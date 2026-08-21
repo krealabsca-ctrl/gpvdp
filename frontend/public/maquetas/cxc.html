@@ -1,0 +1,753 @@
+<title>GPVDP · Cuentas por Cobrar (maqueta v2 — con tus datos reales)</title>
+<style>
+  :root{
+    --surface:#F7F8F5; --raised:#FFFFFF; --muted:#EDF0EA; --border:#DCE2D9;
+    --ink:#1E2A24; --ink-2:#55645C; --ink-3:#8A958D;
+    --accent:#0F6E4E; --accent-hover:#0B583E; --accent-soft:#e3f0ea; --accent-fg:#fff;
+    --gold:#B0894A; --gold-soft:#F7EEDF;
+    --pos:#15803D; --neg:#B3542E; --warn:#A16207; --warn-soft:#FBF3E2;
+    --v1:#C9962F; --v2:#B8722C; --v3:#A0522A; --v4:#7E2E1C; --ok:#3F8F6B;
+    --shadow-sm:0 1px 2px rgb(30 42 36/.06);
+    --shadow:0 1px 2px rgb(30 42 36/.06),0 4px 14px rgb(30 42 36/.05);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --surface:#141714; --raised:#1E2320; --muted:#242A26; --border:#313832;
+    --ink:#E8EDE9; --ink-2:#A9B4AC; --ink-3:#77817A;
+    --accent:#35A578; --accent-hover:#4FBB8F; --accent-soft:#22302a; --accent-fg:#032019;
+    --gold:#C9A468; --gold-soft:#2E2A20;
+    --pos:#4ADE80; --neg:#E08a63; --warn:#E0B44A; --warn-soft:#2E2A1C;
+    --v1:#E3B455; --v2:#DB8F52; --v3:#C9724A; --v4:#B0533A; --ok:#5FBF95;
+    --shadow-sm:0 1px 2px rgb(0 0 0/.3); --shadow:0 1px 2px rgb(0 0 0/.35),0 4px 14px rgb(0 0 0/.25);
+  }}
+  :root[data-theme="dark"]{
+    --surface:#141714; --raised:#1E2320; --muted:#242A26; --border:#313832;
+    --ink:#E8EDE9; --ink-2:#A9B4AC; --ink-3:#77817A;
+    --accent:#35A578; --accent-soft:#22302a; --accent-fg:#032019; --gold:#C9A468; --gold-soft:#2E2A20;
+    --pos:#4ADE80; --neg:#E08a63; --warn:#E0B44A; --warn-soft:#2E2A1C;
+    --v1:#E3B455; --v2:#DB8F52; --v3:#C9724A; --v4:#B0533A; --ok:#5FBF95;
+  }
+  :root[data-theme="light"]{
+    --surface:#F7F8F5; --raised:#FFFFFF; --muted:#EDF0EA; --border:#DCE2D9;
+    --ink:#1E2A24; --ink-2:#55645C; --ink-3:#8A958D;
+    --accent:#0F6E4E; --accent-soft:#e3f0ea; --gold:#B0894A; --gold-soft:#F7EEDF;
+    --pos:#15803D; --neg:#B3542E; --warn:#A16207; --warn-soft:#FBF3E2;
+    --v1:#C9962F; --v2:#B8722C; --v3:#A0522A; --v4:#7E2E1C; --ok:#3F8F6B;
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{background:var(--surface);color:var(--ink);font:14px/1.55 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif}
+  .tnum{font-variant-numeric:tabular-nums lining-nums}
+  h1,h2,h3,h4{margin:0;text-wrap:balance}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  /* ══ Navegación 100 % CSS: la maqueta anterior dependía de JavaScript y el visor
+     no lo ejecuta. Acá son radios + :checked, así que funciona en cualquier lado. ══ */
+  input.nav{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+  main>section{display:none}
+  #n1:checked ~ .shell #s1, #n2:checked ~ .shell #s2, #n3:checked ~ .shell #s3,
+  #n4:checked ~ .shell #s4, #n5:checked ~ .shell #s5, #n6:checked ~ .shell #s6,
+  #n7:checked ~ .shell #s7, #n8:checked ~ .shell #s8 {display:block}
+  #n1:checked ~ .shell label[for=n1], #n2:checked ~ .shell label[for=n2],
+  #n3:checked ~ .shell label[for=n3], #n4:checked ~ .shell label[for=n4],
+  #n5:checked ~ .shell label[for=n5], #n6:checked ~ .shell label[for=n6],
+  #n7:checked ~ .shell label[for=n7], #n8:checked ~ .shell label[for=n8]
+  {background:var(--accent-soft);color:var(--accent)}
+  #n1:checked ~ .shell label[for=n1] small, #n2:checked ~ .shell label[for=n2] small,
+  #n3:checked ~ .shell label[for=n3] small, #n4:checked ~ .shell label[for=n4] small,
+  #n5:checked ~ .shell label[for=n5] small, #n6:checked ~ .shell label[for=n6] small,
+  #n7:checked ~ .shell label[for=n7] small, #n8:checked ~ .shell label[for=n8] small
+  {color:var(--accent)}
+
+  .top{display:flex;align-items:center;gap:11px;padding:9px 16px;background:var(--raised);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:30;flex-wrap:wrap}
+  .logo{width:30px;height:30px;border-radius:8px;background:var(--accent);display:grid;place-items:center;color:var(--accent-fg);font-weight:800;font-size:14px;flex:none}
+  .top h1{font-size:14.5px;font-weight:700} .top h1 small{color:var(--ink-3);font-weight:500}
+  .tag{font-size:9.5px;font-weight:800;letter-spacing:.08em;padding:4px 8px;border-radius:999px;background:var(--gold);color:#fff}
+  .chip{font-size:11.5px;font-weight:600;padding:4px 10px;border-radius:999px;background:var(--muted);color:var(--ink-2)}
+
+  .shell{display:flex;min-height:calc(100vh - 49px)}
+  .rail{width:200px;flex:none;background:var(--raised);border-right:1px solid var(--border);padding:12px 8px}
+  .rail h4{font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3);padding:6px 10px 8px}
+  .rail label{display:block;color:var(--ink-2);padding:8px 10px;border-radius:9px;font-size:13px;font-weight:600;line-height:1.25;cursor:pointer}
+  .rail label small{display:block;font-weight:400;font-size:10.5px;color:var(--ink-3)}
+  .rail label:hover{background:var(--muted);color:var(--ink)}
+  .main{flex:1;min-width:0;padding:18px 20px 70px}
+
+  .head{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+  .head h2{font-size:20px;letter-spacing:-.02em}
+  .head p{margin:3px 0 0;color:var(--ink-2);font-size:13px;max-width:78ch}
+  .head .sp{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+  .card{background:var(--raised);border:1px solid var(--border);border-radius:13px;box-shadow:var(--shadow-sm)}
+  .card.p{padding:15px}
+  .grid{display:grid;gap:12px}
+  @media(min-width:920px){.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}}
+
+  .resumen{display:flex;flex-wrap:wrap;gap:26px;align-items:flex-start;padding:12px 15px;border:1px solid var(--border);border-radius:13px;background:var(--raised);box-shadow:var(--shadow-sm)}
+  .cifra{min-width:8.5rem}
+  .cifra .k{font-size:10px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+  .cifra .v{font-size:19px;font-weight:680;letter-spacing:-.01em;margin-top:1px}
+  .cifra .n{font-size:10.5px;color:var(--ink-3)}
+  .neg{color:var(--neg)} .pos{color:var(--pos)} .warn{color:var(--warn)}
+
+  .filtros{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin:12px 0}
+  .f{display:flex;flex-direction:column;gap:3px}
+  .f label{font-size:11px;font-weight:600;color:var(--ink-2)}
+  .f input,.f select,.f textarea{border:1px solid var(--border);background:var(--raised);color:var(--ink);border-radius:9px;padding:7px 9px;font:inherit;font-size:12.5px;min-width:130px}
+  .chips{display:flex;gap:5px;flex-wrap:wrap}
+  .chips span{border:1px solid var(--border);background:var(--raised);color:var(--ink-2);border-radius:999px;padding:5px 11px;font-size:11.5px;font-weight:600}
+  .chips span.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+
+  table{width:100%;border-collapse:collapse;font-size:12.8px}
+  th{text-align:left;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);font-weight:800;padding:9px;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--muted)}
+  td{padding:8px 9px;border-bottom:1px solid color-mix(in oklab,var(--border) 55%,transparent)}
+  tr:last-child td{border-bottom:0}
+  .num{text-align:right;white-space:nowrap}
+  .tbl{overflow-x:auto;border-radius:13px;border:1px solid var(--border);background:var(--raised)}
+  .tbl table{min-width:880px}
+  .tot td{background:var(--muted);font-weight:700}
+
+  .b{display:inline-block;font-size:10.5px;font-weight:700;padding:2.5px 8px;border-radius:999px;white-space:nowrap}
+  .b.al{background:var(--accent-soft);color:var(--accent)}
+  .b.p1{background:color-mix(in oklab,var(--v1) 20%,transparent);color:var(--v1)}
+  .b.p2{background:color-mix(in oklab,var(--v2) 20%,transparent);color:var(--v2)}
+  .b.p3{background:color-mix(in oklab,var(--v3) 22%,transparent);color:var(--v3)}
+  .b.p4{background:color-mix(in oklab,var(--v4) 24%,transparent);color:var(--v4)}
+  .b.g{background:var(--muted);color:var(--ink-2)}
+  .b.w{background:var(--warn-soft);color:var(--warn)}
+  .b.ok{background:color-mix(in oklab,var(--pos) 16%,transparent);color:var(--pos)}
+
+  .btn{display:inline-block;border:1px solid var(--border);background:var(--raised);color:var(--ink);border-radius:9px;padding:7px 12px;font-size:12.5px;font-weight:650}
+  .btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+  .btn.sm{padding:4px 9px;font-size:11.5px}
+
+  .note{background:var(--gold-soft);border:1px solid color-mix(in oklab,var(--gold) 34%,transparent);border-radius:11px;padding:11px 13px;font-size:12.6px;color:var(--ink-2)}
+  .note b{color:var(--ink)}
+  .note.good{background:var(--accent-soft);border-color:color-mix(in oklab,var(--accent) 30%,transparent)}
+  .note.bad{background:color-mix(in oklab,var(--neg) 8%,transparent);border-color:color-mix(in oklab,var(--neg) 30%,transparent)}
+  .muted{color:var(--ink-2);font-size:12.6px}
+  .k{font-size:10px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+  .big{font-size:22px;font-weight:680;letter-spacing:-.01em}
+  .bar{height:7px;border-radius:4px;background:var(--muted);overflow:hidden;display:block}
+  .bar i{display:block;height:100%;border-radius:4px}
+  .row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .aging{display:grid;grid-template-columns:9rem 1fr 9rem;gap:10px;align-items:center;padding:4px 0}
+  .tl{border-left:2px solid var(--border);padding-left:15px;margin-left:4px}
+  .tl>div{position:relative;padding:7px 0}
+  .tl>div::before{content:"";position:absolute;left:-20px;top:13px;width:8px;height:8px;border-radius:50%;background:var(--accent)}
+  pre{background:var(--muted);border:1px solid var(--border);border-radius:10px;padding:12px 14px;overflow-x:auto;font-size:12.1px;line-height:1.6;margin:10px 0 0;font-family:ui-monospace,Consolas,monospace}
+  .seg{display:flex;gap:2px;background:var(--muted);padding:3px;border-radius:10px;width:fit-content;flex-wrap:wrap}
+  .seg span{padding:5px 11px;border-radius:8px;font-size:12.5px;font-weight:650;color:var(--ink-2)}
+  .seg span.on{background:var(--raised);color:var(--ink);box-shadow:var(--shadow-sm)}
+  ul{margin:7px 0;padding-left:19px} li{margin:4px 0}
+</style>
+
+<input class="nav" type="radio" name="nav" id="n1" checked>
+<input class="nav" type="radio" name="nav" id="n2">
+<input class="nav" type="radio" name="nav" id="n3">
+<input class="nav" type="radio" name="nav" id="n4">
+<input class="nav" type="radio" name="nav" id="n5">
+<input class="nav" type="radio" name="nav" id="n6">
+<input class="nav" type="radio" name="nav" id="n7">
+<input class="nav" type="radio" name="nav" id="n8">
+
+<div class="top">
+  <div class="logo">V</div>
+  <h1>Finance Group VDP <small>· Cuentas por cobrar</small></h1>
+  <span class="tag">MAQUETA v2</span>
+  <div style="margin-left:auto" class="row">
+    <span class="chip">Valle de Paz</span><span class="chip">Agosto 2026</span><span class="chip">Sede: todas las mías</span>
+  </div>
+</div>
+
+<div class="shell">
+  <nav class="rail">
+    <h4>Cuentas por cobrar</h4>
+    <label for="n1">Cola de cobro<small>El trabajo del día</small></label>
+    <label for="n2">Tablero<small>Cartera y recaudo</small></label>
+    <label for="n3">Ficha del contrato<small>Cargos, pagos, gestión</small></label>
+    <label for="n4">Recaudo por asociación<small>Planillas solidaristas</small></label>
+    <label for="n5">Cobros sin identificar<small>Dinero que entró</small></label>
+    <label for="n6">Importaciones<small>Tus columnas reales</small></label>
+    <label for="n7">Parámetros<small>Tramos y reglas</small></label>
+    <label for="n8">El modelo<small>Y lo que hallé en tus datos</small></label>
+  </nav>
+
+  <main class="main">
+
+  <!-- ══════════ 1 · COLA ══════════ -->
+  <section id="s1">
+    <div class="head">
+      <div><h2>Cola de cobro</h2>
+        <p>Ordenada por <b>lo que una llamada puede recuperar hoy</b>: saldo × probabilidad del tramo ×
+           factor de la forma de pago. No por antigüedad.</p></div>
+      <div class="sp"><span class="btn">Exportar</span><span class="btn pri">Registrar gestión</span></div>
+    </div>
+
+    <div class="filtros">
+      <div class="f"><label>Buscar</label><input placeholder="Contrato, cliente o cédula…" style="min-width:210px"></div>
+      <div class="f"><label>Sede operativa</label><select><option>Todas mis sedes</option><option>San José</option><option>San Carlos</option><option>Pérez Zeledón</option><option>Cartago</option></select></div>
+      <div class="f"><label>Tramo</label><select><option>Todos</option><option>Adelantado</option><option>Preventivo 1-15</option><option>Temprano 16-30</option><option>Intensivo 31-60</option><option>Prejurídico 61-90</option><option>Crítico 91-180</option><option>Legal +180</option></select></div>
+      <div class="f"><label>Forma de pago</label><select><option>Todas</option><option>Débito automático</option><option>Depósito o transferencia</option><option>Descuento por asociación</option><option>Cobrador</option></select></div>
+      <div class="f"><label>Asociación</label><select><option>Todas</option><option>ADEPSA</option><option>ASEPRO</option><option>ANASSAS</option><option>COOPEANDE</option><option>ASETAMESIS</option><option>ASESAMA</option><option>ASEPAN</option></select></div>
+      <div class="f"><label>Modalidad</label><select><option>Todas</option><option>Mensual</option><option>Quincenal</option><option>Trimestral</option><option>Semestral</option><option>Anual</option></select></div>
+      <div class="f"><label>Saldo ≥</label><input class="tnum" placeholder="0" style="min-width:90px"></div>
+      <div class="f"><label>Ordenar por</label><select><option>Recuperación esperada ▼</option><option>Saldo ▼</option><option>Días de mora ▼</option><option>Última gestión ▲</option></select></div>
+    </div>
+    <div class="chips" style="margin-bottom:12px">
+      <span class="on">Todo</span><span>⚡ Cobrar hoy</span><span>🔴 Promesa incumplida</span>
+      <span>💳 Tarjeta vencida</span><span>📈 Se deterioró</span><span>🧾 Sin gestionar 30 días</span>
+      <span>🏢 Asociación sin planilla del mes</span>
+    </div>
+
+    <div class="resumen">
+      <div class="cifra"><div class="k">Contratos</div><div class="v tnum">8 412</div><div class="n">en la cola</div></div>
+      <div class="cifra"><div class="k">Saldo total</div><div class="v tnum neg">₡487 240 500</div><div class="n">todo lo que deben</div></div>
+      <div class="cifra"><div class="k">Vencido</div><div class="v tnum neg">₡331 118 200</div><div class="n">68 % del saldo</div></div>
+      <div class="cifra"><div class="k">Recuperación esperada</div><div class="v tnum pos">₡148 972 300</div><div class="n">saldo × prob. × forma de pago</div></div>
+      <div style="margin-left:auto"><span class="btn sm">› Desglose por tramo</span></div>
+    </div>
+    <p class="muted" style="margin-top:7px">
+      El encabezado mide <b>lo que tenés filtrado</b>, igual que en Bancos: si eliges una asociación o un
+      tramo, estas cuatro cifras se mueven con la lista.
+    </p>
+
+    <div class="tbl" style="margin-top:12px">
+      <table>
+        <thead><tr><th style="width:30px"></th><th>Contrato</th><th>Cliente</th><th>Sede</th><th>Forma de pago</th>
+          <th>Tramo</th><th class="num">Días</th><th class="num">Saldo</th><th class="num">Cargos</th>
+          <th class="num">Recup. esp. ▼</th><th>Alerta</th></tr></thead>
+        <tbody>
+          <tr><td><input type="checkbox"></td><td><b>CO198456</b></td><td>Fernando González Vásquez</td><td>San Carlos</td><td>Transferencia</td><td><span class="b p4">Legal</span></td><td class="num tnum">215</td><td class="num tnum neg"><b>₡9 254</b></td><td class="num tnum">4</td><td class="num tnum pos"><b>₡463</b></td><td><span class="b p4">Score −139</span></td></tr>
+          <tr><td><input type="checkbox"></td><td><b>CO198454</b></td><td>Karla Y. Obrego Castañeda</td><td>San José</td><td>Transferencia</td><td><span class="b p1">Preventivo</span></td><td class="num tnum">7</td><td class="num tnum neg"><b>₡14 929</b></td><td class="num tnum">1</td><td class="num tnum pos"><b>₡13 436</b></td><td><span class="b g">2 contratos</span></td></tr>
+          <tr><td><input type="checkbox"></td><td><b>CO198455</b></td><td>Karla Y. Obrego Castañeda</td><td>San José</td><td>Transferencia</td><td><span class="b p1">Preventivo</span></td><td class="num tnum">7</td><td class="num tnum neg"><b>₡4 000</b></td><td class="num tnum">1</td><td class="num tnum pos"><b>₡3 600</b></td><td><span class="b g">2 contratos</span></td></tr>
+          <tr><td><input type="checkbox"></td><td><b>CD-0000000561</b></td><td>Ronald G. Esquivel Alvarado</td><td>San José</td><td>Débito automático</td><td><span class="b p1">Preventivo</span></td><td class="num tnum">1</td><td class="num tnum neg"><b>₡5 600</b></td><td class="num tnum">1</td><td class="num tnum pos"><b>₡5 796</b></td><td><span class="b al">Cobrar hoy</span></td></tr>
+          <tr><td><input type="checkbox"></td><td><b>CO129027</b></td><td>Isidro Sánchez Sánchez</td><td>San José</td><td>Asociación ASESAMA</td><td><span class="b ok">Al día</span></td><td class="num tnum">0</td><td class="num tnum">₡0</td><td class="num tnum">0</td><td class="num tnum">—</td><td><span class="b g">—</span></td></tr>
+          <tr><td><input type="checkbox"></td><td><b>CD-0000000546</b></td><td>Mireya Altamirano Duarte</td><td>San José</td><td>Débito automático</td><td><span class="b ok">Adelantado</span></td><td class="num tnum">−26</td><td class="num tnum">₡0</td><td class="num tnum">0</td><td class="num tnum">—</td><td><span class="b w">Tarjeta vence oct-29</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="margin-top:8px">
+      Filas construidas <b>con tu dataset real</b>. La tabla virtualiza y pagina por cursor: con 70 000
+      contratos, la página 300 responde igual que la primera.
+    </p>
+  </section>
+
+  <!-- ══════════ 2 · TABLERO ══════════ -->
+  <section id="s2">
+    <div class="head">
+      <div><h2>Tablero de cartera</h2>
+        <p>Dos naturalezas separadas, igual que en Cuentas por pagar: <b>lo que nos deben hoy</b> no
+           depende del mes; <b>lo que se generó y se cobró</b> sí.</p></div>
+      <div class="sp"><span class="chip">al 4 de agosto 2026</span></div>
+    </div>
+
+    <div class="k" style="margin-bottom:8px">Cartera · a hoy, no depende del período</div>
+    <div class="grid g4">
+      <div class="card p"><div class="k">Saldo por cobrar</div><div class="big tnum">₡1 284 610 900</div><div class="muted">42 180 cargos abiertos</div></div>
+      <div class="card p"><div class="k">Vencido</div><div class="big tnum neg">₡742 330 400</div><div class="muted">58 % · el más viejo, 412 días</div></div>
+      <div class="card p"><div class="k">Vence este mes</div><div class="big tnum warn">₡186 220 000</div><div class="muted">27 640 cargos</div></div>
+      <div class="card p"><div class="k">Incobrable estimado</div><div class="big tnum">₡96 140 200</div><div class="muted">por antigüedad · 7,5 %</div></div>
+    </div>
+
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card p">
+        <h3 style="font-size:15px">Antigüedad de la cartera</h3>
+        <p class="muted"><b>Esto es lo que hoy no existe</b>: antigüedad de la deuda, no del mes. Clic en un tramo abre esos cargos.</p>
+        <div style="margin-top:10px">
+          <div class="aging"><span style="font-size:12px;font-weight:600">Por vencer</span><span class="bar"><i style="width:100%;background:var(--ok)"></i></span><span class="num tnum" style="font-size:12px"><b>₡542 280 500</b></span></div>
+          <div class="aging"><span style="font-size:12px;font-weight:600">1 a 30 días</span><span class="bar"><i style="width:31%;background:var(--v1)"></i></span><span class="num tnum" style="font-size:12px"><b>₡168 420 000</b></span></div>
+          <div class="aging"><span style="font-size:12px;font-weight:600">31 a 60</span><span class="bar"><i style="width:26%;background:var(--v2)"></i></span><span class="num tnum" style="font-size:12px"><b>₡142 310 000</b></span></div>
+          <div class="aging"><span style="font-size:12px;font-weight:600">61 a 90</span><span class="bar"><i style="width:22%;background:var(--v3)"></i></span><span class="num tnum" style="font-size:12px"><b>₡118 240 400</b></span></div>
+          <div class="aging"><span style="font-size:12px;font-weight:600">91 a 180</span><span class="bar"><i style="width:34%;background:var(--v4)"></i></span><span class="num tnum" style="font-size:12px"><b>₡186 920 000</b></span></div>
+          <div class="aging"><span style="font-size:12px;font-weight:600">+180 días</span><span class="bar"><i style="width:23%;background:var(--neg)"></i></span><span class="num tnum" style="font-size:12px"><b>₡126 440 000</b></span></div>
+        </div>
+      </div>
+      <div class="card p">
+        <h3 style="font-size:15px">Movimiento de agosto</h3>
+        <table style="margin-top:8px">
+          <tbody>
+            <tr><td>Cargos generados</td><td class="num tnum">27 640</td><td class="num tnum">₡186 220 000</td></tr>
+            <tr><td>Cobrado <b>del mes</b></td><td class="num tnum">9 210</td><td class="num tnum pos">₡61 840 500</td></tr>
+            <tr><td>Cobrado <b>de meses anteriores</b></td><td class="num tnum">3 480</td><td class="num tnum pos">₡24 110 900</td></tr>
+            <tr><td>Cobrado <b>adelantado</b> (períodos futuros)</td><td class="num tnum">1 120</td><td class="num tnum pos">₡7 940 000</td></tr>
+            <tr><td>Notas de crédito y ajustes</td><td class="num tnum">62</td><td class="num tnum">₡1 240 000</td></tr>
+            <tr><td>Reversas (débito rechazado, cheque devuelto)</td><td class="num tnum">147</td><td class="num tnum neg">₡920 400</td></tr>
+            <tr class="tot"><td>Efectividad del mes</td><td class="num"></td><td class="num tnum">33,2 %</td></tr>
+          </tbody>
+        </table>
+        <div class="note good" style="margin-top:11px">
+          Las tres líneas de arriba <b>salen de tus datos y hoy son invisibles</b>: en tu muestra de
+          pagos de julio hay cobros aplicados a <b>marzo</b> (4 meses atrás) y a <b>agosto y
+          septiembre</b> (adelantados). Con cargos, cada uno cae donde corresponde.
+        </div>
+      </div>
+    </div>
+
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card p">
+        <h3 style="font-size:15px">Efectividad por sede operativa</h3>
+        <table style="margin-top:8px">
+          <thead><tr><th>Sede</th><th class="num">Exigible</th><th class="num">Cobrado</th><th class="num">Efectividad</th></tr></thead>
+          <tbody>
+            <tr><td><b>San José</b></td><td class="num tnum">₡52 400 000</td><td class="num tnum pos">₡21 180 000</td><td class="num"><div class="row" style="justify-content:flex-end"><span class="bar" style="width:52px"><i style="width:40%;background:var(--pos)"></i></span><b class="tnum">40,4 %</b></div></td></tr>
+            <tr><td><b>Pérez Zeledón</b></td><td class="num tnum">₡48 920 000</td><td class="num tnum pos">₡15 640 000</td><td class="num"><div class="row" style="justify-content:flex-end"><span class="bar" style="width:52px"><i style="width:32%;background:var(--v1)"></i></span><b class="tnum">32,0 %</b></div></td></tr>
+            <tr><td><b>San Carlos</b></td><td class="num tnum">₡34 110 000</td><td class="num tnum pos">₡13 980 000</td><td class="num"><div class="row" style="justify-content:flex-end"><span class="bar" style="width:52px"><i style="width:41%;background:var(--pos)"></i></span><b class="tnum">41,0 %</b></div></td></tr>
+            <tr><td><b>Cartago</b></td><td class="num tnum">₡29 840 000</td><td class="num tnum pos">₡8 420 000</td><td class="num"><div class="row" style="justify-content:flex-end"><span class="bar" style="width:52px"><i style="width:28%;background:var(--v1)"></i></span><b class="tnum">28,2 %</b></div></td></tr>
+            <tr><td><b>Sin sede asignada</b></td><td class="num tnum">₡1 920 000</td><td class="num tnum">₡0</td><td class="num"><span class="b w">73 contratos</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card p">
+        <h3 style="font-size:15px">Dónde se pierde el recaudo</h3>
+        <table style="margin-top:8px">
+          <thead><tr><th>Situación</th><th class="num">Contratos</th><th class="num">Saldo</th></tr></thead>
+          <tbody>
+            <tr><td>Débito automático con tarjeta vencida</td><td class="num tnum">1 842</td><td class="num tnum">₡38 420 000</td></tr>
+            <tr><td><b>Asociación que no envió planilla del mes</b></td><td class="num tnum">2 940</td><td class="num tnum">₡41 180 000</td></tr>
+            <tr><td>Promesa incumplida</td><td class="num tnum">640</td><td class="num tnum">₡22 180 500</td></tr>
+            <tr><td>Sin gestionar en 30 días</td><td class="num tnum">4 118</td><td class="num tnum">₡96 340 200</td></tr>
+            <tr><td>Cobros sin identificar (plata en el banco)</td><td class="num tnum">—</td><td class="num tnum warn">₡8 470 300</td></tr>
+          </tbody>
+        </table>
+        <div class="note" style="margin-top:11px">
+          La segunda línea es nueva y sale de tus datos: si <b>toda</b> una asociación no manda la
+          planilla, se caen cientos de cobros de golpe. Eso no es mora del cliente: es un problema con
+          un tercero, y se gestiona distinto.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 3 · FICHA ══════════ -->
+  <section id="s3">
+    <div class="head">
+      <div><h2>CO198456 · Fernando González Vásquez</h2>
+        <p>Cédula 2-0300-0052 · Sucursal San Carlos — Jardines Tropicales y Forestales La Paz S.A ·
+           Mantenimiento de Lote Individual · <b>Anual</b> ₡2 916,66 · Depósito o transferencia · día 30</p></div>
+      <div class="sp"><span class="btn">Estado de cuenta</span><span class="btn">Arreglo de pago</span><span class="btn pri">Registrar gestión</span></div>
+    </div>
+
+    <div class="grid g4">
+      <div class="card p"><div class="k">Saldo</div><div class="big tnum neg">₡9 254</div><div class="muted">4 cargos abiertos</div></div>
+      <div class="card p"><div class="k">Más vencido</div><div class="big tnum">215 días</div><div class="muted">tramo Legal +180</div></div>
+      <div class="card p"><div class="k">Score del origen</div><div class="big tnum neg">−139</div><div class="muted">Alto riesgo · Crítico</div></div>
+      <div class="card p"><div class="k">Recuperación esperada</div><div class="big tnum pos">₡463</div><div class="muted">₡9 254 × 0,05 × 1,00</div></div>
+    </div>
+
+    <div class="card p" style="margin-top:12px">
+      <div class="row" style="justify-content:space-between">
+        <h3 style="font-size:15px">Cargos del contrato</h3>
+        <div class="seg"><span class="on">Abiertos (4)</span><span>Todos (11)</span></div>
+      </div>
+      <div class="tbl" style="margin-top:10px;border:0">
+        <table style="min-width:700px">
+          <thead><tr><th>Cargo</th><th>Período</th><th>Vence</th><th class="num">Monto</th><th class="num">Aplicado</th><th class="num">Saldo</th><th class="num">Días</th><th>Tramo</th></tr></thead>
+          <tbody>
+            <tr><td>CG-198456-2023</td><td>anual 2023</td><td class="tnum">01/01/2023</td><td class="num tnum">₡2 337</td><td class="num tnum">₡0</td><td class="num tnum neg">₡2 337</td><td class="num tnum">1 311</td><td><span class="b p4">Legal</span></td></tr>
+            <tr><td>CG-198456-2024</td><td>anual 2024</td><td class="tnum">01/01/2024</td><td class="num tnum">₡2 500</td><td class="num tnum">₡0</td><td class="num tnum neg">₡2 500</td><td class="num tnum">946</td><td><span class="b p4">Legal</span></td></tr>
+            <tr><td>CG-198456-2025</td><td>anual 2025</td><td class="tnum">01/01/2025</td><td class="num tnum">₡1 500</td><td class="num tnum">₡0</td><td class="num tnum neg">₡1 500</td><td class="num tnum">581</td><td><span class="b p4">Legal</span></td></tr>
+            <tr><td>CG-198456-2026</td><td>anual 2026</td><td class="tnum">01/01/2026</td><td class="num tnum">₡2 917</td><td class="num tnum">₡0</td><td class="num tnum neg">₡2 917</td><td class="num tnum">215</td><td><span class="b p4">Legal</span></td></tr>
+            <tr class="tot"><td colspan="3">Total abierto</td><td class="num tnum">₡9 254</td><td class="num tnum">₡0</td><td class="num tnum neg">₡9 254</td><td colspan="2"></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note good" style="margin-top:11px">
+        <b>Esto es exactamente lo que tu dataset insinúa y no puede mostrar.</b> El contrato trae
+        «cuota ₡2 916,66 · saldo ₡9 254 · 215 días vencidos». ₡9 254 son <b>3,17 cuotas</b>: es deuda de
+        <b>varios años</b> de mantenimiento, no del mes. Con cargos se ve de qué años viene, cada uno con
+        su antigüedad y su monto de la época. <span class="b w">Los montos por año son un ejemplo</span>
+        — el desglose real sale del importador.
+      </div>
+    </div>
+
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card p">
+        <h3 style="font-size:15px">Cobros y su aplicación</h3>
+        <table style="margin-top:8px">
+          <thead><tr><th>Fecha</th><th>Consecutivo</th><th>Origen</th><th class="num">Monto</th><th>Aplicado a</th></tr></thead>
+          <tbody>
+            <tr><td class="tnum">12/03/2022</td><td>2884120</td><td><span class="b g">Transferencia</span></td><td class="num tnum">₡2 200</td><td>anual 2022</td></tr>
+            <tr><td colspan="5" class="muted">Sin cobros desde 2022 · último contacto: sin gestión registrada</td></tr>
+          </tbody>
+        </table>
+        <div class="note bad" style="margin-top:11px">
+          Contrato de <b>mantenimiento anual</b> con 4 años sin pagar y sin una sola gestión registrada.
+          Con la cola ordenada por valor esperado aparece bajo (₡463), y eso <b>es correcto</b>: hay 8 000
+          casos donde la misma llamada rinde más. Este va a <b>cobro judicial o castigo</b>, no a la cola.
+        </div>
+      </div>
+      <div class="card p">
+        <h3 style="font-size:15px">Gestión</h3>
+        <div class="tl" style="margin-top:10px">
+          <div><b>Sin gestiones registradas</b><div class="muted">Este contrato nunca se trabajó: el portal no tenía cómo priorizarlo ni cómo excluirlo.</div></div>
+        </div>
+        <h4 style="font-size:13px;margin-top:14px">Acción sugerida</h4>
+        <p class="muted">Tramo <b>Legal +180</b> · estrategia «cobro judicial o castigo» · canal «cobro judicial».
+          Antes de eso: verificar que la deuda sea legítima (4 cargos anuales sin gestión previa pueden
+          esconder un error de origen).</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 4 · ASOCIACIONES ══════════ -->
+  <section id="s4">
+    <div class="head">
+      <div><h2>Recaudo por asociación</h2>
+        <p><b>Este bloque no estaba en el plan y tus datos lo exigen.</b> En tu muestra de pagos,
+           <b>11 de 11</b> son «Descuento por Asociación Solidarista»: la asociación deduce de la planilla,
+           manda <b>un solo depósito</b> y un detalle con cientos de contratos.</p></div>
+      <div class="sp"><span class="btn">Subir planilla</span></div>
+    </div>
+
+    <div class="resumen">
+      <div class="cifra"><div class="k">Asociaciones activas</div><div class="v tnum">34</div><div class="n">con contratos vigentes</div></div>
+      <div class="cifra"><div class="k">Planillas de julio</div><div class="v tnum">28 de 34</div><div class="n">6 no han llegado</div></div>
+      <div class="cifra"><div class="k">Recaudado por este canal</div><div class="v tnum pos">₡186 420 000</div><div class="n">68 % del total del mes</div></div>
+      <div class="cifra"><div class="k">En riesgo por planilla ausente</div><div class="v tnum neg">₡41 180 000</div><div class="n">2 940 contratos</div></div>
+    </div>
+
+    <div class="tbl" style="margin-top:12px">
+      <table>
+        <thead><tr><th>Asociación</th><th>Planilla</th><th class="num">Contratos</th><th class="num">Esperado</th><th class="num">Depositado</th><th>Fecha bancaria</th><th class="num">Diferencia</th><th>Estado</th></tr></thead>
+        <tbody>
+          <tr><td><b>ADEPSA</b> · Pindeco</td><td>IQ julio 2026</td><td class="num tnum">412</td><td class="num tnum">₡1 084 200</td><td class="num tnum">₡1 084 200</td><td class="tnum">16/07/2026</td><td class="num tnum">₡0</td><td><span class="b ok">Conciliada</span></td></tr>
+          <tr><td><b>ASEPRO</b></td><td>julio 2026</td><td class="num tnum">168</td><td class="num tnum">₡1 518 720</td><td class="num tnum">₡1 518 720</td><td class="tnum">08/07 y 11/07</td><td class="num tnum">₡0</td><td><span class="b ok">Conciliada</span><br><span class="muted" style="font-size:10.5px">llegó en 2 transferencias</span></td></tr>
+          <tr><td><b>ANASSAS</b></td><td>julio 2026</td><td class="num tnum">96</td><td class="num tnum">₡1 152 000</td><td class="num tnum">₡1 140 000</td><td class="tnum">31/07/2026</td><td class="num tnum neg">−₡12 000</td><td><span class="b w">Faltó 1 cuota</span></td></tr>
+          <tr><td><b>COOPEANDE 7</b></td><td>julio 2026</td><td class="num tnum">204</td><td class="num tnum">₡1 591 200</td><td class="num tnum">₡1 591 200</td><td class="tnum">13/07/2026</td><td class="num tnum">₡0</td><td><span class="b ok">Conciliada</span></td></tr>
+          <tr><td><b>ASETAMESIS</b></td><td>julio 2026</td><td class="num tnum">88</td><td class="num tnum">₡308 000</td><td class="num tnum">₡308 000</td><td class="tnum">29/07/2026</td><td class="num tnum">₡0</td><td><span class="b ok">Conciliada</span></td></tr>
+          <tr><td><b>ASEPAN</b></td><td>julio 2026</td><td class="num tnum">142</td><td class="num tnum">₡568 000</td><td class="num tnum">₡0</td><td class="tnum">—</td><td class="num tnum neg">−₡568 000</td><td><span class="b p3">No ha llegado</span></td></tr>
+          <tr><td><b>Región Huetar Brunca</b> · ICE</td><td>julio 2026</td><td class="num tnum">61</td><td class="num tnum">₡305 000</td><td class="num tnum">₡305 000</td><td class="tnum">30/07/2026</td><td class="num tnum">₡0</td><td><span class="b ok">Conciliada</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card p">
+        <h3 style="font-size:15px">Por qué necesita su propia pantalla</h3>
+        <ul class="muted">
+          <li><b>Un depósito, cientos de cargos.</b> El banco muestra una transferencia de ₡1 084 200 de ADEPSA; adentro van 412 contratos. Sin la planilla, ese depósito es «dinero sin identificar».</li>
+          <li><b>La conciliación es del lote, no del pago.</b> Lo que se revisa es si lo depositado calza con lo esperado. Una diferencia de ₡12 000 son 1 o 2 cuotas que la asociación no deduce — y hay que averiguar de quién.</li>
+          <li><b>El riesgo es del tercero, no del cliente.</b> Si ASEPAN no manda planilla, 142 clientes caen en mora sin haber hecho nada. Marcarlos como morosos y llamarlos sería un error de gestión y de trato.</li>
+          <li><b>Llega en varias transferencias.</b> Tu propio dato lo muestra: <code>08/07/2026|11/07/2026</code> en un mismo registro.</li>
+        </ul>
+      </div>
+      <div class="card p">
+        <h3 style="font-size:15px">Las tres fechas de un pago</h3>
+        <p class="muted">Tu archivo de pagos trae <b>tres fechas distintas</b> y cada una significa otra cosa:</p>
+        <table style="margin-top:8px">
+          <tbody>
+            <tr><td><b>Fecha de Pago</b></td><td class="tnum">01/07/2026</td><td class="muted">el período que se está pagando (siempre día 1)</td></tr>
+            <tr><td><b>Fecha bancaria de la asociación</b></td><td class="tnum">30/07/2026</td><td class="muted">cuándo entró la plata de verdad</td></tr>
+            <tr><td><b>Fecha Creación</b></td><td class="tnum">31/07/2026</td><td class="muted">cuándo se registró en el sistema</td></tr>
+          </tbody>
+        </table>
+        <div class="note bad" style="margin-top:11px">
+          <b>Decisión pendiente:</b> ¿cuál cuenta para «cobrado en el mes»? Con la primera, ese pago es de
+          julio; con la segunda también, pero uno registrado el 2 de agosto por planilla de julio
+          cambiaría de mes según cuál eligas. <b>Y la que concilia contra el banco es la segunda.</b>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 5 · SIN IDENTIFICAR ══════════ -->
+  <section id="s5">
+    <div class="head">
+      <div><h2>Cobros sin identificar</h2>
+        <p>Dinero que <b>ya entró al banco</b> y no se sabe de quién. No se descarta ni se adivina: se
+           resuelve acá, igual que la clasificación bancaria.</p></div>
+      <div class="sp"><span class="chip">₡8 470 300 sin aplicar</span></div>
+    </div>
+
+    <div class="resumen">
+      <div class="cifra"><div class="k">Depósitos</div><div class="v tnum">312</div><div class="n">sin identificar</div></div>
+      <div class="cifra"><div class="k">Monto</div><div class="v tnum warn">₡8 470 300</div><div class="n">sin aplicar a ningún cargo</div></div>
+      <div class="cifra"><div class="k">Más antiguo</div><div class="v tnum">23 días</div><div class="n">18/07/2026</div></div>
+      <div class="cifra"><div class="k">Con sugerencia</div><div class="v tnum pos">184</div><div class="n">59 % se resuelve de un clic</div></div>
+    </div>
+
+    <div class="tbl" style="margin-top:12px">
+      <table>
+        <thead><tr><th>Fecha</th><th>Banco · cuenta</th><th>Referencia del depósito</th><th class="num">Monto</th><th>Sugerencia</th><th></th></tr></thead>
+        <tbody>
+          <tr><td class="tnum">02/08</td><td>BAC Valle de Paz</td><td>SINPE 2030000052 GONZALEZ</td><td class="num tnum">₡9 254</td><td><b>CO198456</b> · cédula y monto calzan exacto <span class="b ok">alta</span></td><td class="num"><span class="btn sm pri">Aplicar</span></td></tr>
+          <tr><td class="tnum">02/08</td><td>BN Colones</td><td>TRF ADEPSA PLANILLA IIQ JUL</td><td class="num tnum">₡1 084 200</td><td><b>Planilla de asociación</b> · falta el detalle <span class="b w">subir archivo</span></td><td class="num"><span class="btn sm">Ir a planillas</span></td></tr>
+          <tr><td class="tnum">01/08</td><td>Davivienda Colones</td><td>DEP 5600 CTA 8842</td><td class="num tnum">₡5 600</td><td>1 842 contratos con cuota ₡5 600 <span class="b w">revisar</span></td><td class="num"><span class="btn sm">Buscar</span></td></tr>
+          <tr><td class="tnum">31/07</td><td>BCR Religiosa</td><td>DEPOSITO EN EFECTIVO</td><td class="num tnum">₡25 000</td><td>sin pista <span class="b g">manual</span></td><td class="num"><span class="btn sm">Buscar</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note" style="margin-top:12px">
+      <b>Cómo se reduce de raíz.</b> Que cada contrato tenga <b>su propia referencia</b> para depositar
+      (el número de contrato en la referencia SINPE). Es lo que hacen las empresas grandes y convierte
+      este trabajo manual en automático. Hoy hay 6 227 movimientos bancarios sin clasificar y una parte
+      son estos depósitos.
+    </div>
+  </section>
+
+  <!-- ══════════ 6 · IMPORTACIONES ══════════ -->
+  <section id="s6">
+    <div class="head">
+      <div><h2>Importaciones</h2>
+        <p>Archivo, API y caja entran por <b>el mismo pipeline</b>. El mapeo de abajo son
+           <b>tus columnas reales</b>, tal como vienen en los dos CSV que me pasaste.</p></div>
+      <div class="sp"><span class="btn">Subir archivo</span><span class="btn">Llave de API</span></div>
+    </div>
+
+    <div class="seg" style="margin-bottom:12px"><span class="on">Contratos</span><span>Pagos</span><span>Planillas de asociación</span><span>Historial</span></div>
+
+    <div class="grid g2">
+      <div class="card p">
+        <h3 style="font-size:15px">Mapeo · reporte_cobranza_contrato</h3>
+        <p class="muted">24 columnas · <code>;</code> · UTF-8 con BOM · fechas d/m/aaaa. Se resuelve por
+          <b>encabezado</b>, no por posición: la cicatriz de las columnas corridas no se repite.</p>
+        <table style="margin-top:8px">
+          <thead><tr><th>Columna del archivo</th><th>Campo del ERP</th><th></th></tr></thead>
+          <tbody>
+            <tr><td>Contrato</td><td>numero</td><td><span class="b ok">directo</span></td></tr>
+            <tr><td>Cliente · Documento · Telefonos · Correos</td><td>datos del contrato</td><td><span class="b ok">directo</span></td></tr>
+            <tr><td>Contrato Fecha Primer Cobro</td><td>inicio de generación de cargos</td><td><span class="b al">clave</span></td></tr>
+            <tr><td>Cuota Servicio</td><td>cuota_vigente</td><td><span class="b ok">directo</span></td></tr>
+            <tr><td>Modalidad de Cobro</td><td>ciclo del generador</td><td><span class="b al">clave</span></td></tr>
+            <tr><td>Dias de Pagos</td><td>día de vencimiento</td><td><span class="b ok">directo</span></td></tr>
+            <tr><td>Forma de Pago · Asociacion</td><td>canal de cobro</td><td><span class="b ok">directo</span></td></tr>
+            <tr><td>Sede</td><td>razón social + plaza</td><td><span class="b w">se parte en 2</span></td></tr>
+            <tr><td>Saldo Pendiente</td><td>saldo inicial</td><td><span class="b w">a definir</span></td></tr>
+            <tr><td>Dias Vencidos · Score · Estado</td><td>se guardan como <b>dato del origen</b></td><td><span class="b g">informativo</span></td></tr>
+            <tr><td>Fecha Vencimiento Tarjeta</td><td>alerta de tarjeta</td><td><span class="b w">mes-año</span></td></tr>
+            <tr><td style="color:var(--neg)"><b>Sede operativa / asignación</b></td><td><b>no viene en el archivo</b></td><td><span class="b p3">vive en el ERP</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card p">
+        <h3 style="font-size:15px">Conciliación antes de confirmar</h3>
+        <table style="margin-top:8px">
+          <tbody>
+            <tr><td>Filas en el archivo</td><td class="num tnum"><b>70 412</b></td><td></td></tr>
+            <tr><td>Contratos nuevos</td><td class="num tnum">68 940</td><td><span class="b ok">entran</span></td></tr>
+            <tr><td>Actualizaciones (cuota o fecha cambió)</td><td class="num tnum">1 208</td><td><span class="b al">entran</span></td></tr>
+            <tr><td>Duplicados en el archivo</td><td class="num tnum">184</td><td><span class="b g">se ignoran</span></td></tr>
+            <tr><td>Modalidad desconocida</td><td class="num tnum neg">36</td><td><span class="b w">cuarentena</span></td></tr>
+            <tr><td>Cuota fuera de rango</td><td class="num tnum neg">62</td><td><span class="b w">cuarentena</span></td></tr>
+            <tr><td>Sin sede operativa asignada</td><td class="num tnum">18</td><td><span class="b w">entra, se marca</span></td></tr>
+          </tbody>
+        </table>
+        <div class="row" style="margin-top:12px"><span class="btn pri">Confirmar 70 314 filas</span><span class="btn">Descargar las 98 en cuarentena</span></div>
+        <div class="note" style="margin-top:11px">
+          <b>Cuarentena no es rechazo:</b> la fila queda visible, marcada, fuera de la meta y de la cola,
+          hasta que alguien la corrija. Nada entra en silencio y nada se pierde.
+        </div>
+      </div>
+    </div>
+
+    <div class="card p" style="margin-top:12px">
+      <h3 style="font-size:15px">El campo <code>Concepto</code> de tus pagos es la mina de oro</h3>
+      <p class="muted">
+        Tu sistema de origen <b>ya sabe qué período paga cada cobro</b>, solo que lo guarda pegado en un
+        texto. Eso permite <b>reconstruir la historia de cargos</b> en la migración, en vez de declarar
+        un saldo inicial a ciegas:
+      </p>
+      <pre>Concepto del archivo                                     →  se convierte en
+─────────────────────────────────────────────────────────────────────────────
+"M/JULIO - Ice Corporacion Brunca Zafiro5000.00"         →  cargo julio 2026 · ₡5 000 · saldado
+"2Q/SEPTIEMBRE - Adepsa SPFC Plan Gardenia2300.00"       →  2ª quincena set. 2026 · ₡2 300 · ADELANTADO
+"2Q/MARZO - Adepsa SIPROFA Plan Plus2750.00"             →  2ª quincena mar. 2026 · ₡2 750 · pagado 4 meses tarde
+"1Q/JULIO - …2500.00, PAGO PARCIAL - 2Q/JULIO - …250.00" →  DOS aplicaciones de un mismo cobro:
+                                                            ₡2 500 a 1Q julio + ₡250 parcial a 2Q julio</pre>
+      <div class="note good" style="margin-top:11px">
+        <b>Esto es la prueba de que el modelo de cargos es el correcto:</b> no lo estoy inventando, tu
+        operación ya funciona así. Lo único que pasa es que la aplicación por período vive en un campo de
+        texto donde nadie puede sumarla, filtrarla ni auditarla.
+      </div>
+    </div>
+
+    <div class="card p" style="margin-top:12px">
+      <h3 style="font-size:15px">Cobros por API</h3>
+      <p class="muted">Misma información que el Excel, misma validación. <b>Idempotente</b>: reenviar el
+        mismo cobro no lo duplica, devuelve el mismo resultado.</p>
+      <pre>POST /v1/cxc/cobros          Idempotency-Key: adepsa-planilla-2026-07-IQ-000412
+
+{ "contrato": "CO109490", "consecutivo": "3308788",
+  "fecha_pago": "2026-07-01", "fecha_bancaria": "2026-07-16",
+  "monto": "2750.00", "forma": "ASOCIACION", "asociacion": "ADEPSA",
+  "planilla": "ADEPSA-PINDECO-IQ-JULIO-2026" }
+
+201 → { "cobro_id": "…",
+        "aplicado": [ { "cargo": "CG-109490-2026-07-1Q", "monto": "2500.00" },
+                      { "cargo": "CG-109490-2026-07-2Q", "monto": "250.00", "parcial": true } ],
+        "saldo_a_favor": "0.00" }</pre>
+    </div>
+  </section>
+
+  <!-- ══════════ 7 · PARÁMETROS ══════════ -->
+  <section id="s7">
+    <div class="head">
+      <div><h2>Parámetros de cobro</h2>
+        <p>Los <code>CONFIG</code> del portal, ahora editables <b>por empresa</b> y con rastro de quién los
+           cambió. Nada de tocar código para mover un tramo.</p></div>
+    </div>
+
+    <div class="card p">
+      <h3 style="font-size:15px">Tramos de mora</h3>
+      <p class="muted">La probabilidad multiplica el <b>saldo</b> para priorizar la cola. Los tramos no
+        pueden traslaparse: lo impide la base, no el código. <b>Adelantado</b> existe porque tus datos
+        traen días vencidos negativos (−26, −30).</p>
+      <div class="tbl" style="margin-top:10px;border:0">
+        <table style="min-width:740px">
+          <thead><tr><th>Tramo</th><th class="num">Días</th><th class="num">Probabilidad</th><th>Estrategia</th><th>Canal sugerido</th></tr></thead>
+          <tbody>
+            <tr><td><span class="b ok">Adelantado</span></td><td class="num tnum">&lt; 0</td><td class="num tnum">1,00</td><td>Fidelización o venta cruzada</td><td>Ninguno</td></tr>
+            <tr><td><span class="b ok">Al día</span></td><td class="num tnum">0</td><td class="num tnum">1,00</td><td>Confirmar domiciliación vigente</td><td>Ninguno</td></tr>
+            <tr><td><span class="b p1">Preventivo</span></td><td class="num tnum">1 – 15</td><td class="num tnum">0,90</td><td>Recordatorio automático</td><td>WhatsApp o SMS</td></tr>
+            <tr><td><span class="b p1">Temprano</span></td><td class="num tnum">16 – 30</td><td class="num tnum">0,75</td><td>Llamada; fijar fecha</td><td>Llamada</td></tr>
+            <tr><td><span class="b p2">Intensivo</span></td><td class="num tnum">31 – 60</td><td class="num tnum">0,55</td><td>Arreglo de pago escrito</td><td>Llamada + correo</td></tr>
+            <tr><td><span class="b p3">Prejurídico</span></td><td class="num tnum">61 – 90</td><td class="num tnum">0,35</td><td>Notificación formal</td><td>Carta y llamada</td></tr>
+            <tr><td><span class="b p4">Crítico</span></td><td class="num tnum">91 – 180</td><td class="num tnum">0,15</td><td>Última oportunidad</td><td>Visita o carta</td></tr>
+            <tr><td><span class="b p4">Legal</span></td><td class="num tnum">+180</td><td class="num tnum">0,05</td><td>Cobro judicial o castigo</td><td>Cobro judicial</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid g3" style="margin-top:12px">
+      <div class="card p">
+        <h3 style="font-size:15px">Factor por forma de pago</h3>
+        <table style="margin-top:8px"><tbody>
+          <tr><td>Débito automático</td><td class="num tnum">1,15</td></tr>
+          <tr><td><b>Descuento por asociación</b></td><td class="num tnum warn">por definir</td></tr>
+          <tr><td>Depósito o transferencia</td><td class="num tnum">1,00</td></tr>
+          <tr><td>Pago en oficina</td><td class="num tnum">0,90</td></tr>
+          <tr><td>Cobrador</td><td class="num tnum">0,80</td></tr>
+        </tbody></table>
+        <div class="note" style="margin-top:10px">
+          El descuento por asociación <b>no estaba en tu catálogo de 4 factores</b> y es el canal
+          dominante de tus pagos. Su recuperación depende de que la asociación mande la planilla, no de
+          la voluntad del cliente: probablemente sea el factor <b>más alto</b> de todos.
+        </div>
+      </div>
+      <div class="card p">
+        <h3 style="font-size:15px">Reglas del módulo</h3>
+        <table style="margin-top:8px"><tbody>
+          <tr><td>Aplicación de pagos</td><td class="num"><b>Más viejo primero</b></td></tr>
+          <tr><td>Cuota máxima razonable</td><td class="num tnum">₡500 000</td></tr>
+          <tr><td>Pago máximo razonable</td><td class="num tnum">₡1 000 000</td></tr>
+          <tr><td>Aviso de tarjeta por vencer</td><td class="num tnum">60 días</td></tr>
+          <tr><td>Vigencia de una promesa</td><td class="num tnum">15 días</td></tr>
+          <tr><td>Fecha que cuenta como cobro</td><td class="num warn">por definir</td></tr>
+          <tr><td>Mora para suspender servicio</td><td class="num warn">por definir</td></tr>
+        </tbody></table>
+      </div>
+      <div class="card p">
+        <h3 style="font-size:15px">Sedes operativas</h3>
+        <p class="muted">La asignación de cartera <b>no viene en el archivo</b>: se administra acá.</p>
+        <table style="margin-top:8px"><tbody>
+          <tr><td>San José</td><td class="num tnum">31 240</td></tr>
+          <tr><td>Pérez Zeledón</td><td class="num tnum">14 180</td></tr>
+          <tr><td>San Carlos</td><td class="num tnum">9 640</td></tr>
+          <tr><td>Cartago</td><td class="num tnum">8 920</td></tr>
+          <tr><td>Sin asignar</td><td class="num tnum warn">73</td></tr>
+        </tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 8 · MODELO Y HALLAZGOS ══════════ -->
+  <section id="s8">
+    <div class="head">
+      <div><h2>El modelo y lo que hallé en tus datos</h2>
+        <p>Con tus cuatro decisiones aplicadas y los ajustes que exigen los dos CSV.</p></div>
+    </div>
+
+    <div class="card p">
+      <h3 style="font-size:15px">Hallazgos de los datasets</h3>
+      <table style="margin-top:8px">
+        <thead><tr><th style="width:29%">Lo que encontré</th><th>Qué cambia en el diseño</th></tr></thead>
+        <tbody>
+          <tr><td><b>El <code>Concepto</code> del pago ya trae el período</b><br><span class="muted">M/JULIO · 1Q/JULIO · 2Q/SEPTIEMBRE</span></td>
+              <td>Confirma el modelo de cargos <b>y da el camino de migración</b>: se puede reconstruir la historia real de cargos parseando ese texto, en vez de declarar un saldo inicial a ciegas.</td></tr>
+          <tr><td><b>Un mismo cobro se parte en dos períodos, con parcial</b></td>
+              <td>La aplicación múltiple y el pago parcial no son casos raros: son la operación normal. Van en el núcleo, no como excepción.</td></tr>
+          <tr><td><b>Pagos a marzo hechos en julio, y a set./ago. adelantados</b></td>
+              <td>Es exactamente lo que la «meta del mes» no puede representar. Con cargos, cada cobro cae en su período.</td></tr>
+          <tr><td><b>«Descuento por Asociación Solidarista» es el canal dominante</b><br><span class="muted">11 de 11 pagos de la muestra</span></td>
+              <td><b>Pantalla y modelo nuevos</b>: planilla por asociación, conciliación del lote, y mora que <b>no es culpa del cliente</b> cuando la asociación no envía.</td></tr>
+          <tr><td><b>Tres fechas por pago</b><br><span class="muted">pago · bancaria · creación</span></td>
+              <td>Se guardan las tres. Falta decidir cuál cuenta para «cobrado del mes»; la que concilia con Bancos es la bancaria.</td></tr>
+          <tr><td><b>Una fecha bancaria con dos valores</b> <code>08/07|11/07</code></td>
+              <td>El depósito de una planilla puede llegar en varias transferencias: la conciliación es del lote, no de una transferencia.</td></tr>
+          <tr><td><b><code>Saldo Pendiente</code> existe</b> (el plan decía que se había eliminado)</td>
+              <td>Pero en 8 de 9 filas es <b>0 o exactamente 1 cuota</b>, y en la novena (anual, 215 días) son 3,17 cuotas. <b>Necesito saber qué acumula</b> antes de usarlo como saldo inicial.</td></tr>
+          <tr><td><b>El campo <code>Sede</code> mezcla razón social y plaza</b><br><span class="muted">«SAN JOSÉ - VALLE DE PAZ DE COSTA RICA SA» · «Sucursal de San Carlos - Jardines Tropicales…»</span></td>
+              <td>Se parte en dos: razón social y plaza. Y aparecen <b>dos personas jurídicas</b> en el mismo archivo.</td></tr>
+          <tr><td><b>La sede operativa NO viene en el archivo</b> (vos lo dijiste)</td>
+              <td>Es dato del ERP, con su pantalla de administración y su scoping en el servidor. Confirmado: <code>sede</code> es dimensión propia, no los departamentos de CxP.</td></tr>
+          <tr><td><b>2 de 9 contratos comparten cliente</b></td>
+              <td>Con el contrato como eje, esos dos no se ven juntos. Queda la alerta «2 contratos» por coincidencia de documento, y la puerta abierta a ascender el cliente.</td></tr>
+          <tr><td><b>Score de −139 a 133 y «Estatus de Morosidad»</b></td>
+              <td>Ya traés un scoring del origen. Se importa como <b>dato informativo</b> y se muestra; el tramo lo sigue calculando el ERP con la antigüedad real.</td></tr>
+          <tr><td><b>Dos formatos de contrato</b> <code>CD-0000000561</code> y <code>CO198456</code></td>
+              <td>El número es texto, no entero. Nada de normalizar formatos: se guarda tal como viene.</td></tr>
+          <tr><td><b>«sept-26»</b> junto a «ago-26», «ene-26»</td>
+              <td>Abreviaturas de mes inconsistentes (3 y 4 letras). El parser las contempla explícitamente o la fila va a cuarentena.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card p" style="margin-top:12px">
+      <h3 style="font-size:15px">El modelo</h3>
+      <pre>contrato_cxc          el EJE (tu decisión)
+  ├ empresa_id, sede_id (del ERP), razon_social, plaza
+  ├ numero ('CO198456' | 'CD-0000000561'), estado
+  ├ cliente: nombre, documento, telefonos, correos    ← dato del contrato, sin unicidad
+  ├ modalidad (ciclo), forma_pago, asociacion_id, dia_pago
+  ├ cuota_vigente, fecha_primer_cobro
+  └ score_origen, estatus_morosidad_origen            ← informativos, del sistema fuente
+
+cargo_cxc             la partida abierta — el corazón
+  ├ contrato_id, periodo ('2026-07' | '2026-07-1Q'), vence_en
+  ├ monto, monto_aplicado, saldo (derivado)
+  ├ estado: ABIERTO · PARCIAL · SALDADO · ANULADO
+  └ origen: GENERADO · RECONSTRUIDO · SALDO_INICIAL · AJUSTE
+     UNIQUE (contrato_id, periodo)   ← generar dos veces no duplica
+
+cobro_cxc             el dinero que entró
+  ├ contrato_id (nullable: los sin identificar aún no lo tienen)
+  ├ consecutivo, fecha_pago, fecha_bancaria, fecha_registro   ← las TRES
+  ├ monto, forma, asociacion_id, planilla_id, referencia
+  ├ idempotency_key, movimiento_bancario_id
+  └ estado: APLICADO · SIN_IDENTIFICAR · REVERSADO
+
+cobro_aplicacion      qué pagó qué (más viejo primero)
+  └ cobro_id, cargo_id, monto, parcial
+
+planilla_asociacion   el lote del canal dominante
+  ├ asociacion_id, periodo, esperado, depositado, diferencia
+  └ estado: PENDIENTE · RECIBIDA · CONCILIADA · CON_DIFERENCIA
+
+asociacion · sede · nota_credito_cxc · gestion_cxc · promesa_pago
+arreglo_pago · corte_cartera_cxc (la foto diaria: lo único que SÍ se guarda)</pre>
+
+      <div class="grid g2" style="margin-top:13px">
+        <div class="note good"><b>Se deriva, no se guarda:</b> saldo del cargo, saldo del contrato, días
+          de mora, tramo, recuperación esperada, aging y alertas. Nada de vista materializada que quede
+          vieja mientras un operador llama a alguien que ya pagó.</div>
+        <div class="note"><b>Se guarda:</b> el corte diario por sede. La foto de ayer no es un caché, es un
+          hecho que no se puede reconstruir — igual que el congelamiento del saldo en Bancos.</div>
+      </div>
+    </div>
+
+    <div class="card p" style="margin-top:12px">
+      <h3 style="font-size:15px">Lo que necesito de vos para arrancar la fase 1</h3>
+      <ul class="muted">
+        <li><b>¿Qué acumula «Saldo Pendiente»?</b> ¿Solo la cuota del período corriente, o la deuda completa? De eso depende si el saldo inicial sale de ese campo o de reconstruir con el <code>Concepto</code>.</li>
+        <li><b>¿Reconstruimos la historia de cargos con el <code>Concepto</code> de los pagos?</b> Es más trabajo y da un aging real desde el primer día. La alternativa es arrancar con un saldo inicial por contrato.</li>
+        <li><b>Las dos personas jurídicas</b> (Valle de Paz de Costa Rica SA y Jardines Tropicales y Forestales La Paz SA): ¿son la misma empresa del ERP con distinta plaza, o empresas separadas que no deben verse entre sí?</li>
+        <li><b>¿Cuál fecha cuenta como «cobrado en el mes»?</b> Pago, bancaria o registro.</li>
+        <li><b>El factor de recuperación del descuento por asociación</b>, que no existía en tu catálogo.</li>
+        <li><b>¿Cuántas asociaciones hay y cómo llega su detalle?</b> ¿Archivo por asociación, un archivo con todas, o se digita?</li>
+      </ul>
+    </div>
+  </section>
+
+  </main>
+</div>

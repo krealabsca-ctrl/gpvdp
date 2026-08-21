@@ -1,0 +1,87 @@
+# Caddy: la única puerta del sistema hacia internet.
+#
+# Hace tres cosas:
+#   1. HTTPS automático — pide y renueva el certificado de Let's Encrypt solo, sin intervención.
+#   2. Sirve la aplicación compilada (los archivos de /srv).
+#   3. Reenvía /v1/* al backend por la red interna de Docker.
+#
+# Que la pantalla y la API salgan por el MISMO dominio no es un detalle de comodidad: elimina el
+# CORS y hace que la app no tenga que conocer ninguna dirección (deriva la de la API del origen
+# desde el que se abrió). Es lo que permite cambiar de dominio sin recompilar nada.
+#
+# {$DOMINIO} lo pone el compose desde el archivo .env. Si vale ":80", Caddy sirve por HTTP sin
+# certificado — el modo para probar con la IP, antes de tener dominio.
+
+{$DOMINIO} {
+	encode zstd gzip
+
+	# La API primero: si la ruta empieza con /v1, va al backend y no se busca como archivo.
+	handle /v1/* {
+		# Tope de tamaño de subida, EN EL BORDE.
+		#
+		# El sistema recibe archivos de verdad: estados de cuenta del banco y el Excel de la
+		# clasificación en bloque (que acepta hasta 16 MB y hasta 50.000 filas). El backend revisa
+		# el tamaño de ese endpoint, pero el importador de estados de cuenta lee el archivo
+		# completo sin tope propio: sin este límite, una subida de varios GB —por error o a
+		# propósito— llena el disco del servidor y tumba la base.
+		#
+		# 24 MB deja aire sobre los 16 MB de la aplicación (el sobre multipart pesa) y sigue siendo
+		# chico. Un archivo entre 16 y 24 MB lo rechaza la aplicación con su mensaje explicando que
+		# hay que partirlo; arriba de 24 MB lo corta Caddy con un 413.
+		request_body {
+			max_size 24MB
+		}
+
+		reverse_proxy backend:8080 {
+			# Tiempos generosos pero FINITOS. Clasificar un archivo de decenas de miles de filas
+			# puede tardar minutos: con el default de 60 s de muchos proxys, la subida se cortaría a
+			# mitad de camino y el usuario vería un error sin saber que el trabajo iba bien. Y sin
+			# ningún tiempo límite, una petición colgada queda tomando una conexión para siempre.
+			transport http {
+				read_timeout 300s
+				write_timeout 300s
+			}
+		}
+	}
+
+	# El resto es la aplicación.
+	handle {
+		root * /srv
+		# La app maneja sus propias rutas (/login, /cxp/bandeja...). Esas direcciones no existen
+		# como archivo, así que cualquier ruta desconocida devuelve index.html y React resuelve.
+		# Sin esto, recargar la página en cualquier pantalla interna daría 404.
+		try_files {path} /index.html
+		file_server
+	}
+
+	# Cabeceras de seguridad. Son gratis y cierran ataques comunes.
+	header {
+		# No permitir que el sistema se muestre dentro de un iframe de otro sitio.
+		X-Frame-Options "DENY"
+		# No adivinar el tipo de archivo (evita que un archivo subido se ejecute como script).
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Ocultar qué servidor es.
+		-Server
+	}
+
+	# Caché: los archivos de /assets llevan un hash en el nombre, así que su contenido nunca
+	# cambia y se pueden guardar para siempre. El HTML es lo contrario: tiene que revalidarse
+	# siempre, porque es el que apunta a los archivos nuevos después de cada actualización. Si
+	# el navegador se queda con un HTML viejo, sigue pidiendo la versión anterior de la app.
+	#
+	# El matcher va NEGADO (todo lo que no sea /assets) y no como `/index.html`: la app maneja
+	# sus rutas, así que el HTML se entrega bajo /login, /cxp/bandeja, etc. Un matcher por
+	# nombre de archivo no acierta ninguna de esas y la cabecera nunca se aplicaría.
+	@estaticos path /assets/*
+	@html not path /assets/*
+	header @estaticos Cache-Control "public, max-age=31536000, immutable"
+	header @html Cache-Control "no-cache"
+
+	log {
+		output file /var/log/caddy/acceso.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

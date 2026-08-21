@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS sesion;
+DROP TABLE IF EXISTS usuario_empresa_rol;
+DROP TABLE IF EXISTS usuario;
+DROP TABLE IF EXISTS rol;
+DROP TABLE IF EXISTS empresa;

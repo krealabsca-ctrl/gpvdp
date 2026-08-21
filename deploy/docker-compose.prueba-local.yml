@@ -1,0 +1,24 @@
+# Probar el stack de PRODUCCIÓN en una máquina de desarrollo, antes de publicar en el servidor.
+#
+# Solo cambia los puertos: 80 y 443 suelen estar ocupados en una computadora de trabajo, y
+# además así no hace falta ser administrador. Todo lo demás —frontend compilado, Caddy, backend
+# en modo producción— es idéntico a lo que va a correr en el VPS.
+#
+# USO (desde la raíz del proyecto). El `-p` le da un nombre de proyecto propio, así que usa
+# volúmenes SEPARADOS y no toca la base de desarrollo:
+#
+#   docker compose -p gpvdp_prueba_prod --env-file deploy/.env.prueba \
+#     -f deploy/docker-compose.prod.yml -f deploy/docker-compose.prueba-local.yml up -d --build
+#
+#   → abrir http://localhost:8090
+#
+# Para borrarlo todo cuando termines (incluida su base de prueba):
+#
+#   docker compose -p gpvdp_prueba_prod -f deploy/docker-compose.prod.yml \
+#     -f deploy/docker-compose.prueba-local.yml down -v
+
+services:
+  web:
+    ports: !override
+      - "8090:80"
+      - "8443:443"

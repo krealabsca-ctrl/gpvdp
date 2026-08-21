@@ -1,0 +1,3 @@
+# Esta carpeta contiene el cliente tipado GENERADO desde openapi/openapi-bancos.yaml.
+# El archivo bancos.ts se produce con `npm run gen:api` (o en el build de Docker)
+# y está ignorado por git. Este .gitkeep solo mantiene la carpeta versionada.

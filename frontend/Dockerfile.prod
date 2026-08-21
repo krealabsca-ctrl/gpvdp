@@ -1,0 +1,32 @@
+# Frontend de PRODUCCIÓN: se compila a archivos estáticos y los sirve Caddy.
+#
+# Diferencia clave con el Dockerfile de desarrollo: ahí corre el dev server de Vite (que compila
+# en cada pedido y trae herramientas de depuración). Acá se compila UNA vez y queda HTML/CSS/JS
+# plano, que es más rápido, más liviano y no expone el código fuente.
+#
+# La imagen final NO lleva Node ni el código fuente: solo Caddy y los archivos compilados.
+
+# ---- compilación ----
+FROM node:24-alpine AS build
+WORKDIR /app
+
+# Dependencias primero, para aprovechar la caché de capas de Docker.
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+
+# `npm run build` = generar el cliente del OpenAPI + verificar tipos + compilar con Vite.
+# Si hay un error de tipos, la imagen NO se construye: es a propósito, así un error de tipos
+# no llega a producción.
+#
+# NO se le pasa VITE_API_URL: la app deriva la dirección de la API del origen desde el que se
+# abrió la página (window.location.origin, ver src/api/client.ts). Gracias a eso los MISMOS
+# archivos compilados sirven para cualquier dominio, y cambiar de dominio no obliga a recompilar.
+RUN npm run build
+
+# ---- servidor ----
+FROM caddy:2-alpine
+# Los archivos compilados y nada más. El Caddyfile NO se copia acá: lo monta el compose desde
+# deploy/Caddyfile, así se puede cambiar el dominio sin reconstruir la imagen.
+COPY --from=build /app/dist /srv

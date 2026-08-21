@@ -1,0 +1,403 @@
+<title>GPVDP · Cuentas por Cobrar — propuesta de arquitectura</title>
+<style>
+  :root{
+    --surface:#F7F8F5; --raised:#FFFFFF; --muted:#EDF0EA; --border:#DCE2D9;
+    --ink:#1E2A24; --ink-2:#55645C; --ink-3:#8A958D;
+    --accent:#0F6E4E; --accent-hover:#0B583E; --accent-soft:#e3f0ea; --accent-fg:#fff;
+    --gold:#B0894A; --gold-soft:#F7EEDF;
+    --pos:#15803D; --neg:#B3542E; --warn:#A16207; --warn-soft:#FBF3E2;
+    --shadow-sm:0 1px 2px rgb(30 42 36/.06);
+    --shadow:0 1px 2px rgb(30 42 36/.06),0 4px 14px rgb(30 42 36/.05);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --surface:#141714; --raised:#1E2320; --muted:#242A26; --border:#313832;
+    --ink:#E8EDE9; --ink-2:#A9B4AC; --ink-3:#77817A;
+    --accent:#35A578; --accent-hover:#4FBB8F; --accent-soft:#22302a; --accent-fg:#032019;
+    --gold:#C9A468; --gold-soft:#2E2A20;
+    --pos:#4ADE80; --neg:#E08a63; --warn:#E0B44A; --warn-soft:#2E2A1C;
+    --shadow-sm:0 1px 2px rgb(0 0 0/.3); --shadow:0 1px 2px rgb(0 0 0/.35),0 4px 14px rgb(0 0 0/.25);
+  }}
+  :root[data-theme="dark"]{
+    --surface:#141714; --raised:#1E2320; --muted:#242A26; --border:#313832;
+    --ink:#E8EDE9; --ink-2:#A9B4AC; --ink-3:#77817A;
+    --accent:#35A578; --accent-hover:#4FBB8F; --accent-soft:#22302a; --accent-fg:#032019;
+    --gold:#C9A468; --gold-soft:#2E2A20;
+    --pos:#4ADE80; --neg:#E08a63; --warn:#E0B44A; --warn-soft:#2E2A1C;
+  }
+  :root[data-theme="light"]{
+    --surface:#F7F8F5; --raised:#FFFFFF; --muted:#EDF0EA; --border:#DCE2D9;
+    --ink:#1E2A24; --ink-2:#55645C; --ink-3:#8A958D;
+    --accent:#0F6E4E; --accent-soft:#e3f0ea; --gold:#B0894A; --gold-soft:#F7EEDF;
+    --pos:#15803D; --neg:#B3542E; --warn:#A16207; --warn-soft:#FBF3E2;
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{background:var(--surface);color:var(--ink);font:14.5px/1.62 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif}
+  .tnum{font-variant-numeric:tabular-nums lining-nums}
+  h1,h2,h3,h4{text-wrap:balance;margin:0}
+  code,pre{font-family:ui-monospace,"Cascadia Code",Consolas,monospace}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .top{display:flex;align-items:center;gap:12px;padding:11px 18px;background:var(--raised);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:20;flex-wrap:wrap}
+  .logo{width:32px;height:32px;border-radius:9px;background:var(--accent);display:grid;place-items:center;color:var(--accent-fg);font-weight:800;flex:none}
+  .top h1{font-size:15px;font-weight:700}
+  .top h1 small{color:var(--ink-3);font-weight:500}
+  .tag{font-size:10px;font-weight:800;letter-spacing:.08em;padding:4px 9px;border-radius:999px;background:var(--gold);color:#fff}
+
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 18px 80px}
+  .lede{color:var(--ink-2);max-width:78ch;margin:8px 0 0}
+  .sec{margin-top:34px}
+  .sec>h2{font-size:11.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .sec>h2 b{background:var(--accent-soft);color:var(--accent);border-radius:999px;padding:3px 9px;font-size:10px;letter-spacing:.05em}
+  .card{background:var(--raised);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-sm);padding:18px}
+  .card+.card{margin-top:12px}
+  .card h3{font-size:16px;letter-spacing:-.01em}
+  .card h4{font-size:13px;margin-top:14px}
+  .grid{display:grid;gap:12px}
+  @media(min-width:880px){.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}}
+  .muted{color:var(--ink-2);font-size:13.5px}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;background:var(--muted);color:var(--ink-2)}
+  .pill.ok{background:var(--accent-soft);color:var(--accent)}
+  .pill.warn{background:var(--warn-soft);color:var(--warn)}
+  .pill.neg{background:color-mix(in oklab,var(--neg) 14%,transparent);color:var(--neg)}
+  .pill.gold{background:var(--gold-soft);color:var(--gold)}
+
+  table{width:100%;border-collapse:collapse;font-size:13.2px}
+  th{text-align:left;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);font-weight:800;padding:0 9px 8px;border-bottom:1px solid var(--border)}
+  td{padding:9px;border-bottom:1px solid color-mix(in oklab,var(--border) 55%,transparent);vertical-align:top}
+  tr:last-child td{border-bottom:0}
+  .num{text-align:right}
+
+  .note{background:var(--gold-soft);border:1px solid color-mix(in oklab,var(--gold) 34%,transparent);border-radius:11px;padding:13px 15px;font-size:13.4px;color:var(--ink-2);margin-top:12px}
+  .note b{color:var(--ink)}
+  .bad{background:color-mix(in oklab,var(--neg) 8%,transparent);border-color:color-mix(in oklab,var(--neg) 32%,transparent)}
+  .good{background:var(--accent-soft);border-color:color-mix(in oklab,var(--accent) 30%,transparent)}
+  pre{background:var(--muted);border:1px solid var(--border);border-radius:10px;padding:12px 14px;overflow-x:auto;font-size:12.4px;line-height:1.55;margin:12px 0 0}
+  ul,ol{margin:8px 0;padding-left:20px}
+  li{margin:5px 0}
+  li>b{color:var(--ink)}
+  .flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12.5px;margin-top:10px}
+  .flow span{background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-weight:600}
+  .flow i{color:var(--ink-3);font-style:normal}
+  .q{border-left:3px solid var(--gold);padding:2px 0 2px 14px;margin:16px 0}
+  .q h4{font-size:14px;color:var(--ink)}
+  .q p{margin:4px 0 0;font-size:13.3px;color:var(--ink-2)}
+  .rec{font-size:12.6px;color:var(--accent);font-weight:650}
+</style>
+
+<div class="top">
+  <div class="logo">V</div>
+  <h1>Finance Group VDP <small>· Cuentas por Cobrar</small></h1>
+  <span class="tag">PROPUESTA</span>
+</div>
+
+<div class="wrap">
+  <h1 style="font-size:25px;letter-spacing:-.02em">Cómo construir CxC sobre lo que ya tenemos</h1>
+  <p class="lede">
+    Leí tu Apps Script (documento, esquema y maqueta). No es un desperdicio: es un prototipo que
+    validó reglas de cobro reales contra datos reales, y varias de esas reglas son mejores que las de
+    un ERP de estante. Pero hay <b>un problema estructural</b> del que se derivan casi todas sus
+    limitaciones, y las dos preguntas que tu propio documento marca como las más importantes
+    (P4 modalidades, P7 saldo) son <b>el mismo problema visto dos veces</b>.
+  </p>
+
+  <!-- ═══════════ 1. EL DIAGNÓSTICO ═══════════ -->
+  <div class="sec">
+    <h2>1 · El diagnóstico <b>de esto sale todo lo demás</b></h2>
+    <div class="card">
+      <h3>No existe el documento de cargo</h3>
+      <p class="muted">
+        Hoy el contrato tiene <code>cuota_vigente</code> y <code>fecha_proximo_pago</code>: <b>un solo
+        renglón que se sobreescribe</b>. Cuando el cliente paga, esa fecha se corre y el mes anterior
+        deja de existir como obligación. No hay ningún registro que diga «el cargo de julio de este
+        contrato son ₡5 600, vencía el 20/7, y todavía debe ₡5 600».
+      </p>
+      <p class="muted">
+        Todas estas reglas tuyas son <b>compensaciones ingeniosas</b> por esa ausencia:
+      </p>
+      <table style="margin-top:8px">
+        <thead><tr><th>Regla que validaste</th><th>Qué está compensando</th></tr></thead>
+        <tbody>
+          <tr><td><b>«Meta fija del mes»</b>: sumar la cuota de todo exigible, contada una vez por contrato</td><td>No se pueden sumar cargos del mes… porque no hay cargos</td></tr>
+          <tr><td><b>«La evidencia de pago manda»</b>: si pagó en el mes, está recaudado aunque la fecha ya se corrió</td><td>El pago no se puede aplicar contra <i>nada</i>, así que hay que adivinar a qué mes pertenece</td></tr>
+          <tr><td><b>«Mora efectiva»</b>: la mayor entre los días reportados y los derivados de la fecha</td><td>Sin cargo vencido, la antigüedad hay que reconstruirla</td></tr>
+          <tr><td><b>«Contar la cuota una sola vez»</b></td><td>Defensa contra contar dos veces algo que no está anclado a un período</td></tr>
+          <tr><td><b>Cuarentena de cuotas gigantes</b> (saldos pegados en el campo de cuota)</td><td>El campo hace dos trabajos: cuota del período y proxy del saldo</td></tr>
+        </tbody>
+      </table>
+      <div class="note bad">
+        <b>El costo real de no tener cargos.</b> Hoy no podés contestar, con el sistema, tres preguntas
+        que cualquier gerencia va a hacer: <b>¿cuánto nos deben en total?</b> · <b>¿de qué meses viene
+        esa deuda?</b> · <b>¿cuánto de lo que se cobró este mes era de meses anteriores?</b> El
+        «monto en riesgo» de hoy es la cuota del mes, que no es la deuda. Con 70 000 clientes eso ya
+        no es un detalle: es la diferencia entre gestionar cobro y <b>tener cuentas por cobrar</b>.
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ 2. LA PROPUESTA CENTRAL ═══════════ -->
+  <div class="sec">
+    <h2>2 · La propuesta <b>open-item, como las grandes</b></h2>
+    <div class="card">
+      <h3>Un cargo por período, y los pagos se aplican contra cargos</h3>
+      <p class="muted">
+        Es exactamente cómo funciona la contabilidad de cuentas por cobrar en SAP, Oracle, NetSuite y
+        cualquier plataforma de suscripción: <b>partidas abiertas</b> (open items). Cada obligación es
+        un documento con su fecha de vencimiento y su saldo; un pago no «marca un mes», sino que
+        <b>se aplica</b> a uno o varios cargos y los deja parcial o totalmente saldados.
+      </p>
+      <div class="flow">
+        <span>Contrato</span><i>→ genera →</i><span>Cargo de julio · vence 20/7 · ₡5 600</span>
+        <i>→ recibe →</i><span>Aplicación de pago ₡5 600</span><i>→ queda →</i><span>Saldo 0</span>
+      </div>
+      <h4>Lo que se resuelve solo, sin reglas especiales</h4>
+      <table style="margin-top:6px">
+        <thead><tr><th>Pregunta de tu documento</th><th>Cómo se contesta con cargos</th></tr></thead>
+        <tbody>
+          <tr><td><b>P4 · Quincenal, trimestral, semestral, anual</b><br><span class="muted">marcada como «probablemente la más importante»</span></td>
+              <td>Deja de ser un problema de la meta: <b>cada modalidad genera su cargo en su ciclo</b>, con su propio vencimiento. El trimestral genera uno cada 3 meses; el quincenal, dos por mes. La meta del mes es «la suma de los cargos que vencen este mes». <b>Sin casos especiales.</b></td></tr>
+          <tr><td><b>P7 · Saldo pendiente</b><br><span class="muted">«define el alcance del producto»</span></td>
+              <td>El saldo <b>es</b> la suma de los cargos abiertos. No hace falta un «motor de facturación» aparte: el generador de cargos <i>es</i> ese motor, y es simple porque los cargos son recurrentes y conocidos.</td></tr>
+          <tr><td><b>P2 · Historia de la cuota</b></td>
+              <td>Innecesaria como tabla aparte: el cargo de febrero <b>guarda el monto que tenía en febrero</b>. Un cambio de cuota afecta los cargos futuros y no reescribe el pasado.</td></tr>
+          <tr><td><b>Mora y aging</b></td>
+              <td>Antigüedad real por cargo vencido, igual que el aging de CxP que ya funciona. La «mora efectiva» deja de ser un cálculo defensivo.</td></tr>
+        </tbody>
+      </table>
+      <div class="note good">
+        <b>Lo mejor del prototipo se queda.</b> Los tramos con probabilidad de recuperación, el factor
+        por forma de pago y la <b>priorización por valor esperado</b> son tu ventaja competitiva y no
+        las trae ningún ERP de estante. Lo único que cambia es el insumo: la cola se ordena por
+        <b>saldo real en riesgo</b> × probabilidad, no por la cuota del mes.
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Y es el mismo modelo que ya corre en CxP</h3>
+      <p class="muted">
+        CxC es CxP visto en espejo: allá son documentos que <b>debemos</b>, acá documentos que
+        <b>nos deben</b>. Ese modelo ya está construido, probado y con tablero: documento con estados,
+        pagos, aplicación de anticipos, aging navegable, cartera abierta, conciliación con Bancos.
+      </p>
+      <pre>CxP (construido)                    CxC (propuesto)
+─────────────────────────────       ─────────────────────────────
+proveedor                       ↔   cliente + contrato
+documento_cxp (factura)         ↔   cargo_cxc (cuota del período)
+pago + lote_pago (salida)       ↔   cobro + aplicacion (entrada)
+anticipo_aplicacion (netting)   ↔   saldo a favor del cliente
+aging + cartera abierta         ↔   aging + estado de cuenta
+huella CXP- en el banco         ↔   identificación del depósito del cliente
+comprobante al proveedor        ↔   estado de cuenta / recibo al cliente</pre>
+    </div>
+  </div>
+
+  <!-- ═══════════ 3. LO QUE NO HAY QUE VOLVER A HACER ═══════════ -->
+  <div class="sec">
+    <h2>3 · Lo que el esquema del zip duplica <b>y no debe construirse</b></h2>
+    <div class="card">
+      <p class="muted">
+        El <code>schema.sql</code> que traés es un sistema <b>completo e independiente</b>: trae su
+        propio login, sus roles, sus permisos, su auditoría. Eso tenía sentido como portal aparte;
+        dentro del ERP sería un segundo sistema de seguridad que se desincroniza del primero.
+      </p>
+      <table style="margin-top:6px">
+        <thead><tr><th>En el zip</th><th style="width:44%">Ya existe en el ERP</th><th>Qué hacemos</th></tr></thead>
+        <tbody>
+          <tr><td><code>usuario</code>, <code>rol</code>, <code>permiso</code>, <code>rol_permiso</code>, <code>usuario_permiso</code>, argon2, JWT+refresh</td>
+              <td>Módulo <b>Configuración</b>: usuarios por empresa, matriz permiso × rol × empresa (41 permisos), contraseña temporal con cambio forzado</td>
+              <td><span class="pill ok">Se borra del alcance</span> CxC solo <b>agrega sus permisos</b> al catálogo</td></tr>
+          <tr><td><code>auditoria</code></td><td><code>auditoria_evento</code> append-only, ya en uso en los tres módulos</td><td><span class="pill ok">Se reusa</span></td></tr>
+          <tr><td><code>parametro</code> (clave/valor con auditoría)</td><td>Ajustes por empresa + parámetros versionados por año en Nómina</td><td><span class="pill ok">Mismo patrón</span></td></tr>
+          <tr><td>Importador con alias de columnas y reporte</td><td>Importador de Bancos (7 bancos, adaptadores, previsualizar → confirmar) e importador Excel de CxP</td><td><span class="pill ok">Se reusa el patrón</span></td></tr>
+          <tr><td><code>sede</code> como frontera de datos</td><td><code>empresa</code> (tenant) + <code>departamento</code> (áreas de CxP)</td><td><span class="pill warn">Decisión pendiente</span> ver §6</td></tr>
+          <tr><td>Tablero, evolución, ranking</td><td>Recharts + el patrón del tablero de CxP (cartera a hoy vs movimiento del período)</td><td><span class="pill ok">Se reusa</span></td></tr>
+        </tbody>
+      </table>
+      <div class="note bad">
+        <b>Y un defecto que hay que corregir sí o sí:</b> el esquema del zip <b>no tiene
+        <code>empresa_id</code> en ninguna tabla</b>. Es de una sola empresa. La regla más dura de
+        este ERP es que toda tabla y toda consulta filtran por empresa. Valle de Paz, Coopeprofa y
+        Memorial Pets tienen que poder cobrar sin verse entre sí. <b>Todas</b> las tablas de CxC
+        nacen con <code>empresa_id</code>.
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ 4. LA VISTA MATERIALIZADA ═══════════ -->
+  <div class="sec">
+    <h2>4 · La vista materializada <b>no la haría</b></h2>
+    <div class="card">
+      <p class="muted">
+        El zip propone <code>mv_cartera_mes</code> refrescada cada 10–15 minutos. Entiendo de dónde
+        viene: en Sheets el batch de las 5 a. m. era obligatorio. Pero en PostgreSQL con 70 000
+        contratos, la consulta viva bien indexada corre en milisegundos, y la vista materializada trae
+        de vuelta <b>el bug que ya sufriste</b>: números de una corrida vieja.
+      </p>
+      <ul>
+        <li><b>El operador registra un pago y la cola no lo refleja por 15 minutos.</b> Va a llamar a un cliente que ya pagó. Ese es el error más caro que puede cometer un cobrador.</li>
+        <li>Tu propio documento dice que las alertas escritas «podían quedar de una corrida vieja (pasó)». Materializar el estado del mes es <b>volver a poner ese pie en la misma piedra</b>.</li>
+        <li>La disciplina que llevamos en todo el ERP es <b>derivar, no guardar</b>: el saldo esperado, el saldo de libros, el saldo de vacaciones y el monto de horas extra se calculan siempre.</li>
+      </ul>
+      <p class="muted">
+        <b>Lo que sí es legítimo guardar</b> es el <b>corte diario histórico</b>
+        (<code>corte_cartera</code>): la foto de ayer no es un caché, es un hecho, y no se puede
+        reconstruir. Igual que el congelamiento del saldo diario en Bancos.
+      </p>
+      <div class="note">
+        <b>Y si mido y no rinde</b>, se materializa entonces, con datos en la mano y sabiendo cuál
+        consulta cuesta. Primero medimos con tus 70 000 y sus pagos reales; optimizar antes de medir
+        es cómo se llega a un caché que nadie sabe invalidar.
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ 5. ENTRADA DE DATOS ═══════════ -->
+  <div class="sec">
+    <h2>5 · Entrada de datos y pagos <b>CSV · Excel · API</b></h2>
+    <div class="card">
+      <h3>Un solo camino de entrada, tres puertas</h3>
+      <p class="muted">
+        Las tres puertas (archivo, API, captura manual) desembocan en <b>el mismo pipeline</b>. Si cada
+        una tiene su lógica, tarde o temprano el CSV acepta lo que la API rechaza.
+      </p>
+      <div class="flow">
+        <span>CSV / Excel</span><span>API</span><span>Caja</span><i>→</i><span>staging</span>
+        <i>→</i><span>validación por fila</span><i>→</i><span>previsualización + conciliación</span>
+        <i>→</i><span>confirmar</span><i>→</i><span>asiento</span>
+      </div>
+      <h4>Lo que hacen las grandes y hay que copiar</h4>
+      <ul>
+        <li><b>Idempotencia de verdad.</b> Cada cobro trae una llave (<code>Idempotency-Key</code> en la API, consecutivo + contrato en el archivo). Reenviar el mismo lote no duplica: devuelve <i>el mismo resultado</i>. Tu <code>UNIQUE (contrato_id, consecutivo)</code> va en la dirección correcta; le falta la llave externa del sistema que lo envía.</li>
+        <li><b>Aplicación de efectivo con caja de dinero no identificado.</b> Un depósito que no se puede atribuir <b>no se descarta ni se adivina</b>: entra a una bandeja de «cobros sin identificar» con su monto y su referencia, y se resuelve como se resuelve hoy la clasificación bancaria. Con 70 000 clientes esto va a pasar todos los días.</li>
+        <li><b>Pagos parciales y sobrepagos.</b> Un pago de ₡3 000 contra un cargo de ₡5 600 deja saldo ₡2 600, no «no pagó». Un sobrepago crea <b>saldo a favor</b> del cliente (ya existe el mecanismo en CxP).</li>
+        <li><b>Reversas.</b> Cheque devuelto, contracargo, débito rechazado por el banco: el cobro se reversa y los cargos <b>vuelven a abrirse</b> con su antigüedad original. CxP ya tiene el estado REBOTADA para el espejo de esto.</li>
+        <li><b>Nunca borrar.</b> Anular un cobro es un asiento nuevo, no un <code>DELETE</code>. Ya es regla del proyecto.</li>
+      </ul>
+      <div class="note">
+        <b>El puente con Bancos.</b> En CxP resolvimos que la macro lleve <code>CXP-xxxx</code> para que
+        el pago se reconozca solo. En CxC va al revés: <b>el cliente deposita y hay que adivinar quién
+        fue</b>. La solución que usan las grandes es darle a cada cliente una <b>referencia propia</b>
+        (o cuenta virtual) para que la use al depositar. Sin eso, la identificación siempre será
+        trabajo manual — y hoy tenés 6 227 movimientos bancarios sin clasificar que probablemente
+        incluyen muchos de estos depósitos.
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ 6. LO QUE FALTA ═══════════ -->
+  <div class="sec">
+    <h2>6 · Lo que ningún CxC serio omite <b>y no está en el zip</b></h2>
+    <div class="card">
+      <div class="grid g2">
+        <div>
+          <h4 style="margin-top:0">Estado de cuenta del cliente</h4>
+          <p class="muted">Documento imprimible y enviable con cargos, pagos y saldo. Ya tenés el módulo de plantillas de correo por empresa y el patrón de documento imprimible (acta de conciliación, finiquito).</p>
+          <h4>Notas de crédito y ajustes</h4>
+          <p class="muted">Condonación, descuento, corrección de un cargo mal generado. Con autorización y rastro, nunca editando el cargo original.</p>
+          <h4>Arreglos de pago formales</h4>
+          <p class="muted">La «promesa de pago» del prototipo es un compromiso verbal. Un arreglo es un <b>plan con cuotas</b>: reprograma cargos, se cumple o se rompe, y su incumplimiento es un evento gestionable.</p>
+        </div>
+        <div>
+          <h4 style="margin-top:0">Recordatorios automáticos por tramo (dunning)</h4>
+          <p class="muted">El tramo preventivo se atiende con un recordatorio, no con una llamada. Las plantillas por empresa ya existen; falta el disparador y el consentimiento del cliente.</p>
+          <h4>Provisión de incobrables</h4>
+          <p class="muted">Con aging real, la estimación de pérdida esperada por tramo es un cálculo directo. Hoy es imposible porque no hay antigüedad de deuda.</p>
+          <h4>Suspensión / reactivación del servicio</h4>
+          <p class="muted">Qué le pasa al contrato cuando la mora cruza un umbral, quién lo autoriza y qué pasa con los cargos ya generados.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ 7. PANTALLAS ═══════════ -->
+  <div class="sec">
+    <h2>7 · Las pantallas <b>con lo que ya aprendimos esta semana</b></h2>
+    <div class="card">
+      <table>
+        <thead><tr><th style="width:22%">Pantalla</th><th>Qué resuelve</th></tr></thead>
+        <tbody>
+          <tr><td><b>Cola de cobro</b></td><td>El puesto de trabajo del operador. Tabla virtualizada para 70 000 filas, filtros server-side, orden por valor esperado, y <b>el encabezado que mide lo filtrado</b> — cuántos contratos, cuánto saldo, cuánto recuperable — igual que acabamos de hacer en Clasificar. Paginación por cursor, no por <code>OFFSET</code>: en la página 500 el <code>OFFSET</code> se arrastra.</td></tr>
+          <tr><td><b>Ficha 360 del cliente</b></td><td>Cargos abiertos con su antigüedad, pagos aplicados, gestiones, promesas, arreglos, y el estado de cuenta imprimible. Un cliente puede tener varios contratos: la ficha es del <b>cliente</b>, no del contrato.</td></tr>
+          <tr><td><b>Tablero de cartera</b></td><td>Dos naturalezas separadas, como en CxP: <b>cartera a hoy</b> (aging navegable, concentración, incobrable estimado) vs <b>movimiento del período</b> (facturado, cobrado, efectividad). Cada número navega a las partidas que lo componen.</td></tr>
+          <tr><td><b>Cobros sin identificar</b></td><td>La bandeja del dinero que entró y no se sabe de quién. Con buscador por monto, fecha y referencia, y sugerencias por coincidencia.</td></tr>
+          <tr><td><b>Importaciones</b></td><td>Previsualizar → conciliar → confirmar, con el reporte persistido: cuántas filas entraron, cuántas en cuarentena y por qué, cuántos duplicados.</td></tr>
+          <tr><td><b>Supervisión</b></td><td>Efectividad por sede y operador, evolución, y las tres métricas que ya separaste bien: contactabilidad, promesas, cumplimiento.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ═══════════ 8. DECISIONES ═══════════ -->
+  <div class="sec">
+    <h2>8 · Lo que necesito que decidas <b>antes de tocar código</b></h2>
+    <div class="card">
+      <p class="muted">
+        Tu documento traía 16 preguntas. Varias las contesta el modelo de cargos (P2, P4, P7 en parte)
+        y otras las contesta el ERP (P14 autenticación, P1 en parte). Quedan estas, ordenadas por
+        cuánto bloquean:
+      </p>
+
+      <div class="q">
+        <h4>1 · ¿Cargos por período, o seguimos con la cuota?</h4>
+        <p>Es <b>la</b> decisión. Con cargos tenés CxC de verdad (saldo, aging, incobrables) y el importador tiene que traer historia, no solo el estado de hoy. Sin cargos es un gestor de cobro más rápido que el actual, y en 6 meses vuelve la pregunta.</p>
+        <p class="rec">Recomiendo cargos. Es más trabajo al inicio y resuelve tres de tus preguntas de una vez.</p>
+      </div>
+
+      <div class="q">
+        <h4>2 · ¿Emiten factura electrónica por estos cobros?</h4>
+        <p>Si el cargo mensual debe ser un <b>comprobante electrónico 4.4 firmado y enviado a Hacienda</b>, eso es un proyecto adentro del proyecto: firma digital, consecutivos por sucursal/terminal, contingencia, notas de crédito fiscales. CxP <b>recibe</b> comprobantes, que es mucho más simple que <b>emitirlos</b>. Necesito saberlo antes de definir qué es un cargo.</p>
+      </div>
+
+      <div class="q">
+        <h4>3 · ¿Cómo se aplica un pago que no calza exacto?</h4>
+        <p>Un cliente debe 3 meses y deposita el equivalente a 1,5 cuotas. ¿Se aplica al cargo más viejo primero (lo normal y lo que reduce la mora), al más nuevo, o el operador elige? ¿Y el remanente queda como saldo a favor o como pago parcial del siguiente?</p>
+        <p class="rec">Recomiendo: más viejo primero por omisión, con aplicación manual disponible.</p>
+      </div>
+
+      <div class="q">
+        <h4>4 · La identidad del cliente con 70 000 registros</h4>
+        <p>Tu documento decía 27 000 contratos y vos mencionás <b>más de 70 000 clientes</b>: quiero entender si creció, si un cliente tiene varios contratos, o si hay inactivos. Y lo crítico: ¿la cédula es única y confiable, o hay duplicados y variantes (con guiones, DIMEX, extranjeros sin documento)? De eso depende si el eje es el cliente o el contrato, y qué hace el importador cuando dos filas se parecen.</p>
+      </div>
+
+      <div class="q">
+        <h4>5 · Sede: ¿dimensión nueva o los departamentos que ya existen?</h4>
+        <p>La sede es tu frontera de datos (cada operador ve su cartera). El ERP ya tiene <code>departamento</code> con validadores asignados para CxP. ¿Son lo mismo, o la sede es otra cosa y necesita su propia tabla y su propio scoping?</p>
+      </div>
+
+      <div class="q">
+        <h4>6 · Las que quedan para después (no bloquean el arranque)</h4>
+        <p>Tope de pago legítimo · fecha de próximo pago en blanco · ciclo de vida del contrato y castigo contable · cumplimiento de promesa (ventana y monto) · metas acordadas por sede · quién ejecuta los débitos automáticos hoy · recordatorios automáticos y consentimiento · retención de datos personales (Ley 8968) · feriados y exigibilidad.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ 9. FASES ═══════════ -->
+  <div class="sec">
+    <h2>9 · Cómo lo construiría <b>y cómo se apaga el portal sin riesgo</b></h2>
+    <div class="card">
+      <table>
+        <thead><tr><th style="width:9%">Fase</th><th>Contenido</th><th style="width:32%">Cómo sé que quedó bien</th></tr></thead>
+        <tbody>
+          <tr><td><b>0</b></td><td>Maqueta navegable aprobada + decisiones 1 a 5</td><td>Vos aprobás las pantallas y las reglas, como en Bancos y Nómina</td></tr>
+          <tr><td><b>1</b></td><td>Clientes, contratos y <b>generador de cargos</b>. Importador con staging y conciliación</td><td>Los 70 000 cargados, cuarentena en cero o aceptada explícitamente</td></tr>
+          <tr><td><b>2</b></td><td>Cobros: archivo, API idempotente, aplicación, parciales, sobrepagos, reversas, sin identificar</td><td><b>La meta y el recaudado del mes cuadran contra tu pivote de Excel y contra el portal</b></td></tr>
+          <tr><td><b>3</b></td><td>Cola de cobro, ficha 360, gestión, tramos y valor esperado</td><td>Operadores de una sede trabajando en paralelo con el portal</td></tr>
+          <tr><td><b>4</b></td><td>Tablero, aging, supervisión, estado de cuenta, corte diario</td><td>Un cierre completo conciliado en los tres lados</td></tr>
+          <tr><td><b>5</b></td><td>Según tus respuestas: factura electrónica · dunning · débito automático · provisión</td><td>—</td></tr>
+        </tbody>
+      </table>
+      <div class="note good">
+        <b>El criterio de apagado</b> es el que ya trae tu documento y es el correcto: correr en
+        paralelo un ciclo completo y apagar el portal solo cuando <b>meta, recaudado y efectividad por
+        sede</b> cuadren contra el pivote de Excel. Nada de migrar por fe.
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="note">
+      <b>Lo siguiente.</b> Contestame las 5 decisiones (la primera y la segunda son las que definen
+      el tamaño del módulo) y armo la <b>maqueta navegable</b> de las pantallas para que la apruebes
+      antes de que exista una sola tabla — el mismo camino que seguimos con Bancos, CxP y Nómina.
+    </div>
+  </div>
+</div>

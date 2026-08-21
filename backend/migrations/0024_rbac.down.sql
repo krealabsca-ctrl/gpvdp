@@ -1,0 +1,3 @@
+ALTER TABLE rol DROP COLUMN IF EXISTS empresa_id;
+DROP TABLE IF EXISTS rol_permiso;
+DROP TABLE IF EXISTS permiso;

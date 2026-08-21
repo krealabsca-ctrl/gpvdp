@@ -1,0 +1,92 @@
+# USO LOCAL ÚNICAMENTE — nada de este sistema es accesible desde la red (2026-08-17).
+#
+# TODOS los puertos están prefijados con 127.0.0.1, que significa «solo esta computadora». Ni la
+# pantalla, ni la API, ni la base de datos responden a otra máquina, aunque esté en la misma red
+# y aunque el firewall de Windows tenga el paso abierto. Ese prefijo es el candado.
+#
+# Los datos viven en el volumen `pgdata` (abajo) y no dependen de esta configuración: cambiar
+# puertos no los toca. Lo único que los borra es `docker compose down -v` — nunca con `-v`.
+#
+# PARA VOLVER A ABRIRLO a los compañeros de la oficina: quitarle el prefijo `127.0.0.1:` SOLO a
+# la línea de puertos del servicio `frontend` (dejar el resto como está), levantar de nuevo, y
+# crear la regla de firewall de PRUEBA-EN-LA-OFICINA.md. Nada más: el sistema se adapta solo a
+# la dirección por la que cada persona entra, así que no hay que editar direcciones en ningún
+# lado. La API viaja por dentro del mismo puerto de la pantalla (proxy en frontend/vite.config.ts).
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gpvdp
+      POSTGRES_USER: gpvdp
+      POSTGRES_PASSWORD: localdev
+    # Solo esta máquina: el backend le llega por la red interna de Docker, no por este puerto.
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gpvdp -d gpvdp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: development
+      PORT: "8080"
+      DATABASE_URL: postgres://gpvdp:localdev@db:5432/gpvdp?sslmode=disable
+      JWT_SECRET: fFTjEuBcM6XaKDPR2hN7rzyG_gRpQXU1mmjAoCdFxPk3unp0I3g2uq9GDuSWcIzU
+      ACCESS_TTL: 15m
+      REFRESH_TTL: 720h
+      # Con el proxy del frontend el navegador nunca habla directo con la API, así que CORS ya no
+      # interviene en el uso normal. Queda solo para llamar la API a mano desde esta máquina
+      # (Postman, curl con Origin). Ya NO hay que tocarlo cuando cambia la IP.
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      # Apagado a propósito: la base ya tiene las empresas, los roles, los bancos y las cuentas
+      # reales. Encendido, en cada arranque reactivaba bancos y pisaba la moneda de las cuentas.
+      # Las migraciones y los permisos NO dependen de esto: corren siempre.
+      SEED_ON_START: "false"
+      SEED_ADMIN_EMAIL: admin@gpvdp.local
+      SEED_ADMIN_PASSWORD: admin1234
+      CIERRE_PERIODO_BLOQUEANTE: "true"
+    # La API no sale a la red: el frontend le llega por la red interna de Docker. El puerto
+    # publicado queda solo para esta máquina (probar con curl o Postman).
+    ports: ["127.0.0.1:8080:8080"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    environment:
+      # VACÍO A PROPÓSITO: el cliente arma la URL de la API como «(vacío) + /v1» = ruta relativa,
+      # o sea el MISMO origen desde el que se abrió la página. Así el navegador —esté en
+      # localhost, en la IP de la red o en el nombre de la máquina— siempre le pega al lugar
+      # correcto, y el proxy de vite.config.ts reenvía /v1 al backend.
+      # No poner una dirección acá: es lo que hacía que el sistema dependiera de la IP.
+      VITE_API_URL: ""
+    # Cerrado a la red: solo esta computadora, en las DOS familias de direcciones.
+    #
+    # Las dos líneas hacen falta. «localhost» resuelve primero a ::1 (IPv6) y los navegadores lo
+    # prefieren; publicar solo en 127.0.0.1 dejaba a http://localhost:5173 a medias —la página
+    # cargaba pero las llamadas a la API morían con «No se pudo conectar con el servidor»—.
+    # Para reabrirlo a la oficina: reemplazar AMBAS por la única línea "5173:5173".
+    ports:
+      - "127.0.0.1:5173:5173"
+      - "[::1]:5173:5173"
+    depends_on: [backend]
+
+  adminer:
+    image: adminer
+    # Administrador de la base con acceso total: NUNCA a la red, solo a esta máquina.
+    ports: ["127.0.0.1:8081:8080"]
+
+  mailhog:
+    image: mailhog/mailhog
+    # Buzón de prueba: muestra los correos que emite el sistema. Solo esta máquina.
+    ports: ["127.0.0.1:8025:8025"]
+
+volumes:
+  pgdata: {}

@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Tokens de color como variables CSS (canal RGB "r g b" para permitir /alpha).
+ * Paleta sobria financiera: neutros zinc/slate + acento teal petróleo.
+ * Modo claro por defecto; modo oscuro con la clase `.dark` en <html>.
+ */
+@layer base {
+  :root {
+    /* Superficies (slate premium: página gris azulada, tarjetas blancas) */
+    --surface: 245 247 250; /* #F5F7FA página */
+    --surface-muted: 241 245 249; /* slate-100 */
+    --surface-raised: 255 255 255; /* blanco (tarjetas) */
+    --border: 226 232 240; /* slate-200 */
+
+    /* Texto (slate) */
+    --content: 15 23 42; /* slate-900 */
+    --content-muted: 100 116 139; /* slate-500 */
+
+    /* Acento de marca: verde Valle de Paz (memorial / jardines) */
+    --accent: 15 110 78; /* verde profundo #0F6E4E */
+    --accent-hover: 11 88 62; /* #0B583E */
+    --accent-fg: 255 255 255; /* texto sobre acento */
+
+    /* Secundario de marca: dorado sobrio (detalles del logotipo / realces) */
+    --brand-gold: 176 137 74; /* #B0894A */
+
+    /* Estados de cifras (débito/crédito/pendiente) */
+    --positivo: 21 128 61; /* green-700 */
+    --negativo: 185 28 28; /* red-700   */
+    --pendiente: 161 98 7; /* amber-700 */
+
+    color-scheme: light;
+  }
+
+  .dark {
+    --surface: 15 23 42; /* slate-900 (página) */
+    --surface-muted: 30 41 59; /* slate-800 */
+    --surface-raised: 30 41 59; /* slate-800 (tarjetas, elevadas sobre la página) */
+    --border: 51 65 85; /* slate-700 */
+
+    --content: 241 245 249; /* slate-100 */
+    --content-muted: 148 163 184; /* slate-400 */
+
+    --accent: 74 190 148; /* verde claro #4ABE94 (más luminoso en oscuro) */
+    --accent-hover: 110 211 176; /* #6ED3B0 */
+    --accent-fg: 3 34 25; /* verde muy oscuro (texto sobre acento) */
+
+    --brand-gold: 202 168 116; /* #CAA874 (más claro en oscuro) */
+
+    --positivo: 74 222 128; /* green-400 */
+    --negativo: 248 113 113; /* red-400   */
+    --pendiente: 251 191 36; /* amber-400 */
+
+    color-scheme: dark;
+  }
+
+  /*
+   * Tema POR EMPRESA: al cambiar de empresa activa se setea data-empresa en <html>
+   * (ver EmpresaTheme.tsx) y se sobreescribe el acento. Valle de Paz usa el verde
+   * base de arriba (sin override). El logotipo usa fill-accent, así que su color
+   * cambia solo. Confirmar hex contra el manual de marca de cada empresa.
+   */
+  /* Coopeprofa — azul cooperativa */
+  :root[data-empresa="coopeprofa"] {
+    --accent: 27 79 156; /* #1B4F9C */
+    --accent-hover: 22 63 125; /* #163F7D */
+    --accent-fg: 255 255 255;
+  }
+  .dark[data-empresa="coopeprofa"] {
+    --accent: 96 165 250; /* #60A5FA */
+    --accent-hover: 147 197 253; /* #93C5FD */
+    --accent-fg: 8 27 51; /* #081B33 */
+  }
+  /* Memorial Pets — teal */
+  :root[data-empresa="memorialpets"] {
+    --accent: 14 116 144; /* #0E7490 */
+    --accent-hover: 11 90 114; /* #0B5A72 */
+    --accent-fg: 255 255 255;
+  }
+  .dark[data-empresa="memorialpets"] {
+    --accent: 45 212 191; /* #2DD4BF */
+    --accent-hover: 94 234 212; /* #5EEAD4 */
+    --accent-fg: 4 47 46; /* #042F2E */
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-surface text-content font-sans antialiased;
+  }
+
+  /* Cifras siempre con figuras tabulares para alinear columnas de montos. */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  /* Foco visible y consistente (accesibilidad). */
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-surface;
+  }
+}

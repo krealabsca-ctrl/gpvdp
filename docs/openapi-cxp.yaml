@@ -1,0 +1,319 @@
+openapi: 3.1.0
+info:
+  title: GPVDP ERP — API CxP (Cuentas por Pagar)
+  version: 0.1.0
+  description: >
+    Contrato del módulo CxP. Todos los endpoints están scoped a la empresa activa
+    (empresa_id del token, vía middleware de tenant). Fase 2 en construcción:
+    por ahora, maestro de proveedores. El flujo de documentos y aprobaciones se
+    agrega cuando el Director Financiero defina las reglas.
+servers:
+  - url: http://localhost:8080/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: Proveedores
+  - name: Documentos
+
+paths:
+  /cxp/proveedores:
+    get:
+      tags: [Proveedores]
+      summary: Listar proveedores (filtrable por texto)
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, default: 100 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListaProveedores' }
+    post:
+      tags: [Proveedores]
+      summary: Crear proveedor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProveedorInput' }
+      responses:
+        "201":
+          description: Creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Proveedor' }
+        "409": { $ref: '#/components/responses/Error' }
+
+  /cxp/proveedores/{id}:
+    get:
+      tags: [Proveedores]
+      summary: Obtener proveedor
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Proveedor' }
+        "404": { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [Proveedores]
+      summary: Actualizar proveedor
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProveedorInput' }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Proveedor' }
+        "404": { $ref: '#/components/responses/Error' }
+        "409": { $ref: '#/components/responses/Error' }
+
+  /cxp/proveedores/{id}/desactivar:
+    post:
+      tags: [Proveedores]
+      summary: Desactivar (baja lógica) un proveedor
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: OK }
+        "404": { $ref: '#/components/responses/Error' }
+
+  /cxp/documentos:
+    get:
+      tags: [Documentos]
+      summary: Listar documentos CxP (filtrable por estado/proveedor)
+      parameters:
+        - { name: estado, in: query, schema: { type: string, enum: [RECIBIDO, REVISADO, APROBADO, PROGRAMADO, PAGADO, CONCILIADO] } }
+        - { name: proveedor_id, in: query, schema: { type: string, format: uuid } }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, default: 100 } }
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/ListaDocumentos' } } }
+    post:
+      tags: [Documentos]
+      summary: Crear documento CxP (manual o desde XML 4.4)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DocumentoInput' } } }
+      responses:
+        "201":
+          description: Creado
+          content: { application/json: { schema: { $ref: '#/components/schemas/Documento' } } }
+        "404": { $ref: '#/components/responses/Error' }
+        "409": { $ref: '#/components/responses/Error' }
+
+  /cxp/documentos/{id}:
+    get:
+      tags: [Documentos]
+      summary: Obtener documento CxP
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Documento' } } }
+        "404": { $ref: '#/components/responses/Error' }
+
+  /cxp/documentos/{id}/revisar:
+    post:
+      tags: [Documentos]
+      summary: "RECIBIDO → REVISADO (rol Supervisor/Director/Admin)"
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Documento' } } } }
+        "409": { $ref: '#/components/responses/Error' }
+
+  /cxp/documentos/{id}/aprobar:
+    post:
+      tags: [Documentos]
+      summary: "Registra aprobación; al reunir las firmas requeridas por monto pasa a APROBADO"
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Documento' } } } }
+        "409": { $ref: '#/components/responses/Error' }
+
+  /cxp/documentos/{id}/programar:
+    post:
+      tags: [Documentos]
+      summary: "APROBADO → PROGRAMADO (fija fecha de pago y genera la huella)"
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fecha_pago_programada]
+              properties:
+                fecha_pago_programada: { type: string, format: date }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Documento' } } } }
+        "409": { $ref: '#/components/responses/Error' }
+
+  /cxp/documentos/{id}/pagar:
+    post:
+      tags: [Documentos]
+      summary: "PROGRAMADO → PAGADO"
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Documento' } } } }
+        "409": { $ref: '#/components/responses/Error' }
+
+  /cxp/documentos/{id}/conciliar:
+    post:
+      tags: [Documentos]
+      summary: "PAGADO → CONCILIADO"
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Documento' } } } }
+        "409": { $ref: '#/components/responses/Error' }
+
+  /cxp/pagos/archivo:
+    get:
+      tags: [Documentos]
+      summary: Archivo de pago (CSV SINPE) de los documentos PROGRAMADOS
+      parameters:
+        - { name: fecha, in: query, schema: { type: string, format: date }, description: "opcional; solo pagos programados hasta esa fecha" }
+      responses:
+        "200":
+          description: "CSV: Cedula, Nombre, IBAN, Moneda, MontoNeto, Descripcion (huella), Consecutivo"
+          content:
+            text/csv:
+              schema: { type: string }
+
+  /cxp/conciliacion/match:
+    post:
+      tags: [Documentos]
+      summary: Concilia un movimiento bancario con un pago CxP por huella (Bancos↔CxP)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [descripcion]
+              properties:
+                descripcion: { type: string, description: "descripción del movimiento bancario (contiene la huella)" }
+                monto: { type: string, description: decimal }
+                fecha: { type: string, format: date }
+      responses:
+        "200":
+          description: Resultado del emparejamiento
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conciliado: { type: boolean }
+                  documento: { $ref: '#/components/schemas/Documento' }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+    Proveedor:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        nombre: { type: string }
+        tipo_identificacion: { type: string, enum: [FISICA, JURIDICA, DIMEX, NITE] }
+        identificacion: { type: string }
+        email: { type: string }
+        telefono: { type: string }
+        iban: { type: string }
+        retencion_renta_pct: { type: string, description: decimal }
+        exento_iva: { type: boolean }
+        activo: { type: boolean }
+    ProveedorInput:
+      type: object
+      required: [nombre]
+      properties:
+        nombre: { type: string }
+        tipo_identificacion: { type: string, enum: [FISICA, JURIDICA, DIMEX, NITE] }
+        identificacion: { type: string }
+        email: { type: string }
+        telefono: { type: string }
+        iban: { type: string }
+        retencion_renta_pct: { type: string, description: decimal }
+        exento_iva: { type: boolean }
+    ListaProveedores:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Proveedor' }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+    Documento:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        proveedor_id: { type: string, format: uuid }
+        proveedor: { type: string }
+        clave: { type: string }
+        consecutivo: { type: string }
+        fecha_emision: { type: string, format: date }
+        moneda: { type: string, enum: [CRC, USD] }
+        subtotal: { type: string, description: decimal }
+        iva: { type: string, description: decimal }
+        retencion: { type: string, description: decimal }
+        total: { type: string, description: decimal }
+        total_crc: { type: string, description: decimal }
+        estado: { type: string, enum: [RECIBIDO, REVISADO, APROBADO, PROGRAMADO, PAGADO, CONCILIADO] }
+        fecha_pago_programada: { type: string, format: date, nullable: true }
+        huella: { type: string }
+        descripcion: { type: string }
+    DocumentoInput:
+      type: object
+      required: [proveedor_id, clave, fecha_emision, moneda, total]
+      properties:
+        proveedor_id: { type: string, format: uuid }
+        clave: { type: string }
+        consecutivo: { type: string }
+        fecha_emision: { type: string, format: date }
+        moneda: { type: string, enum: [CRC, USD] }
+        subtotal: { type: string, description: decimal }
+        iva: { type: string, description: decimal }
+        retencion: { type: string, description: decimal }
+        total: { type: string, description: decimal }
+        tc: { type: string, description: "decimal; requerido si moneda=USD" }
+        descripcion: { type: string }
+    ListaDocumentos:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Documento' }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }

@@ -1,0 +1,115 @@
+# GPVDP ERP — PRODUCCIÓN en un VPS (Linux).
+#
+# Diferencias con el compose de desarrollo, y por qué:
+#   · El frontend va COMPILADO (archivos estáticos servidos por Caddy), no con el dev server.
+#   · Caddy es el único servicio con puertos hacia internet (80 y 443) y resuelve el HTTPS solo.
+#   · La base de datos y el backend NO publican ningún puerto: se hablan por la red interna.
+#   · Los secretos salen de un archivo .env que genera el instalador, no están escritos acá.
+#   · Todo lleva `restart: unless-stopped` para sobrevivir a un reinicio del servidor.
+#
+# Se usa así (siempre desde la raíz del proyecto):
+#   docker compose -f deploy/docker-compose.prod.yml up -d --build
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # NO se fija el idioma (LANG) de la base a propósito: se deja el default de la imagen,
+      # `en_US.utf8` con proveedor libc, que es EXACTAMENTE el de la base de desarrollo. Igualar
+      # los dos ambientes importa porque el idioma define cómo se ORDENAN los textos con tildes
+      # y ñ: si producción ordenara distinto, los mismos datos saldrían en otro orden en los
+      # reportes y nadie entendería por qué.
+      # (Probado: poner `LANG: es_CR.utf8` rompe el arranque — ese locale no existe en la
+      #  imagen y initdb falla con «invalid locale settings».)
+    # SIN `ports`: nadie fuera del servidor puede tocar la base. El backend la alcanza por
+    # el nombre `db` en la red interna de Docker.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    # Un tope de memoria evita que un pico de la base tumbe el servidor entero.
+    deploy:
+      resources:
+        limits:
+          memory: ${LIMITE_MEMORIA_DB:-1g}
+
+  backend:
+    build:
+      context: ../backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      PORT: "8080"
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET}
+      ACCESS_TTL: ${ACCESS_TTL:-15m}
+      REFRESH_TTL: ${REFRESH_TTL:-168h}
+      # Mismo dominio para pantalla y API ⇒ el navegador no hace peticiones entre orígenes y
+      # CORS no interviene. Se declara igual para poder llamar la API desde otra herramienta.
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      # El instalador lo pone en "true" SOLO para el primer arranque y después lo apaga:
+      # con la base ya poblada, el seed reactiva catálogos que alguien desactivó a propósito.
+      SEED_ON_START: ${SEED_ON_START:-false}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD}
+      CIERRE_PERIODO_BLOQUEANTE: "true"
+      TZ: America/Costa_Rica
+    # SIN `ports`: solo Caddy le habla, por la red interna.
+    depends_on:
+      db:
+        condition: service_healthy
+    # El healthcheck no es decoración: hace que Caddy espere a que el backend esté listo en el
+    # primer arranque, y que Docker reinicie el contenedor si el proceso queda vivo pero mudo.
+    # `wget` viene en la imagen (el instalador ya lo usa para comprobar el arranque).
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/v1/healthz | grep -q ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+    # Tope de memoria del backend. Existe porque hay caminos que trabajan con archivos enteros en
+    # memoria: el importador de estados de cuenta lee el .xlsx completo, y la clasificación en
+    # bloque desde Excel arma hasta 50.000 filas con sus montos. Sin tope, un archivo grande podía
+    # llevarse toda la memoria del servidor y matar a la BASE, que es lo que no se puede perder.
+    # 2 GB es holgado para esos picos; si un archivo lo excede, muere el backend (se reinicia solo)
+    # y la base queda intacta.
+    deploy:
+      resources:
+        limits:
+          memory: ${LIMITE_MEMORIA_BACKEND:-2g}
+
+  web:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    environment:
+      # El dominio con el que Caddy pide el certificado. ":80" = HTTP sin certificado.
+      DOMINIO: ${DOMINIO}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Los certificados tienen que sobrevivir a un redespliegue: si se pierden, Caddy los
+      # vuelve a pedir y Let's Encrypt tiene un límite de 5 por semana por dominio.
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  pgdata: {}
+  caddy_data: {}
+  caddy_config: {}
+  caddy_logs: {}

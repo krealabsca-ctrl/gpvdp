@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "Bundler",
+    "allowSyntheticDefaultImports": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    // `composite` es obligatorio en un proyecto referenciado desde otro tsconfig
+    // ("references"), y por eso mismo no puede llevar "noEmit": true. Sin estas dos cosas
+    // `tsc -b` —o sea `npm run build`— falla con TS6306/TS6310 y no hay build de producción.
+    "composite": true,
+    "emitDeclarationOnly": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    // vite.config.ts usa `node:path` y `__dirname`: sin los tipos de Node no compilan.
+    "types": ["node"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": ["vite.config.ts", "tailwind.config.ts", "postcss.config.js"]
+}

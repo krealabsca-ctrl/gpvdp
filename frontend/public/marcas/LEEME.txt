@@ -1,0 +1,28 @@
+LOGOS OFICIALES DE LAS EMPRESAS
+================================
+
+Poné acá el archivo de cada empresa con EXACTAMENTE estos nombres:
+
+    valle-de-paz.svg        (o .png)
+    coopeprofa.svg          (o .png)
+    memorial-pets.svg       (o .png)
+
+Cómo los usa el sistema
+-----------------------
+- El selector de empresa (/seleccionar-empresa) los muestra en la tarjeta de
+  cada empresa, sobre un recuadro blanco (el área de respeto de la marca), así
+  que se ven igual en tema claro y oscuro.
+- Si el archivo no está, la tarjeta muestra la inicial de la empresa en su color
+  de marca. NO se dibuja ningún logo aproximado.
+- El nombre del archivo se deriva del nombre de la empresa en la base de datos
+  (ver marcaDeEmpresa en src/components/shell/LogoEmpresa.tsx). Si se agrega una
+  empresa nueva, hay que agregarla ahí.
+
+Formato recomendado
+-------------------
+1. SVG es lo ideal: escala sin perder nitidez y pesa menos.
+2. Si solo hay PNG, que sea de al menos 600 px de ancho y con FONDO
+   TRANSPARENTE (no blanco), para que respire dentro del recuadro.
+3. Recortado al logotipo, sin márgenes grandes alrededor.
+
+El archivo se busca primero como .svg y, si no existe, como .png.

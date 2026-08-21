@@ -1,0 +1,609 @@
+openapi: 3.1.0
+info:
+  title: GPVDP ERP — API Bancos
+  version: 1.0.0
+  description: >
+    Contrato del módulo Bancos. Todos los endpoints están scoped a la empresa activa
+    (empresa_id se toma del token/contexto vía middleware de tenant, NO del cliente).
+servers:
+  - url: http://localhost:8080/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: Importaciones
+  - name: Movimientos
+  - name: Catalogo
+  - name: TipoCambio
+  - name: Cuadre
+  - name: Dashboard
+  - name: Proyecciones
+  - name: Conciliacion
+
+paths:
+  /bancos/cuentas:
+    get:
+      tags: [Catalogo]
+      summary: Cuentas de la empresa activa (selector del importador)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CuentaBancaria' }
+
+  /bancos/importaciones:
+    post:
+      tags: [Importaciones]
+      summary: Subir un estado de cuenta (Excel) para previsualizar
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                cuenta_bancaria_id: { type: string, format: uuid }
+                archivo: { type: string, format: binary }
+      responses:
+        "201":
+          description: Importación creada y previsualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PreviewResult' }
+        "400": { $ref: '#/components/responses/Error' }
+        "404": { $ref: '#/components/responses/Error' }
+        "422": { $ref: '#/components/responses/Error' }
+
+  /bancos/importaciones/{importacionId}/preview:
+    get:
+      tags: [Importaciones]
+      summary: Previsualización con marca de duplicados e inconsistencias
+      parameters: [ { $ref: '#/components/parameters/importacionId' } ]
+      responses:
+        "200":
+          description: Previsualización
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PreviewResult' }
+        "404": { $ref: '#/components/responses/Error' }
+
+  /bancos/importaciones/{importacionId}/confirmar:
+    post:
+      tags: [Importaciones]
+      summary: Confirmar importación (incluir/excluir duplicados)
+      parameters: [ { $ref: '#/components/parameters/importacionId' } ]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                excluir:
+                  type: array
+                  description: natural_key de las líneas a excluir (duplicados reales)
+                  items: { type: string }
+      responses:
+        "200":
+          description: Confirmada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  importacion_id: { type: string, format: uuid }
+                  insertados: { type: integer }
+        "404": { $ref: '#/components/responses/Error' }
+
+  /bancos/movimientos:
+    get:
+      tags: [Movimientos]
+      summary: Hoja de trabajo con filtros
+      parameters:
+        - { name: desde, in: query, schema: { type: string, format: date } }
+        - { name: hasta, in: query, schema: { type: string, format: date } }
+        - { name: periodo, in: query, schema: { type: string, example: "2026-07" } }
+        - { name: concepto_id, in: query, schema: { type: string, format: uuid } }
+        - { name: clasificacion_id, in: query, schema: { type: string, format: uuid } }
+        - { name: estado_clasificacion, in: query, schema: { type: string, enum: [NO_IDENTIFICADO, AUTO, REVISADO] } }
+        - { name: tipo, in: query, schema: { type: string, enum: [DEBITO, CREDITO] } }
+        - { name: q, in: query, schema: { type: string }, description: "buscar por referencia/descripción" }
+        - { name: orden, in: query, schema: { type: string, example: "fecha:desc" } }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, default: 100 } }
+      responses:
+        "200":
+          description: Listado + totales
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListaMovimientos' }
+
+  /bancos/movimientos/{movimientoId}/clasificacion:
+    patch:
+      tags: [Movimientos]
+      summary: Clasificar/reclasificar un movimiento (queda REVISADO)
+      parameters: [ { $ref: '#/components/parameters/movimientoId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [concepto_id, clasificacion_id]
+              properties:
+                concepto_id: { type: string, format: uuid }
+                clasificacion_id: { type: string, format: uuid }
+      responses:
+        "200": { description: OK }
+        "422": { $ref: '#/components/responses/Error' }
+
+  /bancos/reglas:
+    post:
+      tags: [Catalogo]
+      summary: Crear regla de clasificación (incluye creación por bloque)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReglaClasificacion' }
+      responses:
+        "201": { description: Creada }
+
+  /bancos/catalogo/conceptos:
+    get:
+      tags: [Catalogo]
+      summary: Conceptos de la empresa activa
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ConceptoCatalogo' }
+    post:
+      tags: [Catalogo]
+      summary: Crear concepto
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nombre]
+              properties:
+                nombre: { type: string }
+      responses:
+        "201": { description: Creado, content: { application/json: { schema: { $ref: '#/components/schemas/ConceptoCatalogo' } } } }
+        "409": { $ref: '#/components/responses/Error' }
+
+  /bancos/catalogo/clasificaciones:
+    get:
+      tags: [Catalogo]
+      summary: Clasificaciones de la empresa activa
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ClasificacionCatalogo' }
+    post:
+      tags: [Catalogo]
+      summary: Crear clasificación (bajo un concepto de la empresa)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [concepto_id, nombre]
+              properties:
+                concepto_id: { type: string, format: uuid }
+                nombre: { type: string }
+                cuenta_contable_futura: { type: string }
+      responses:
+        "201": { description: Creada, content: { application/json: { schema: { $ref: '#/components/schemas/ClasificacionCatalogo' } } } }
+        "404": { $ref: '#/components/responses/Error' }
+        "409": { $ref: '#/components/responses/Error' }
+
+  /bancos/catalogo/palabras-clave/export:
+    get:
+      tags: [Catalogo]
+      summary: Exportar diccionario palabra_clave -> (concepto, clasificacion)
+      responses:
+        "200": { description: OK }
+  /bancos/catalogo/palabras-clave/import:
+    post:
+      tags: [Catalogo]
+      summary: Importar diccionario de palabras clave
+      responses:
+        "200": { description: OK }
+
+  /bancos/traslados/propuestas:
+    get:
+      tags: [Movimientos]
+      summary: Pares candidatos de traslado/overnight del período
+      parameters:
+        - { name: periodo, in: query, schema: { type: string, example: "2026-07" } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PropuestaTraslado' }
+
+  /bancos/traslados/desemparejar:
+    post:
+      tags: [Movimientos]
+      summary: Deshacer un emparejamiento de traslado
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [movimiento_id]
+              properties:
+                movimiento_id: { type: string, format: uuid }
+      responses:
+        "200": { description: OK }
+
+  /bancos/periodos/{anio}/{mes}:
+    get:
+      tags: [Cuadre]
+      summary: Estado del cierre de período
+      parameters:
+        - { name: anio, in: path, required: true, schema: { type: integer } }
+        - { name: mes, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  anio: { type: integer }
+                  mes: { type: integer }
+                  cerrado: { type: boolean }
+
+  /bancos/periodos/{anio}/{mes}/cerrar:
+    post:
+      tags: [Cuadre]
+      summary: Cerrar período (bloqueante si hay No-identificados; requiere rol autorizado)
+      parameters:
+        - { name: anio, in: path, required: true, schema: { type: integer } }
+        - { name: mes, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: Cerrado }
+        "409": { $ref: '#/components/responses/Error' }
+
+  /bancos/traslados/emparejar:
+    post:
+      tags: [Movimientos]
+      summary: Confirmar emparejamiento de un traslado/overnight (con TOLERANCIA_TRASLADO_USD)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [movimiento_debito_id, movimiento_credito_id]
+              properties:
+                movimiento_debito_id: { type: string, format: uuid }
+                movimiento_credito_id: { type: string, format: uuid }
+      responses:
+        "200": { description: Emparejado }
+        "409": { $ref: '#/components/responses/Error' }
+
+  /bancos/cotizaciones:
+    post:
+      tags: [TipoCambio]
+      summary: Registrar una cotización del TC (día 1 / 15 / último)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fecha, valor, fuente]
+              properties:
+                fecha: { type: string, format: date }
+                valor: { type: string, description: decimal }
+                fuente: { type: string, enum: [BCCR, MANUAL] }
+      responses:
+        "201": { description: Registrada }
+
+  /bancos/tipo-cambio/{anio}/{mes}:
+    get:
+      tags: [TipoCambio]
+      summary: Estado del TC del mes (provisional/congelado)
+      parameters:
+        - { name: anio, in: path, required: true, schema: { type: integer } }
+        - { name: mes, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TipoCambioMes' }
+  /bancos/tipo-cambio/{anio}/{mes}/congelar:
+    post:
+      tags: [TipoCambio]
+      summary: Congelar TC del mes = promedio(dia1, dia15, ultimo). Requiere rol autorizado + MFA.
+      parameters:
+        - { name: anio, in: path, required: true, schema: { type: integer } }
+        - { name: mes, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: Congelado }
+        "403": { $ref: '#/components/responses/Error' }
+
+  /bancos/cuadre:
+    get:
+      tags: [Cuadre]
+      summary: Totales por concepto (crédito/débito) del período
+      parameters:
+        - { name: periodo, in: query, schema: { type: string, example: "2026-07" } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    concepto_id: { type: string, format: uuid }
+                    concepto: { type: string }
+                    total_creditos: { type: string }
+                    total_debitos: { type: string }
+
+  /bancos/dashboard:
+    get:
+      tags: [Dashboard]
+      summary: KPIs del período (ingresos/gastos/EBITDA/comparativo + calendarios)
+      parameters:
+        - { name: periodo, in: query, schema: { type: string, example: "2026-07" } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DashboardData' } } } }
+
+  /bancos/proyecciones:
+    post:
+      tags: [Proyecciones]
+      summary: Calcular/guardar un escenario de proyección de cierre de mes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                metodo: { type: string, enum: [HISTORICO_2025, PROMEDIO_2026, COINCIDENCIA] }
+                lineas_ingreso: { type: array, items: { type: string } }
+                rango_dias: { type: object, properties: { desde: { type: integer }, hasta: { type: integer } } }
+                meta_crecimiento_pct: { type: number, example: 6 }
+      responses:
+        "200": { description: OK }
+
+  /bancos/conciliacion/match:
+    post:
+      tags: [Conciliacion]
+      summary: "Contrato con CxP: emparejar pago (descripción única + monto + fecha) con movimiento bancario"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [descripcion_unica, monto, fecha]
+              properties:
+                descripcion_unica: { type: string }
+                monto: { type: string, description: decimal }
+                fecha: { type: string, format: date }
+      responses:
+        "200":
+          description: Movimiento emparejado o candidatos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  movimiento_id: { type: string, format: uuid, nullable: true }
+                  candidatos: { type: array, items: { $ref: '#/components/schemas/MovimientoBancario' } }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    importacionId: { name: importacionId, in: path, required: true, schema: { type: string, format: uuid } }
+    movimientoId: { name: movimientoId, in: path, required: true, schema: { type: string, format: uuid } }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ImportacionCreada:
+      description: Importación creada
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Importacion' }
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, example: MOVIMIENTO_DUPLICADO }
+        message: { type: string }
+    Importacion:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        cuenta_bancaria_id: { type: string, format: uuid }
+        source_file_hash: { type: string }
+        nombre_archivo: { type: string }
+        estado: { type: string, enum: [CARGADA, PREVISUALIZADA, CONFIRMADA, CERRADA] }
+    MovimientoBancario:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        cuenta_bancaria_id: { type: string, format: uuid }
+        importacion_id: { type: string, format: uuid }
+        fecha: { type: string, format: date }
+        documento: { type: string }
+        descripcion: { type: string }
+        debito: { type: string, description: decimal }
+        credito: { type: string, description: decimal }
+        moneda_original: { type: string, enum: [CRC, USD] }
+        monto_original: { type: string, description: decimal }
+        monto_crc: { type: string, description: decimal }
+        tc_aplicado: { type: string, description: decimal, nullable: true }
+        concepto_id: { type: string, format: uuid, nullable: true }
+        clasificacion_id: { type: string, format: uuid, nullable: true }
+        estado_clasificacion: { type: string, enum: [NO_IDENTIFICADO, AUTO, REVISADO] }
+        confianza: { type: number, nullable: true }
+        es_traslado: { type: boolean }
+        par_traslado_id: { type: string, format: uuid, nullable: true }
+        indice_ocurrencia: { type: integer }
+        incluido: { type: boolean }
+        origen_historico: { type: boolean }
+    ReglaClasificacion:
+      type: object
+      required: [nombre, aplica_a, concepto_id, clasificacion_id]
+      properties:
+        nombre: { type: string }
+        aplica_a: { type: string, enum: [DEBITO, CREDITO, MIXTO] }
+        concepto_id: { type: string, format: uuid }
+        clasificacion_id: { type: string, format: uuid }
+        prioridad: { type: integer }
+        palabras_clave: { type: array, items: { type: string } }
+    TipoCambioMes:
+      type: object
+      properties:
+        anio: { type: integer }
+        mes: { type: integer }
+        estado: { type: string, enum: [PROVISIONAL, CONGELADO] }
+        valor_congelado: { type: string, description: decimal, nullable: true }
+        cotizaciones:
+          type: array
+          items: { $ref: '#/components/schemas/Cotizacion' }
+    Cotizacion:
+      type: object
+      properties:
+        fecha: { type: string, format: date }
+        valor: { type: string, description: decimal }
+        fuente: { type: string, enum: [BCCR, MANUAL] }
+    DashboardData:
+      type: object
+      properties:
+        periodo: { type: string }
+        ingresos: { type: string, description: decimal }
+        gastos: { type: string, description: decimal }
+        ebitda: { type: string, description: decimal }
+        no_identificados: { type: integer }
+        comparativo:
+          type: object
+          properties:
+            periodo_anterior: { type: string }
+            ingresos: { type: string, description: decimal }
+            gastos: { type: string, description: decimal }
+            ebitda: { type: string, description: decimal }
+    Resumen:
+      type: object
+      properties:
+        leidas: { type: integer }
+        nuevas: { type: integer }
+        duplicados_reales: { type: integer }
+        reimportacion: { type: integer }
+    MovimientoPreview:
+      type: object
+      properties:
+        natural_key: { type: string }
+        fecha: { type: string, format: date }
+        documento: { type: string }
+        descripcion: { type: string }
+        debito: { type: string, description: decimal }
+        credito: { type: string, description: decimal }
+        moneda: { type: string, enum: [CRC, USD] }
+        indice_ocurrencia: { type: integer }
+        estado_duplicado: { type: string, enum: [NUEVO, DUPLICADO_REAL, REIMPORTACION] }
+    PreviewResult:
+      type: object
+      properties:
+        importacion_id: { type: string, format: uuid }
+        banco: { type: string }
+        iban_archivo: { type: string }
+        resumen: { $ref: '#/components/schemas/Resumen' }
+        movimientos:
+          type: array
+          items: { $ref: '#/components/schemas/MovimientoPreview' }
+    CuentaBancaria:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        alias: { type: string }
+        banco: { type: string }
+        iban: { type: string }
+        moneda: { type: string, enum: [CRC, USD] }
+    PropuestaTraslado:
+      type: object
+      properties:
+        debito_id: { type: string, format: uuid }
+        credito_id: { type: string, format: uuid }
+        fecha_debito: { type: string, format: date }
+        fecha_credito: { type: string, format: date }
+        cuenta_debito: { type: string }
+        cuenta_credito: { type: string }
+        monto_debito: { type: string, description: decimal }
+        monto_credito: { type: string, description: decimal }
+    ConceptoCatalogo:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        nombre: { type: string }
+    ClasificacionCatalogo:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        concepto_id: { type: string, format: uuid }
+        concepto: { type: string }
+        nombre: { type: string }
+    MovimientoRow:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        fecha: { type: string, format: date }
+        documento: { type: string }
+        descripcion: { type: string }
+        debito: { type: string, description: decimal }
+        credito: { type: string, description: decimal }
+        moneda: { type: string, enum: [CRC, USD] }
+        monto_crc: { type: string, description: decimal }
+        concepto_id: { type: string, format: uuid, nullable: true }
+        concepto: { type: string }
+        clasificacion_id: { type: string, format: uuid, nullable: true }
+        clasificacion: { type: string }
+        estado_clasificacion: { type: string, enum: [NO_IDENTIFICADO, AUTO, REVISADO] }
+        confianza: { type: string, description: decimal, nullable: true }
+        es_traslado: { type: boolean }
+    ListaMovimientos:
+      type: object
+      properties:
+        totales:
+          type: object
+          properties:
+            total_debitos: { type: string, description: decimal }
+            total_creditos: { type: string, description: decimal }
+            diferencia: { type: string, description: decimal }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/MovimientoRow' }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }

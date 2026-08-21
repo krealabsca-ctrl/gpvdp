@@ -1,0 +1,7 @@
+node_modules
+dist
+.env.local
+.env.*.local
+npm-debug.log*
+# tipos generados: se regeneran en el build (RUN npm run gen:api)
+src/api/generated/bancos.ts

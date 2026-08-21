@@ -1,0 +1,1 @@
+ALTER TABLE finiquito DROP COLUMN IF EXISTS patronal;
