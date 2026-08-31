@@ -1,0 +1,35 @@
+# ─────────────────────────────────────────────────────────────
+# Secretos — NUNCA se commitean.
+# Los archivos de ejemplo (.env.example, .env.prueba.ejemplo) SÍ
+# van al repo: no llevan valores reales.
+# ─────────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ─────────────────────────────────────────────────────────────
+# Respaldos de la base: son volcados con los movimientos
+# bancarios reales. Un respaldo en el repo es una filtración.
+# ─────────────────────────────────────────────────────────────
+respaldos/
+*.dump
+*.sql.gz
+
+# Paquetes de entrega generados por deploy/empaquetar.sh
+gpvdp-erp-*.tar.gz
+
+# ─────────────────────────────────────────────────────────────
+# Basura del sistema operativo
+# ─────────────────────────────────────────────────────────────
+._*
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─────────────────────────────────────────────────────────────
+# Compilados y dependencias
+# ─────────────────────────────────────────────────────────────
+node_modules/
+dist/
+backend/api
+backend/bin/
