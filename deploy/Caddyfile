@@ -61,6 +61,18 @@
 		# No adivinar el tipo de archivo (evita que un archivo subido se ejecute como script).
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
+		# HSTS: una vez que el navegador vio el sitio por HTTPS, exige HTTPS por un año y nunca
+		# vuelve a intentar HTTP. Cierra el «SSL strip» (un atacante en medio que degrada a HTTP
+		# en la primera visita). En modo :80 (prueba por IP, sin TLS) es inofensivo: el navegador
+		# ignora HSTS recibido sobre HTTP (RFC 6797). No se usa `preload` a propósito: es difícil
+		# de revertir y comprometería subdominios que quizá no van por HTTPS.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		# CSP: la app solo carga recursos del MISMO origen y NO ejecuta scripts inline
+		# (`script-src 'self'`, sin 'unsafe-inline'): si algún día se colara un XSS, el script
+		# inyectado no correría. Los estilos permiten inline ('unsafe-inline') porque React y las
+		# librerías de gráficos aplican estilos por atributo; imágenes y fuentes admiten data:/blob:
+		# por los gráficos y los íconos embebidos. Probado contra el build real (sin violaciones).
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
 		# Ocultar qué servidor es.
 		-Server
 	}
