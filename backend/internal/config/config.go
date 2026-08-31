@@ -66,6 +66,11 @@ func Load() (Config, error) {
 	if cfg.JWTSecret == "" {
 		return cfg, fmt.Errorf("config: JWT_SECRET es obligatorio")
 	}
+	// Los access tokens se firman con HS256 (clave simétrica). Una clave corta se crackea
+	// offline y permite forjar cualquier token (incluido rol ADMIN). Se exige ≥ 32 bytes.
+	if len(cfg.JWTSecret) < 32 {
+		return cfg, fmt.Errorf("config: JWT_SECRET debe tener al menos 32 caracteres (tiene %d)", len(cfg.JWTSecret))
+	}
 	return cfg, nil
 }
 
