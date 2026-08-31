@@ -29,6 +29,15 @@ type Repository interface {
 	RefreshPorHash(ctx context.Context, tokenHash string) (RefreshRecord, error)
 	// RevocarRefresh revoca la sesión y devuelve cuántas filas cambió (0 si ya estaba revocada).
 	RevocarRefresh(ctx context.Context, id string) (int64, error)
+	// RevocarSesionesDeUsuario revoca TODAS las sesiones vigentes del usuario (al cambiar la
+	// contraseña se cierran las demás sesiones abiertas: si la cuenta estaba comprometida, el
+	// atacante pierde el refresh que tenía). Devuelve cuántas revocó.
+	RevocarSesionesDeUsuario(ctx context.Context, usuarioID string) (int64, error)
+	// RegistrarIntentoFallido incrementa el contador de fallos consecutivos y, al llegar al
+	// umbral, fija la ventana de bloqueo. Devuelve el estado resultante para decidir la respuesta.
+	RegistrarIntentoFallido(ctx context.Context, usuarioID string, umbral int, ventana time.Duration) (intentos int, bloqueadoHasta *time.Time, err error)
+	// LimpiarIntentos pone el contador a 0 y quita el bloqueo (login exitoso).
+	LimpiarIntentos(ctx context.Context, usuarioID string) error
 }
 
 type pgRepository struct{ pool *pgxpool.Pool }
@@ -37,9 +46,9 @@ type pgRepository struct{ pool *pgxpool.Pool }
 func NewRepository(pool *pgxpool.Pool) Repository { return &pgRepository{pool: pool} }
 
 func (r *pgRepository) UsuarioByEmail(ctx context.Context, email string) (Usuario, error) {
-	const q = `SELECT id::text, nombre, email, password_hash, activo, debe_cambiar_password FROM usuario WHERE email = $1`
+	const q = `SELECT id::text, nombre, email, password_hash, activo, debe_cambiar_password, intentos_fallidos, bloqueado_hasta FROM usuario WHERE email = $1`
 	var u Usuario
-	err := r.pool.QueryRow(ctx, q, email).Scan(&u.ID, &u.Nombre, &u.Email, &u.PasswordHash, &u.Activo, &u.DebeCambiarPassword)
+	err := r.pool.QueryRow(ctx, q, email).Scan(&u.ID, &u.Nombre, &u.Email, &u.PasswordHash, &u.Activo, &u.DebeCambiarPassword, &u.IntentosFallidos, &u.BloqueadoHasta)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Usuario{}, ErrCredenciales
 	}
@@ -50,9 +59,9 @@ func (r *pgRepository) UsuarioByEmail(ctx context.Context, email string) (Usuari
 }
 
 func (r *pgRepository) UsuarioByID(ctx context.Context, id string) (Usuario, error) {
-	const q = `SELECT id::text, nombre, email, password_hash, activo, debe_cambiar_password FROM usuario WHERE id = $1::uuid`
+	const q = `SELECT id::text, nombre, email, password_hash, activo, debe_cambiar_password, intentos_fallidos, bloqueado_hasta FROM usuario WHERE id = $1::uuid`
 	var u Usuario
-	err := r.pool.QueryRow(ctx, q, id).Scan(&u.ID, &u.Nombre, &u.Email, &u.PasswordHash, &u.Activo, &u.DebeCambiarPassword)
+	err := r.pool.QueryRow(ctx, q, id).Scan(&u.ID, &u.Nombre, &u.Email, &u.PasswordHash, &u.Activo, &u.DebeCambiarPassword, &u.IntentosFallidos, &u.BloqueadoHasta)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Usuario{}, ErrCredenciales
 	}
@@ -147,4 +156,45 @@ func (r *pgRepository) RevocarRefresh(ctx context.Context, id string) (int64, er
 		return 0, fmt.Errorf("auth: revocar refresh: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+func (r *pgRepository) RevocarSesionesDeUsuario(ctx context.Context, usuarioID string) (int64, error) {
+	const q = `UPDATE sesion SET revocado = true WHERE usuario_id = $1::uuid AND revocado = false`
+	tag, err := r.pool.Exec(ctx, q, usuarioID)
+	if err != nil {
+		return 0, fmt.Errorf("auth: revocar sesiones del usuario: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+func (r *pgRepository) RegistrarIntentoFallido(ctx context.Context, usuarioID string, umbral int, ventana time.Duration) (int, *time.Time, error) {
+	// Incremento atómico. Al alcanzar el umbral de fallos consecutivos se fija la ventana de
+	// bloqueo; por debajo del umbral, bloqueado_hasta se conserva (arranca en NULL).
+	const q = `
+		UPDATE usuario
+		   SET intentos_fallidos = intentos_fallidos + 1,
+		       bloqueado_hasta = CASE
+		           WHEN intentos_fallidos + 1 >= $2 THEN now() + make_interval(secs => $3)
+		           ELSE bloqueado_hasta
+		       END,
+		       actualizado_en = now()
+		 WHERE id = $1::uuid
+		RETURNING intentos_fallidos, bloqueado_hasta`
+	var intentos int
+	var hasta *time.Time
+	if err := r.pool.QueryRow(ctx, q, usuarioID, umbral, ventana.Seconds()).Scan(&intentos, &hasta); err != nil {
+		return 0, nil, fmt.Errorf("auth: registrar intento fallido: %w", err)
+	}
+	return intentos, hasta, nil
+}
+
+func (r *pgRepository) LimpiarIntentos(ctx context.Context, usuarioID string) error {
+	// Solo escribe si había algo que limpiar (evita un UPDATE inútil en cada login normal).
+	const q = `
+		UPDATE usuario SET intentos_fallidos = 0, bloqueado_hasta = NULL, actualizado_en = now()
+		 WHERE id = $1::uuid AND (intentos_fallidos <> 0 OR bloqueado_hasta IS NOT NULL)`
+	if _, err := r.pool.Exec(ctx, q, usuarioID); err != nil {
+		return fmt.Errorf("auth: limpiar intentos: %w", err)
+	}
+	return nil
 }

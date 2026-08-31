@@ -23,6 +23,8 @@ const (
 	CodeCredenciales  = "CREDENCIALES_INVALIDAS"
 	CodeEmpresaNoSel  = "EMPRESA_NO_SELECCIONADA"
 	CodeErrorInterno  = "ERROR_INTERNO"
+	// CodeDemasiadosIntentos: se superó el límite de intentos (por IP o por cuenta). HTTP 429.
+	CodeDemasiadosIntentos = "DEMASIADOS_INTENTOS"
 )
 
 // Abort responde con el contrato de error y detiene la cadena de handlers.

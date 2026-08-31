@@ -25,17 +25,47 @@ func NewService(repo Repository, secret string, accessTTL, refreshTTL time.Durat
 	return &Service{repo: repo, secret: secret, accessTTL: accessTTL, refreshTTL: refreshTTL}
 }
 
+// Parámetros del bloqueo por cuenta ante fuerza bruta (complementa el límite por IP).
+const (
+	// maxIntentosLogin: fallos CONSECUTIVOS antes de bloquear la cuenta.
+	maxIntentosLogin = 10
+	// ventanaBloqueo: cuánto dura el bloqueo una vez alcanzado el umbral.
+	ventanaBloqueo = 15 * time.Minute
+)
+
 // Login valida credenciales y emite tokens. El access token de login NO trae empresa.
+//
+// Seguridad:
+//   - Timing uniforme: todos los caminos de fallo pagan un bcrypt (real o dummy), así el
+//     tiempo de respuesta no revela si el email existe (anti-enumeración).
+//   - Bloqueo por cuenta: tras `maxIntentosLogin` fallos seguidos, la cuenta queda bloqueada
+//     `ventanaBloqueo`; un login exitoso reinicia el contador.
 func (s *Service) Login(ctx context.Context, email, password string) (LoginResult, error) {
 	u, err := s.repo.UsuarioByEmail(ctx, email)
 	if err != nil {
-		return LoginResult{}, err // ErrCredenciales cuando no existe
+		VerifyDummy(password) // iguala el tiempo con el de un usuario real (usuario inexistente)
+		return LoginResult{}, ErrCredenciales
+	}
+	// Cuenta bloqueada: se rechaza aunque la contraseña fuera correcta. Se paga el bcrypt dummy
+	// para no distinguir por timing de otros caminos.
+	if u.BloqueadoHasta != nil && u.BloqueadoHasta.After(time.Now()) {
+		VerifyDummy(password)
+		return LoginResult{}, ErrCuentaBloqueada
 	}
 	if !u.Activo {
-		return LoginResult{}, ErrUsuarioInactivo
+		VerifyDummy(password) // no se revela el estado de la cuenta por timing ni por mensaje
+		return LoginResult{}, ErrCredenciales
 	}
 	if !VerifyPassword(u.PasswordHash, password) {
+		intentos, hasta, rerr := s.repo.RegistrarIntentoFallido(ctx, u.ID, maxIntentosLogin, ventanaBloqueo)
+		if rerr == nil && hasta != nil && hasta.After(time.Now()) && intentos >= maxIntentosLogin {
+			return LoginResult{}, ErrCuentaBloqueada
+		}
 		return LoginResult{}, ErrCredenciales
+	}
+	// Login correcto: se limpia cualquier bloqueo o contador de fallos previo.
+	if err := s.repo.LimpiarIntentos(ctx, u.ID); err != nil {
+		return LoginResult{}, err
 	}
 
 	memberships, err := s.repo.Memberships(ctx, u.ID)
@@ -163,7 +193,16 @@ func (s *Service) CambiarPassword(ctx context.Context, usuarioID, actual, nueva 
 	if err != nil {
 		return err
 	}
-	return s.repo.ActualizarPassword(ctx, usuarioID, hash, false)
+	if err := s.repo.ActualizarPassword(ctx, usuarioID, hash, false); err != nil {
+		return err
+	}
+	// Al cambiar la contraseña se revocan las DEMÁS sesiones abiertas: si la cuenta estaba
+	// comprometida, el atacante pierde el refresh token que tuviera. La sesión actual sigue con
+	// su access token vigente (≤ ACCESS_TTL) y luego tendrá que volver a iniciar sesión.
+	if _, err := s.repo.RevocarSesionesDeUsuario(ctx, usuarioID); err != nil {
+		return err
+	}
+	return nil
 }
 
 // nuevoRefresh genera, persiste y devuelve un refresh token en claro (se guarda solo su hash).

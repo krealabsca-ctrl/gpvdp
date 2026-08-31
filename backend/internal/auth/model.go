@@ -1,5 +1,7 @@
 package auth
 
+import "time"
+
 // Usuario representa la identidad de acceso. PasswordHash nunca se serializa a HTTP.
 type Usuario struct {
 	ID           string
@@ -9,6 +11,10 @@ type Usuario struct {
 	Activo       bool
 	// DebeCambiarPassword: contraseña temporal pendiente de cambio (primer ingreso / reset).
 	DebeCambiarPassword bool
+	// IntentosFallidos y BloqueadoHasta implementan el bloqueo por cuenta ante fuerza bruta.
+	// BloqueadoHasta nil o en el pasado ⇒ la cuenta no está bloqueada.
+	IntentosFallidos int
+	BloqueadoHasta   *time.Time
 }
 
 // Membership es la pertenencia de un usuario a una empresa con un rol.
