@@ -98,6 +98,9 @@ func (h *Handler) Login(c *gin.Context) {
 	res, err := h.svc.Login(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
 		switch {
+		case errors.Is(err, ErrCuentaBloqueada):
+			// Mismo 429/mensaje que el límite por IP: no se confirma que la cuenta exista.
+			httpx.Abort(c, http.StatusTooManyRequests, httpx.CodeDemasiadosIntentos, "demasiados intentos, probá de nuevo en unos minutos")
 		case errors.Is(err, ErrCredenciales):
 			httpx.Abort(c, http.StatusUnauthorized, httpx.CodeCredenciales, "credenciales inválidas")
 		case errors.Is(err, ErrUsuarioInactivo):

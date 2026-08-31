@@ -9,10 +9,18 @@ import (
 	"github.com/gpvdp/erp/internal/httpx"
 )
 
+// maxArchivoCxP es el tope de los archivos de CxP que se leen en memoria (XML/Excel de
+// facturación, comprobantes de pago). 24 MiB, igual al límite del borde en Caddy.
+const maxArchivoCxP = 24 << 20
+
 func (h *Handler) leerArchivo(c *gin.Context) ([]byte, bool) {
 	fh, err := c.FormFile("archivo")
 	if err != nil {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "archivo requerido")
+		return nil, false
+	}
+	if fh.Size > maxArchivoCxP {
+		httpx.Abort(c, http.StatusRequestEntityTooLarge, httpx.CodeValidacion, "el archivo excede 24 MB")
 		return nil, false
 	}
 	f, err := fh.Open()
@@ -21,7 +29,7 @@ func (h *Handler) leerArchivo(c *gin.Context) ([]byte, bool) {
 		return nil, false
 	}
 	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(f)
+	data, err := io.ReadAll(io.LimitReader(f, maxArchivoCxP))
 	if err != nil {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "no se pudo leer el archivo")
 		return nil, false

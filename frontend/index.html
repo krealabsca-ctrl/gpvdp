@@ -6,20 +6,9 @@
     <meta name="color-scheme" content="light dark" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Finance Group VDP — ERP</title>
-    <script>
-      // Aplica el tema guardado antes de pintar para evitar parpadeo (FOUC).
-      (function () {
-        try {
-          var t = localStorage.getItem("gpvdp.theme");
-          var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-          if (t === "dark" || (!t && prefersDark)) {
-            document.documentElement.classList.add("dark");
-          }
-        } catch (e) {
-          /* no-op */
-        }
-      })();
-    </script>
+    <!-- Anti-parpadeo del tema. Externo (no inline) para permitir un CSP estricto sin
+         'unsafe-inline'. Ver public/theme-init.js. -->
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

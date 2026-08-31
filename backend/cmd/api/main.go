@@ -143,9 +143,16 @@ func run(migrateOnly bool) error {
 	router := server.NewRouter(cfg, logger, authH, bancosH, cxpH, cxcH, nominaH, rbacH, plantillasH, rbacSvc)
 
 	srv := &http.Server{
-		Addr:              ":" + cfg.Port,
-		Handler:           router,
+		Addr:    ":" + cfg.Port,
+		Handler: router,
+		// Timeouts finitos contra conexiones lentas/colgadas (Slowloris). Los valores dejan aire
+		// a los caminos legítimamente largos: subir e importar un .xlsx grande (ReadTimeout) y
+		// clasificar decenas de miles de filas (WriteTimeout, por encima de los 300 s de Caddy,
+		// para que sea Caddy quien corte primero con un error limpio).
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       120 * time.Second,
+		WriteTimeout:      310 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {

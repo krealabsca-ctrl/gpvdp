@@ -29,3 +29,7 @@ pnpm-debug.log*
 # cliente tipado GENERADO (se produce con `npm run gen:api`)
 src/api/generated/*
 !src/api/generated/.gitkeep
+
+# artefactos de `tsc -b`
+*.tsbuildinfo
+*.config.d.ts

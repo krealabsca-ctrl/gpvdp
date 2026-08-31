@@ -104,6 +104,43 @@ func (f *fakeRepo) RevocarRefresh(_ context.Context, id string) (int64, error) {
 	return 0, nil
 }
 
+func (f *fakeRepo) RevocarSesionesDeUsuario(_ context.Context, usuarioID string) (int64, error) {
+	var n int64
+	for h, rec := range f.refreshHash {
+		if rec.UsuarioID == usuarioID && !rec.Revocado {
+			rec.Revocado = true
+			f.refreshHash[h] = rec
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (f *fakeRepo) RegistrarIntentoFallido(_ context.Context, usuarioID string, umbral int, ventana time.Duration) (int, *time.Time, error) {
+	u, ok := f.byID[usuarioID]
+	if !ok {
+		return 0, nil, ErrCredenciales
+	}
+	u.IntentosFallidos++
+	if u.IntentosFallidos >= umbral {
+		t := time.Now().Add(ventana)
+		u.BloqueadoHasta = &t
+	}
+	f.byID[usuarioID] = u
+	f.byEmail[u.Email] = u
+	return u.IntentosFallidos, u.BloqueadoHasta, nil
+}
+
+func (f *fakeRepo) LimpiarIntentos(_ context.Context, usuarioID string) error {
+	if u, ok := f.byID[usuarioID]; ok {
+		u.IntentosFallidos = 0
+		u.BloqueadoHasta = nil
+		f.byID[usuarioID] = u
+		f.byEmail[u.Email] = u
+	}
+	return nil
+}
+
 // ---- helpers ----
 
 func nuevoServicioDePrueba(t *testing.T) (*Service, *fakeRepo) {
@@ -242,5 +279,91 @@ func TestSelectEmpresaUsuarioInactivo(t *testing.T) {
 
 	if _, _, err := svc.SelectEmpresa(context.Background(), "u3", "emp-x"); !errors.Is(err, ErrUsuarioInactivo) {
 		t.Errorf("SelectEmpresa de usuario inactivo: err = %v, quería ErrUsuarioInactivo", err)
+	}
+}
+
+// ---- tests de endurecimiento (hardening) ----
+
+func TestLoginBloqueoPorFuerzaBruta(t *testing.T) {
+	svc, _ := nuevoServicioDePrueba(t)
+	ctx := context.Background()
+
+	// Los primeros (umbral-1) fallos devuelven credenciales inválidas.
+	for i := 1; i < maxIntentosLogin; i++ {
+		if _, err := svc.Login(ctx, "ana@vdp.com", "malo"); !errors.Is(err, ErrCredenciales) {
+			t.Fatalf("intento %d: err = %v, quería ErrCredenciales", i, err)
+		}
+	}
+	// El fallo que alcanza el umbral bloquea la cuenta.
+	if _, err := svc.Login(ctx, "ana@vdp.com", "malo"); !errors.Is(err, ErrCuentaBloqueada) {
+		t.Fatalf("al alcanzar el umbral: err = %v, quería ErrCuentaBloqueada", err)
+	}
+	// Ya bloqueada, ni siquiera la contraseña correcta entra.
+	if _, err := svc.Login(ctx, "ana@vdp.com", "secreto"); !errors.Is(err, ErrCuentaBloqueada) {
+		t.Errorf("con contraseña correcta pero bloqueada: err = %v, quería ErrCuentaBloqueada", err)
+	}
+}
+
+func TestLoginExitosoLimpiaIntentos(t *testing.T) {
+	svc, repo := nuevoServicioDePrueba(t)
+	ctx := context.Background()
+
+	// Unos cuantos fallos por debajo del umbral.
+	for i := 0; i < 3; i++ {
+		_, _ = svc.Login(ctx, "ana@vdp.com", "malo")
+	}
+	// Un login correcto reinicia el contador.
+	if _, err := svc.Login(ctx, "ana@vdp.com", "secreto"); err != nil {
+		t.Fatalf("Login correcto: %v", err)
+	}
+	if u := repo.byID["u1"]; u.IntentosFallidos != 0 || u.BloqueadoHasta != nil {
+		t.Errorf("tras login correcto: intentos=%d bloqueado=%v, quería 0/nil", u.IntentosFallidos, u.BloqueadoHasta)
+	}
+}
+
+func TestLoginUsuarioInactivoNoRevelaEstado(t *testing.T) {
+	svc, repo := nuevoServicioDePrueba(t)
+	ctx := context.Background()
+
+	u := repo.byID["u1"]
+	u.Activo = false
+	repo.byID["u1"] = u
+	repo.byEmail[u.Email] = u
+
+	// Anti-enumeración: un usuario inactivo devuelve el MISMO error que credenciales malas,
+	// no un "usuario inactivo" que confirmaría que la cuenta existe.
+	if _, err := svc.Login(ctx, "ana@vdp.com", "secreto"); !errors.Is(err, ErrCredenciales) {
+		t.Errorf("usuario inactivo: err = %v, quería ErrCredenciales (no revelar estado)", err)
+	}
+}
+
+func TestCambiarPasswordRevocaSesiones(t *testing.T) {
+	svc, repo := nuevoServicioDePrueba(t)
+	ctx := context.Background()
+
+	// Abre dos sesiones (dos refresh tokens vigentes).
+	if _, err := svc.Login(ctx, "ana@vdp.com", "secreto"); err != nil {
+		t.Fatalf("login 1: %v", err)
+	}
+	if _, err := svc.Login(ctx, "ana@vdp.com", "secreto"); err != nil {
+		t.Fatalf("login 2: %v", err)
+	}
+	vigentes := 0
+	for _, rec := range repo.refreshHash {
+		if rec.UsuarioID == "u1" && !rec.Revocado {
+			vigentes++
+		}
+	}
+	if vigentes < 2 {
+		t.Fatalf("precondición: se esperaban ≥2 sesiones vigentes, hay %d", vigentes)
+	}
+	// Cambiar la contraseña revoca todas las sesiones abiertas.
+	if err := svc.CambiarPassword(ctx, "u1", "secreto", "nuevaClave123"); err != nil {
+		t.Fatalf("CambiarPassword: %v", err)
+	}
+	for _, rec := range repo.refreshHash {
+		if rec.UsuarioID == "u1" && !rec.Revocado {
+			t.Errorf("quedó una sesión vigente tras cambiar la contraseña")
+		}
 	}
 }

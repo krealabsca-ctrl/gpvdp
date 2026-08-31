@@ -14,6 +14,10 @@ import (
 	"github.com/gpvdp/erp/internal/httpx"
 )
 
+// maxEstadoCuenta es el tope del archivo de estado de cuenta que se lee en memoria (24 MiB,
+// igual al límite del borde en Caddy).
+const maxEstadoCuenta = 24 << 20
+
 // Handler expone los endpoints del importador (bajo RequireEmpresa).
 type Handler struct {
 	svc *Service
@@ -60,13 +64,20 @@ func (h *Handler) Subir(c *gin.Context) {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "archivo requerido")
 		return
 	}
+	// Tope de tamaño: el estado de cuenta se lee entero en memoria. Sin este freno un archivo
+	// enorme (por error o a propósito) infla la memoria del backend. Caddy ya corta a 24 MB en
+	// el borde; este es el mismo límite como defensa en profundidad si se llega al backend directo.
+	if fh.Size > maxEstadoCuenta {
+		httpx.Abort(c, http.StatusRequestEntityTooLarge, httpx.CodeValidacion, "el archivo excede 24 MB")
+		return
+	}
 	f, err := fh.Open()
 	if err != nil {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "no se pudo leer el archivo")
 		return
 	}
 	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(f)
+	data, err := io.ReadAll(io.LimitReader(f, maxEstadoCuenta))
 	if err != nil {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "no se pudo leer el archivo")
 		return

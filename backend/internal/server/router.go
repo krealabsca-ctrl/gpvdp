@@ -33,9 +33,12 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 	v1 := r.Group("/v1")
 	v1.GET("/healthz", health)
 
-	// Públicos
-	v1.POST("/auth/login", authH.Login)
-	v1.POST("/auth/refresh", authH.Refresh)
+	// Públicos. Con límite de frecuencia por IP para frenar fuerza bruta / credential stuffing.
+	// login: 10/min (un humano no falla 10 veces por minuto); refresh: 30/min (el cliente lo
+	// llama de forma legítima al vencer el access token). La IP sale de c.ClientIP(): como el
+	// backend solo recibe tráfico de Caddy, es la IP real que Caddy pone en X-Forwarded-For.
+	v1.POST("/auth/login", rateLimit(10, time.Minute), authH.Login)
+	v1.POST("/auth/refresh", rateLimit(30, time.Minute), authH.Refresh)
 
 	// Requieren access token
 	authed := v1.Group("")

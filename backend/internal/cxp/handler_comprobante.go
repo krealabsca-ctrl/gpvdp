@@ -20,13 +20,17 @@ func (h *Handler) AdjuntarComprobante(c *gin.Context) {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "archivo requerido")
 		return
 	}
+	if fh.Size > maxArchivoCxP {
+		httpx.Abort(c, http.StatusRequestEntityTooLarge, httpx.CodeValidacion, "el archivo excede 24 MB")
+		return
+	}
 	f, err := fh.Open()
 	if err != nil {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "no se pudo leer el archivo")
 		return
 	}
 	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(f)
+	data, err := io.ReadAll(io.LimitReader(f, maxArchivoCxP))
 	if err != nil {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "no se pudo leer el archivo")
 		return
