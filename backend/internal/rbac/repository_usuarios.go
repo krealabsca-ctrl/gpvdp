@@ -10,8 +10,19 @@ import (
 
 // ListarUsuarios devuelve los usuarios con acceso a la empresa + su rol en ella.
 func (r *Repository) ListarUsuarios(ctx context.Context, empresaID string) ([]UsuarioAdmin, error) {
+	// `otras_empresas` contesta de un vistazo «¿este usuario ve las otras empresas?», que es la duda
+	// que aparece sola al mirar el selector del encabezado. Se devuelven los NOMBRES y no los roles:
+	// a qué empresas del grupo entra alguien es lo que hace falta saber para administrarlo, pero su
+	// nivel de privilegio en una empresa que este administrador no administra no es asunto de esta
+	// pantalla.
 	const q = `
-		SELECT u.id::text, u.nombre, u.email, u.activo, u.debe_cambiar_password, r.codigo, r.nombre
+		SELECT u.id::text, u.nombre, u.email, u.activo, u.debe_cambiar_password, r.codigo, r.nombre,
+		       COALESCE((SELECT string_agg(e2.nombre, ' · ' ORDER BY e2.nombre)
+		                 FROM usuario_empresa_rol uer2
+		                 JOIN empresa e2 ON e2.id = uer2.empresa_id
+		                 WHERE uer2.usuario_id = u.id
+		                   AND uer2.empresa_id <> $1::uuid
+		                   AND e2.activo), '')
 		FROM usuario_empresa_rol uer
 		JOIN usuario u ON u.id = uer.usuario_id
 		JOIN rol r ON r.id = uer.rol_id
@@ -25,7 +36,8 @@ func (r *Repository) ListarUsuarios(ctx context.Context, empresaID string) ([]Us
 	out := make([]UsuarioAdmin, 0)
 	for rows.Next() {
 		var u UsuarioAdmin
-		if err := rows.Scan(&u.ID, &u.Nombre, &u.Email, &u.Activo, &u.DebeCambiar, &u.RolCodigo, &u.RolNombre); err != nil {
+		if err := rows.Scan(&u.ID, &u.Nombre, &u.Email, &u.Activo, &u.DebeCambiar,
+			&u.RolCodigo, &u.RolNombre, &u.OtrasEmpresas); err != nil {
 			return nil, fmt.Errorf("rbac: scan usuario: %w", err)
 		}
 		out = append(out, u)
@@ -78,6 +90,20 @@ func (r *Repository) AsignarRolEmpresa(ctx context.Context, empresaID, usuarioID
 		return fmt.Errorf("rbac: asignar rol a usuario: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
+		// Distinguir «no existe» de «existe, pero es a medida de OTRA empresa». Los dos casos daban
+		// «rol no encontrado», que se lee como una falla del sistema cuando en realidad es lo
+		// esperado: un rol a medida pertenece a la empresa donde se creó, así que llevar un usuario
+		// «solo nómina» a otra empresa exige tener ese rol también allá. Sin este mensaje, el flujo
+		// se corta sin decir qué hacer.
+		var enOtra string
+		err := r.pool.QueryRow(ctx,
+			`SELECT COALESCE(string_agg(e.nombre, ' · ' ORDER BY e.nombre), '')
+			 FROM rol r JOIN empresa e ON e.id = r.empresa_id
+			 WHERE r.codigo = $1 AND r.empresa_id IS NOT NULL AND r.empresa_id <> $2::uuid`,
+			rolCodigo, empresaID).Scan(&enOtra)
+		if err == nil && enOtra != "" {
+			return &RolDeOtraEmpresaError{Codigo: rolCodigo, Empresas: enOtra}
+		}
 		return ErrRolNoEncontrado
 	}
 	return nil

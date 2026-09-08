@@ -29,7 +29,8 @@ const documentoCols = `d.id::text, d.proveedor_id::text, COALESCE(p.nombre, ''),
 	        AND a2.tipo = 'ANTICIPO' AND a2.estado IN ('PAGADO','CONCILIADO') AND a2.moneda = 'CRC'
 	        AND (a2.total_crc - COALESCE((SELECT SUM(x.monto_crc) FROM anticipo_aplicacion x WHERE x.anticipo_id = a2.id AND x.activo), 0)) > 0),
 	` + contabilidadOrigenSQL + `, COALESCE(d.contabilidad_motivo, ''), COALESCE(d.contabilidad_marcado_por::text, ''),
-	d.requiere_validacion, COALESCE(d.validacion_motivo, '')`
+	d.requiere_validacion, COALESCE(d.validacion_motivo, ''),
+	d.bloqueado_para_pago, COALESCE(d.bloqueo_motivo, '')`
 
 // contabilidadOrigenSQL resuelve la marca «de Contabilidad» en UNA expresión, y la resuelve acá
 // —en el SELECT común— para que la Bandeja, el detalle y el candado de aprobación lean todos el
@@ -77,7 +78,8 @@ func scanDocumento(row scanner) (Documento, error) {
 		&d.DepartamentoID, &d.Departamento, &d.ValidadoDeptoPor, &d.ValidadoDeptoEn, &d.ValidacionRespaldo,
 		&d.ValidadoDeptoPorNombre, &d.AnticiposAplicados, &d.ProveedorAnticipoDisponible,
 		&d.ContabilidadOrigen, &d.ContabilidadMotivo, &d.ContabilidadMarcadoPor,
-		&d.RequiereValidacion, &d.ValidacionMotivo)
+		&d.RequiereValidacion, &d.ValidacionMotivo,
+		&d.BloqueadoParaPago, &d.BloqueoMotivo)
 	if err == nil {
 		d.NetoCRC = netoCRC(d.TotalCRC, d.AnticiposAplicados)
 		// Derivado del origen, nunca consultado aparte: así el booleano y el «por qué» no pueden
@@ -110,7 +112,8 @@ func (r *pgRepository) CrearDocumento(ctx context.Context, empresaID string, in 
 	const q = `
 		INSERT INTO documento_cxp
 			(empresa_id, proveedor_id, clave, consecutivo, fecha_emision, moneda, subtotal, iva, retencion, total, tc_aplicado, total_crc, descripcion, creado_por, fecha_vencimiento, tipo,
-			 concepto_id, clasificacion_id, subclasificacion_id, clasif_auto, departamento_id)
+			 concepto_id, clasificacion_id, subclasificacion_id, clasif_auto, departamento_id,
+			 bloqueado_para_pago, bloqueo_motivo)
 		SELECT $1::uuid, p.id,
 		       COALESCE(NULLIF($3, ''), 'INT-' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 10)),
 		       NULLIF($4, ''), $5::date, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), $14::uuid,
@@ -119,12 +122,14 @@ func (r *pgRepository) CrearDocumento(ctx context.Context, empresaID string, in 
 		       COALESCE(NULLIF($16, ''), 'CXP'),
 		       p.gasto_concepto_id, p.gasto_clasificacion_id, p.gasto_subclasificacion_id, (p.gasto_concepto_id IS NOT NULL),
 		       -- Enrutamiento automático: hereda el departamento (centro de costo) del proveedor.
-		       (SELECT dep.id FROM departamento dep WHERE dep.empresa_id = $1::uuid AND dep.nombre = p.departamento AND dep.activo)
+		       (SELECT dep.id FROM departamento dep WHERE dep.empresa_id = $1::uuid AND dep.nombre = p.departamento AND dep.activo),
+		       $17, NULLIF($18, '')
 		FROM proveedor p WHERE p.id = $2::uuid AND p.empresa_id = $1::uuid
 		RETURNING id::text`
 	var id string
 	err := r.pool.QueryRow(ctx, q, empresaID, in.ProveedorID, in.Clave, in.Consecutivo, in.FechaEmision,
-		in.Moneda, in.Subtotal, in.IVA, in.Retencion, in.Total, tc, totalCRC, in.Descripcion, usuarioID, in.Vencimiento, in.Tipo).Scan(&id)
+		in.Moneda, in.Subtotal, in.IVA, in.Retencion, in.Total, tc, totalCRC, in.Descripcion, usuarioID, in.Vencimiento, in.Tipo,
+		in.BloqueadoParaPago, in.BloqueoMotivo).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Documento{}, ErrProveedorNoEncontrado
 	}
@@ -146,6 +151,25 @@ func (r *pgRepository) DocumentoPorID(ctx context.Context, empresaID, id string)
 	}
 	if err != nil {
 		return Documento{}, fmt.Errorf("cxp: documento por id: %w", err)
+	}
+	return d, nil
+}
+
+// DocumentoPorClave busca por la llave anti-duplicado, que es (empresa_id, clave).
+//
+// Existe para que otro módulo pueda RECUPERARSE de su propio duplicado: cuando un módulo crea
+// documentos con una clave determinística (para que reintentar no fabrique una segunda factura por el
+// mismo hecho), el rechazo por duplicado le dice «ya existe» pero no le dice CUÁL. Sin esta consulta
+// el módulo queda sin salida: no puede crear otro ni enlazar el que ya está.
+func (r *pgRepository) DocumentoPorClave(ctx context.Context, empresaID, clave string) (Documento, error) {
+	const q = `SELECT ` + documentoCols + ` ` + documentoFrom + `
+		WHERE d.empresa_id = $1::uuid AND d.clave = $2`
+	d, err := scanDocumento(r.pool.QueryRow(ctx, q, empresaID, clave))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Documento{}, ErrDocumentoNoEncontrado
+	}
+	if err != nil {
+		return Documento{}, fmt.Errorf("cxp: documento por clave: %w", err)
 	}
 	return d, nil
 }
@@ -409,9 +433,13 @@ func (r *pgRepository) AsignarTipo(ctx context.Context, empresaID, id, tipo stri
 }
 
 func (r *pgRepository) Programar(ctx context.Context, empresaID, id, fecha, huella string) (int64, error) {
+	// `AND NOT bloqueado_para_pago` es el candado principal contra el doble pago: si el documento no
+	// se puede programar, nunca llega al archivo que va al banco. Va acá y no solo en la consulta del
+	// archivo porque programar es el paso que lo habilita.
 	const q = `UPDATE documento_cxp
 	           SET estado = 'PROGRAMADO', fecha_pago_programada = $3::date, huella = $4, actualizado_en = now()
-	           WHERE empresa_id = $1::uuid AND id = $2::uuid AND estado = 'APROBADO'`
+	           WHERE empresa_id = $1::uuid AND id = $2::uuid AND estado = 'APROBADO'
+	             AND NOT bloqueado_para_pago`
 	tag, err := r.pool.Exec(ctx, q, empresaID, id, fecha, huella)
 	if err != nil {
 		return 0, fmt.Errorf("cxp: programar: %w", err)
@@ -422,10 +450,25 @@ func (r *pgRepository) Programar(ctx context.Context, empresaID, id, fecha, huel
 // Clasificar asigna concepto/clasificación de gasto a un documento. Tenant-safe: solo aplica si
 // el concepto y la clasificación (cuando se envían) pertenecen a la empresa. Devuelve filas afectadas.
 func (r *pgRepository) Clasificar(ctx context.Context, empresaID, id, conceptoID, clasificacionID, subclasificacionID string) (int64, error) {
+	// El departamento se DEDUCE de la clasificación si la factura no lo trae.
+	//
+	// Es el segundo eslabón del enrutamiento: al crearse, la factura hereda el departamento del
+	// PROVEEDOR (ver CrearDocumento), pero solo 13 de 649 proveedores lo tienen cargado. La
+	// clasificación del gasto es la otra fuente, y este es el momento exacto en que aparece.
+	//
+	// Sin esto, el 2026-09-03 había 938 facturas que requerían validación de área SIN departamento
+	// asignado: no se podían enrutar a nadie y esperaban para siempre.
+	//
+	// Solo rellena lo que está vacío (`departamento_id IS NULL`): si alguien ya lo asignó a mano, su
+	// decisión manda sobre el default de la partida.
 	const q = `
 		UPDATE documento_cxp
 		SET concepto_id = NULLIF($3, '')::uuid, clasificacion_id = NULLIF($4, '')::uuid,
-		    subclasificacion_id = NULLIF($5, '')::uuid, clasif_auto = false, actualizado_en = now()
+		    subclasificacion_id = NULLIF($5, '')::uuid, clasif_auto = false, actualizado_en = now(),
+		    departamento_id = COALESCE(
+		        departamento_id,
+		        (SELECT cl.departamento_id FROM clasificacion cl
+		         WHERE cl.id = NULLIF($4, '')::uuid AND cl.empresa_id = $1::uuid))
 		WHERE empresa_id = $1::uuid AND id = $2::uuid
 		  AND ($3 = '' OR EXISTS (SELECT 1 FROM concepto WHERE id = $3::uuid AND empresa_id = $1::uuid AND visible_cxp))
 		  AND ($4 = '' OR EXISTS (SELECT 1 FROM clasificacion WHERE id = $4::uuid AND empresa_id = $1::uuid))

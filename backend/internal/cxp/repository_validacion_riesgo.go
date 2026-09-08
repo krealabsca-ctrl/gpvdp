@@ -49,6 +49,7 @@ func (r *pgRepository) EvaluarValidacion(ctx context.Context, empresaID, docID s
 		WITH params AS (
 		    SELECT MAX(valor) FILTER (WHERE clave = 'VALIDACION_UMBRAL_MONTO')::numeric      AS umbral,
 		           MAX(valor) FILTER (WHERE clave = 'VALIDACION_PROVEEDOR_NUEVO_MAX')::int   AS max_nuevo,
+		           MAX(valor) FILTER (WHERE clave = 'VALIDACION_PROVEEDOR_NUEVO_PISO_MONTO')::numeric AS nuevo_piso,
 		           MAX(valor) FILTER (WHERE clave = 'VALIDACION_DESVIO_PCT')::numeric        AS desvio_pct,
 		           MAX(valor) FILTER (WHERE clave = 'VALIDACION_DESVIO_PISO_MONTO')::numeric AS desvio_piso
 		    FROM cxp_parametro WHERE empresa_id = $1::uuid
@@ -67,7 +68,16 @@ func (r *pgRepository) EvaluarValidacion(ctx context.Context, empresaID, docID s
 		    SELECT doc.id,
 		           CASE
 		               WHEN doc.total_crc > COALESCE(p.umbral, 0) THEN 'MONTO'
-		               WHEN COALESCE(h.facturas, 0) <= COALESCE(p.max_nuevo, 0) THEN 'PROVEEDOR_NUEVO'
+		               -- Proveedor nuevo, pero solo si la factura es MATERIAL. El piso es propio y no
+		               -- el umbral general: por encima del umbral ya manda 'MONTO', así que exigir el
+		               -- mismo valor dejaría esta rama muerta.
+		               --
+		               -- Sin piso, estrenar proveedor mandaba al área facturas de ₡10: medido el
+		               -- 2026-09-03, 437 facturas (44 % de todas las validaciones) por ₡9,3M —el 1 %
+		               -- del dinero en juego— con una mediana de ₡5.650. Eso es lo que hacía sentir
+		               -- que los departamentos validan todo el día.
+		               WHEN COALESCE(h.facturas, 0) <= COALESCE(p.max_nuevo, 0)
+		                    AND doc.total_crc > COALESCE(p.nuevo_piso, 0) THEN 'PROVEEDOR_NUEVO'
 		               WHEN COALESCE(p.desvio_pct, 0) > 0 AND COALESCE(h.promedio, 0) > 0
 		                    AND doc.total_crc > COALESCE(p.desvio_piso, 0)
 		                    AND ABS(doc.total_crc - h.promedio) > h.promedio * p.desvio_pct / 100 THEN 'DESVIO'

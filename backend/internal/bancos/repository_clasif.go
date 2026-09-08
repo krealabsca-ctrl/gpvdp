@@ -81,6 +81,20 @@ func condicionesMovimientos(empresaID string, f FiltrosMovimientos) (string, []a
 	if len(f.ClasificacionIDs) > 0 {
 		conds = append(conds, fmt.Sprintf("m.clasificacion_id = ANY($%d::uuid[])", addArg(f.ClasificacionIDs)))
 	}
+	// El RECORTE por segmento (mig 0077). Va acá y no como un filtro más porque su vacío significa
+	// lo contrario que el de los demás: sin alcance no se ve NADA.
+	//
+	// La condición imposible es deliberada. Un `if len(...) > 0` alrededor —el reflejo natural,
+	// copiando las líneas de arriba— haría que un rol sin partidas asignadas viera la empresa
+	// completa: el filtro simplemente no se agregaría. Un alcance vacío tiene que cerrar, no abrir,
+	// y el servicio además corta antes de llegar acá.
+	if f.Alcance != nil {
+		if len(f.Alcance) == 0 {
+			conds = append(conds, "false")
+		} else {
+			conds = append(conds, fmt.Sprintf("m.clasificacion_id = ANY($%d::uuid[])", addArg(f.Alcance)))
+		}
+	}
 	// La cuenta se resuelve directo sobre el movimiento; el banco, por subconsulta a sus cuentas,
 	// para no obligar al JOIN de `cuenta_bancaria` en las consultas que no lo traen (los totales).
 	if f.CuentaID != "" {

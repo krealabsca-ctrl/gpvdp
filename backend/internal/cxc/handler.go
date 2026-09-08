@@ -226,6 +226,13 @@ func (h *Handler) error(c *gin.Context, err error, op string) {
 		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, err.Error())
 	case errors.Is(err, ErrNotaNoEncontrada):
 		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, err.Error())
+	// Corrección de un contrato apartado: todo son reglas de negocio (422), salvo la modalidad
+	// que no existe en el catálogo (404). Si estos salieran como 500, quien corrige un contrato no
+	// tendría forma de saber que puso una cuota en cero.
+	case errors.Is(err, ErrModalidadNoEncontrada):
+		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, err.Error())
+	case errors.Is(err, ErrCuotaInvalida), errors.Is(err, ErrDiaPagoInvalido), errors.Is(err, ErrNadaQueCorregir):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
 	case errors.Is(err, ErrNotaYaAnulada), errors.Is(err, ErrMotivoRequerido),
 		errors.Is(err, ErrContratoYaSuspendido), errors.Is(err, ErrContratoNoSuspendido):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())

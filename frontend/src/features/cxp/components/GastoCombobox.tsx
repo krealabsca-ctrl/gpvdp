@@ -18,6 +18,7 @@ import { queryKeys } from "@/api/queryKeys";
 import { useConceptos, useClasificaciones } from "@/features/bancos/hooks";
 import { useGastosProveedor, useSubclasificacionesTodas } from "@/features/cxp/hooks";
 import { useEmpresaId } from "@/features/bancos/useEmpresaId";
+import { useTienePermiso } from "@/features/auth/permisos";
 
 export interface GastoElegido {
   conceptoId: string;
@@ -106,6 +107,14 @@ function GastoPopover({
   const subsQ = useSubclasificacionesTodas();
   const frecuentesQ = useGastosProveedor(proveedorId);
 
+  // Por qué puerta se crea el rubro. Contabilidad tiene `cxp.catalogo` y NO `bancos.catalogo`:
+  // hasta la migración 0075 el "+ Crear" de acá llamaba al catálogo de Bancos y le respondía 403
+  // justo a quien más lo necesita. La puerta de CxP es además la correcta para este flujo: el rubro
+  // nace visible para CxP, que es lo que este selector pide.
+  const tiene = useTienePermiso();
+  const porPuertaCxP = tiene("cxp.catalogo");
+  const puedeCrearRubro = porPuertaCxP || tiene("bancos.catalogo");
+
   const [q, setQ] = useState("");
   const [creando, setCreando] = useState(false);
   const popRef = useRef<HTMLDivElement>(null);
@@ -183,7 +192,9 @@ function GastoPopover({
       if (!con) {
         try {
           // Creado desde CxP → visible para CxP.
-          con = await bancosApi.crearConcepto({ nombre: nc!, visible_cxp: true });
+          con = porPuertaCxP
+            ? await cxpApi.crearConceptoGasto(nc!)
+            : await bancosApi.crearConcepto({ nombre: nc!, visible_cxp: true });
         } catch {
           conceptos = await bancosApi.conceptos("cxp");
           con = conceptos.find((c) => c.nombre.toLowerCase() === nc!.toLowerCase());
@@ -196,7 +207,9 @@ function GastoPopover({
       let cla = clasifs.find((c) => c.concepto_id === con!.id && c.nombre.toLowerCase() === ncl!.toLowerCase());
       if (!cla) {
         try {
-          cla = await bancosApi.crearClasificacion({ concepto_id: con.id, nombre: ncl! });
+          cla = porPuertaCxP
+            ? await cxpApi.crearClasificacionGasto(con.id, ncl!)
+            : await bancosApi.crearClasificacion({ concepto_id: con.id, nombre: ncl! });
         } catch {
           clasifs = await bancosApi.clasificaciones("cxp");
           cla = clasifs.find((c) => c.concepto_id === con!.id && c.nombre.toLowerCase() === ncl!.toLowerCase());
@@ -303,14 +316,24 @@ function GastoPopover({
             )}
             {texto && !exacta && (
               <li className="mt-1 border-t border-border pt-1">
-                <button
-                  type="button"
-                  onClick={() => void crearRuta()}
-                  disabled={creando}
-                  className="block w-full rounded-md px-2.5 py-1.5 text-left text-sm font-semibold text-accent hover:bg-accent/10"
-                >
-                  {creando ? "Creando…" : `+ Crear «${texto}»`}
-                </button>
+                {puedeCrearRubro ? (
+                  <button
+                    type="button"
+                    onClick={() => void crearRuta()}
+                    disabled={creando}
+                    className="block w-full rounded-md px-2.5 py-1.5 text-left text-sm font-semibold text-accent hover:bg-accent/10"
+                  >
+                    {creando ? "Creando…" : `+ Crear «${texto}»`}
+                  </button>
+                ) : (
+                  // Ofrecer un botón que va a responder 403 es peor que no ofrecerlo: decir quién
+                  // sí puede abrir el rubro es lo que desatasca la factura.
+                  <p className="px-2.5 py-1.5 text-xs text-content-muted">
+                    No existe esa categoría y tu rol no puede abrir rubros nuevos. Pedile a
+                    Contabilidad (permiso <span className="font-mono">cxp.catalogo</span>) que la
+                    cree en <b className="text-content">CxP › Catálogo de gasto</b>.
+                  </p>
+                )}
               </li>
             )}
           </>

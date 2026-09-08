@@ -164,6 +164,110 @@ export interface MovimientoRow {
   estado_clasificacion: EstadoClasificacion;
   confianza: string | null;
   es_traslado: boolean;
+  /**
+   * Motivo del aviso «está mal segmentado» que ya está sin resolver para este movimiento.
+   * Solo lo llena la consulta por segmento; en la hoja de trabajo llega vacío.
+   */
+  reporte_abierto?: string;
+}
+
+// --- Consulta por segmento (mig 0077) ---
+
+/** Una partida que el rol consulta. */
+export interface PartidaDelSegmento {
+  clasificacion_id: string;
+  clasificacion: string;
+  concepto: string;
+}
+
+/** Una cuenta donde el segmento del rol recibe plata (para el filtro de la pantalla). */
+export interface CuentaDelSegmento {
+  id: string;
+  banco: string;
+  cuenta: string;
+}
+
+/**
+ * Lo que ve el equipo de una partida.
+ *
+ * `sin_alcance` no es un error: es el estado de todo rol al que todavía no le marcaron partidas en
+ * el catálogo, y la pantalla lo explica en vez de mostrar «algo falló».
+ *
+ * `cargado_hasta` es la última fecha importada DE LA EMPRESA (no de su segmento): es lo que separa
+ * «todavía no entró» de «entró y no es mío».
+ */
+export interface MiSegmento {
+  partidas: PartidaDelSegmento[];
+  cuentas: CuentaDelSegmento[];
+  movimientos: ListaMovimientos;
+  cargado_hasta: string;
+  sin_alcance: boolean;
+  aviso?: string;
+}
+
+/** Un rol que puede consultar por segmento (los que ofrece la columna del catálogo). */
+export interface RolDeConsulta {
+  id: string;
+  codigo: string;
+  nombre: string;
+  usuarios: number;
+}
+
+/** «Esta partida la consulta este rol»: una fila del alcance. */
+export interface AsignacionConsulta {
+  clasificacion_id: string;
+  clasificacion: string;
+  concepto_id: string;
+  concepto: string;
+  rol_id: string;
+  rol_nombre: string;
+}
+
+export interface AlcanceConsulta {
+  roles: RolDeConsulta[];
+  asignaciones: AsignacionConsulta[];
+}
+
+/** El aviso del equipo: «este movimiento no es de mi partida». */
+export interface ReporteSegmentacion {
+  id: string;
+  motivo: string;
+  usuario: string;
+  creado_en: string;
+  movimiento_id: string;
+  fecha: string;
+  descripcion: string;
+  monto_crc: string;
+  banco: string;
+  cuenta: string;
+  concepto: string;
+  clasificacion: string;
+  resolucion: string;
+  respuesta: string;
+  resuelto_por: string;
+  resuelto_en: string;
+  pendiente: boolean;
+  /** Aviso de FALTANTE: el equipo esperaba un movimiento y no lo vio. Puede no traer movimiento. */
+  es_faltante: boolean;
+  fecha_esperada: string;
+  monto_esperado: string;
+  referencia: string;
+}
+
+/**
+ * Veredicto de buscar un movimiento que no aparece.
+ *
+ * Divulgación mínima: `movimientos` viene con datos SOLO cuando el veredicto es EN_MI_PARTIDA. Con
+ * FUERA_DE_MI_PARTIDA la respuesta es que existe y nada más — ni descripción, ni cuenta, ni de
+ * quién es.
+ */
+export type VeredictoFaltante = "EN_MI_PARTIDA" | "FUERA_DE_MI_PARTIDA" | "NO_EXISTE";
+
+export interface ResultadoFaltante {
+  veredicto: VeredictoFaltante;
+  movimientos: MovimientoRow[];
+  /** Acompaña a NO_EXISTE: sin esto, «no hay ninguno» no distingue «no entró» de «no lo cargaron». */
+  cargado_hasta: string;
 }
 
 /** Totales del filtro, EN COLONES (salen de `monto_crc`, no de débito/crédito). */
@@ -318,6 +422,110 @@ export interface PlanClasifExcel {
   hojas: string[];
   /** Qué hay que mirar antes de aplicar, en una frase (vacío = nada). */
   aviso: string;
+}
+
+/** Un lugar físico del negocio: sucursal, camposanto, plaza. */
+export interface Sede {
+  id: string;
+  nombre: string;
+  codigo: string;
+  activo: boolean;
+}
+
+/** Un área de la empresa. Es UNA sola tabla, administrable desde Bancos y desde CxP. */
+export interface DepartamentoRef {
+  id: string;
+  nombre: string;
+  codigo: string;
+  activo: boolean;
+}
+
+/** De dónde salió la atribución de un gasto a un departamento. */
+export type OrigenDimension = "MOVIMIENTO" | "FACTURA" | "PARTIDA" | "SIN_ASIGNAR";
+
+/** En qué partida gastó un departamento (o sede), y de dónde salió esa atribución. */
+export interface GastoPartidaDimension {
+  /** Vacío = movimientos sin clasificar. Con valor sirve para asignar y para el subpresupuesto. */
+  clasificacion_id: string;
+  concepto: string;
+  clasificacion: string;
+  movs: number;
+  gasto: string;
+  origen: OrigenDimension;
+  origen_legible: string;
+  /** Monto autorizado para esta partida en el rango. Vacío = no se definió ninguno. */
+  subpresupuesto: string;
+  disponible: string;
+  consumido_pct: string;
+  estado: EstadoControl;
+}
+
+/** Estado de un departamento frente a su presupuesto. */
+export type EstadoControl = "SIN_PRESUPUESTO" | "EN_RANGO" | "ALERTA" | "EXCEDIDO";
+
+/** Un departamento con su presupuesto y su gasto real, ya comparados. */
+export interface FilaControl {
+  departamento_id: string;
+  departamento: string;
+  /** Vacío = no se definió presupuesto: no hay contra qué comparar. */
+  presupuesto: string;
+  meses_con_presupuesto: number;
+  gasto: string;
+  movs: number;
+  disponible: string;
+  consumido_pct: string;
+  estado: EstadoControl;
+  /** Cuántas partidas de este departamento tienen monto propio definido. */
+  subpresupuestos: number;
+  /** Lo repartido por partida. Vacío si no hay ninguna. */
+  suma_subpresupuestos: string;
+  /** Presupuesto − suma de los subpresupuestos. NEGATIVO = el desglose reparte de más. */
+  sin_repartir: string;
+}
+
+/** La respuesta completa del control presupuestario. */
+export interface ControlPresupuestario {
+  desde: string;
+  hasta: string;
+  agrupar_por: "departamento" | "sede";
+  umbral_alerta_pct: string;
+  filas: FilaControl[];
+  total_presupuesto: string;
+  total_gasto: string;
+  /** El gasto sin dueño. Va aparte y NO se reparte entre los departamentos. */
+  sin_asignar: string;
+  sin_asignar_movs: number;
+  meses: SaludMes[];
+  aviso: string;
+}
+
+/** Un monto autorizado en un mes: del departamento completo o de una de sus partidas. */
+export interface PresupuestoLinea {
+  departamento_id: string;
+  departamento: string;
+  periodo: string;
+  monto: string;
+  nota: string;
+  /** Vacío = es el TOTAL del departamento. Con valor = subpresupuesto de esa partida. */
+  clasificacion_id: string;
+  clasificacion: string;
+  concepto: string;
+}
+
+/** De qué cuelga una entrada del catálogo. Decide si se puede borrar o solo desactivar. */
+export interface UsoCatalogo {
+  uso: {
+    facturas: number;
+    empleados: number;
+    fondos: number;
+    validadores: number;
+    partidas: number;
+    movimientos: number;
+    lineas_presupuesto: number;
+  };
+  total: number;
+  detalle: string;
+  se_puede_eliminar: boolean;
 }
 
 /** Ámbito del catálogo: "cxp" limita a lo visible para contabilidad. */
@@ -804,6 +1012,72 @@ export const bancosApi = {
       query: { ...filtros },
     });
   },
+
+  // --- Consulta por SEGMENTO (mig 0077) ---
+  //
+  // La puerta del equipo de una partida. Es un endpoint propio y no `/bancos/movimientos`: el
+  // recorte por alcance lo aplica el servidor SIEMPRE, no es un filtro que se pueda quitar.
+  /** Los créditos de las partidas que consulta el rol del usuario. */
+  miSegmento(filtros: FiltrosMovimientos): Promise<MiSegmento> {
+    return apiFetch<MiSegmento>("/bancos/mi-segmento/movimientos", {
+      method: "GET",
+      query: { ...filtros },
+    });
+  },
+  /** Avisa que un movimiento quedó mal segmentado. El motivo es obligatorio. */
+  reportarSegmentacion(movimientoId: string, motivo: string): Promise<void> {
+    return apiFetch<void>("/bancos/mi-segmento/reportes", {
+      method: "POST",
+      json: { movimiento_id: movimientoId, motivo },
+    });
+  },
+  /**
+   * Busca un movimiento que el equipo espera y no ve, por fecha y monto EXACTOS.
+   *
+   * POST aunque solo lea: cada consulta queda en auditoría, y así el monto no viaja en la URL.
+   */
+  buscarFaltante(fecha: string, monto: string): Promise<ResultadoFaltante> {
+    return apiFetch<ResultadoFaltante>("/bancos/mi-segmento/buscar", {
+      method: "POST",
+      json: { fecha, monto },
+    });
+  },
+  /** Avisa de un movimiento que no aparece. El servidor lo engancha si puede identificarlo. */
+  reportarFaltante(fecha: string, monto: string, referencia: string, motivo: string): Promise<void> {
+    return apiFetch<void>("/bancos/mi-segmento/faltantes", {
+      method: "POST",
+      json: { fecha, monto, referencia, motivo },
+    });
+  },
+  /** Los roles elegibles y el alcance ya asignado (para la columna del catálogo). */
+  alcanceConsulta(): Promise<AlcanceConsulta> {
+    return apiFetch<AlcanceConsulta>("/bancos/catalogo/consulta", { method: "GET" });
+  },
+  /** Reemplaza los roles que consultan una partida. Lista vacía = ningún equipo la consulta. */
+  guardarConsultaDePartida(clasificacionId: string, rolIds: string[]): Promise<void> {
+    return apiFetch<void>(`/bancos/catalogo/clasificaciones/${clasificacionId}/consulta`, {
+      method: "PUT",
+      json: { rol_ids: rolIds },
+    });
+  },
+  /** Los avisos de mala segmentación, para quien clasifica. */
+  reportesSegmentacion(soloPendientes = true): Promise<{ reportes: ReporteSegmentacion[] }> {
+    return apiFetch<{ reportes: ReporteSegmentacion[] }>("/bancos/reportes-segmentacion", {
+      method: "GET",
+      query: soloPendientes ? { pendientes: "1" } : {},
+    });
+  },
+  /** Cierra un aviso. SIN_CAMBIO exige explicarle al equipo por qué la partida está bien. */
+  resolverReporte(
+    reporteId: string,
+    resolucion: "RECLASIFICADO" | "SIN_CAMBIO",
+    respuesta = "",
+  ): Promise<void> {
+    return apiFetch<void>(`/bancos/reportes-segmentacion/${reporteId}/resolver`, {
+      method: "POST",
+      json: { resolucion, respuesta },
+    });
+  },
   /** Trae TODOS los movimientos que cumplen el filtro, paginando hasta agotar (para exportar). */
   async todosMovimientos(filtros: FiltrosMovimientos): Promise<MovimientoRow[]> {
     const acc: MovimientoRow[] = [];
@@ -1020,6 +1294,148 @@ export const bancosApi = {
   },
 
   // --- Diccionario del catálogo (Concepto › Clasificación + palabras clave) ---
+  // --- Dimensiones del gasto (departamento y sede) y control presupuestario ---
+
+  sedes(incluirInactivas = false): Promise<Sede[]> {
+    return apiFetch<Sede[]>("/bancos/catalogo/sedes", {
+      method: "GET",
+      query: incluirInactivas ? { incluir_inactivas: "true" } : {},
+    });
+  },
+  crearSede(nombre: string, codigo = ""): Promise<Sede> {
+    return apiFetch<Sede>("/bancos/catalogo/sedes", { method: "POST", json: { nombre, codigo } });
+  },
+  renombrarSede(id: string, nombre: string, codigo = ""): Promise<void> {
+    return apiFetch<void>(`/bancos/catalogo/sedes/${id}`, { method: "PATCH", json: { nombre, codigo } });
+  },
+  cambiarActivoSede(id: string, activo: boolean): Promise<void> {
+    return apiFetch<void>(`/bancos/catalogo/sedes/${id}/activo`, { method: "POST", json: { activo } });
+  },
+
+  usoDeSede(id: string): Promise<UsoCatalogo> {
+    return apiFetch<UsoCatalogo>(`/bancos/catalogo/sedes/${id}/uso`, { method: "GET" });
+  },
+  eliminarSede(id: string): Promise<void> {
+    return apiFetch<void>(`/bancos/catalogo/sedes/${id}`, { method: "DELETE" });
+  },
+
+  /**
+   * Los departamentos de la empresa. Es el MISMO catálogo que usa CxP (una sola tabla): editarlo
+   * acá lo cambia allá, que es justamente lo que se quiere.
+   */
+  departamentosDeBancos(): Promise<DepartamentoRef[]> {
+    return apiFetch<DepartamentoRef[]>("/bancos/catalogo/departamentos", { method: "GET" });
+  },
+  crearDepartamento(nombre: string, codigo = ""): Promise<DepartamentoRef> {
+    return apiFetch<DepartamentoRef>("/bancos/catalogo/departamentos", {
+      method: "POST",
+      json: { nombre, codigo },
+    });
+  },
+  renombrarDepartamento(id: string, nombre: string, codigo = ""): Promise<void> {
+    return apiFetch<void>(`/bancos/catalogo/departamentos/${id}`, {
+      method: "PATCH",
+      json: { nombre, codigo },
+    });
+  },
+  cambiarActivoDepartamento(id: string, activo: boolean): Promise<void> {
+    return apiFetch<void>(`/bancos/catalogo/departamentos/${id}/activo`, {
+      method: "POST",
+      json: { activo },
+    });
+  },
+  usoDeDepartamento(id: string): Promise<UsoCatalogo> {
+    return apiFetch<UsoCatalogo>(`/bancos/catalogo/departamentos/${id}/uso`, { method: "GET" });
+  },
+  eliminarDepartamento(id: string): Promise<void> {
+    return apiFetch<void>(`/bancos/catalogo/departamentos/${id}`, { method: "DELETE" });
+  },
+
+  /**
+   * Define el departamento y la sede POR DEFECTO de una partida. Devuelve cuántos movimientos
+   * quedan atribuidos con ese solo cambio — incluida toda la historia, sin reprocesar nada.
+   * Un id vacío QUITA la asignación.
+   */
+  asignarDimensionesPartida(
+    clasificacionId: string,
+    v: { departamento_id: string; sede_id: string },
+  ): Promise<{ movimientos_afectados: number }> {
+    return apiFetch<{ movimientos_afectados: number }>(
+      `/bancos/clasificaciones/${clasificacionId}/dimensiones`,
+      { method: "PATCH", json: v },
+    );
+  },
+
+  /** La excepción: este movimiento no es del departamento de su partida. */
+  asignarDimensionesMovimiento(
+    movimientoId: string,
+    v: { departamento_id: string; sede_id: string },
+  ): Promise<void> {
+    return apiFetch<void>(`/bancos/movimientos/${movimientoId}/dimensiones`, {
+      method: "PATCH",
+      json: v,
+    });
+  },
+
+  control(
+    desde: string,
+    hasta: string,
+    agruparPor: "departamento" | "sede",
+    umbral: string,
+  ): Promise<ControlPresupuestario> {
+    return apiFetch<ControlPresupuestario>("/bancos/control", {
+      method: "GET",
+      query: { desde, hasta, agrupar_por: agruparPor, ...(umbral ? { umbral } : {}) },
+    });
+  },
+
+  /** Las partidas de una dimensión. `id` vacío pide el gasto SIN atribuir. */
+  partidasDeDimension(
+    desde: string,
+    hasta: string,
+    agruparPor: "departamento" | "sede",
+    id: string,
+    umbral = "",
+  ): Promise<GastoPartidaDimension[]> {
+    return apiFetch<GastoPartidaDimension[]>("/bancos/control/partidas", {
+      method: "GET",
+      query: {
+        desde,
+        hasta,
+        agrupar_por: agruparPor,
+        ...(id ? { id } : {}),
+        ...(umbral ? { umbral } : {}),
+      },
+    });
+  },
+
+  presupuesto(desde: string, hasta: string): Promise<PresupuestoLinea[]> {
+    return apiFetch<PresupuestoLinea[]>("/bancos/presupuesto", {
+      method: "GET",
+      query: { desde, hasta },
+    });
+  },
+  /** Sin `clasificacion_id` fija el TOTAL del departamento; con él, el subpresupuesto de la partida. */
+  guardarPresupuesto(v: {
+    departamento_id: string;
+    periodo: string;
+    monto: string;
+    nota?: string;
+    clasificacion_id?: string;
+  }): Promise<void> {
+    return apiFetch<void>("/bancos/presupuesto", { method: "PUT", json: v });
+  },
+  borrarPresupuesto(departamentoId: string, periodo: string, clasificacionId = ""): Promise<void> {
+    return apiFetch<void>("/bancos/presupuesto", {
+      method: "DELETE",
+      query: {
+        departamento_id: departamentoId,
+        periodo,
+        ...(clasificacionId ? { clasificacion_id: clasificacionId } : {}),
+      },
+    });
+  },
+
   // --- Traer la clasificación hecha en Excel ---
 
   /** Baja la plantilla que se llena en Excel y se vuelve a subir. El nombre lo pone el servidor. */

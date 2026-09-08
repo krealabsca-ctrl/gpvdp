@@ -264,16 +264,43 @@ func (r *pgRepository) CargosDeContrato(ctx context.Context, empresaID, contrato
 	return out, rows.Err()
 }
 
+// sqlMotivoNoGenerable dice por qué un contrato no puede generar cargos, o ” si puede.
+//
+// Es UNA sola expresión y vive acá porque el orden importa: un contrato en revisión suele tener
+// además la cuota en cero, y el motivo que hay que reportar es el primero —el que explica de dónde
+// viene el problema (el dato del origen)—, no el síntoma.
+//
+// Las razones se escriben como se van a leer en pantalla: quien mire la vista previa tiene que
+// entender qué hacer, y «cuota en cero» ya le dice dónde mirar.
+const sqlMotivoNoGenerable = `
+	CASE
+	  WHEN c.revision_pendiente THEN 'en revisión: el dato del origen quedó incompleto'
+	  ELSE (` + sqlMotivoDatoIncompleto + `)
+	END`
+
+// sqlMotivoDatoIncompleto es la parte OBJETIVA: qué le falta al contrato, mirando solo los datos.
+//
+// Va aparte de sqlMotivoNoGenerable porque tiene un segundo uso incompatible con la marca: cuando
+// se corrige un contrato hay que volver a DERIVAR `revision_pendiente`, y si esa derivación mirara
+// la marca actual sería circular —un contrato apartado quedaría apartado para siempre, por más que
+// se le arregle la cuota—. Así hay una sola definición de «el dato está incompleto», y el generador
+// le suma aparte el respeto por la marca que puso el importador.
+//
+// Requiere que la consulta tenga `m` (cxc_modalidad) en LEFT JOIN.
+const sqlMotivoDatoIncompleto = `
+	CASE
+	  WHEN c.cuota_vigente <= 0 THEN 'la cuota está en cero'
+	  WHEN c.modalidad_id IS NULL OR m.id IS NULL THEN 'sin modalidad de pago en el catálogo'
+	  WHEN c.fecha_primer_cobro IS NULL THEN 'sin fecha de primer cobro'
+	  ELSE ''
+	END`
+
 func (r *pgRepository) ContratosParaGenerar(ctx context.Context, empresaID string, sedeIDs []string) ([]ContratoGenerable, error) {
+	// Solo el estado se filtra: un contrato inactivo no es una exclusión que haya que explicar, es
+	// que no está vigente. Todo lo demás VIENE con su motivo para que el plan pueda confesarlo.
 	conds := []string{
 		"c.empresa_id = $1::uuid",
 		"c.estado = 'ACTIVO'",
-		// Un contrato en cuarentena NO genera cargos: sería fabricar deuda sobre un dato
-		// que ya sabemos que está mal.
-		"c.revision_pendiente = false",
-		"c.fecha_primer_cobro IS NOT NULL",
-		"c.cuota_vigente > 0",
-		"c.modalidad_id IS NOT NULL",
 	}
 	args := []any{empresaID}
 	if sedeIDs != nil {
@@ -283,11 +310,14 @@ func (r *pgRepository) ContratosParaGenerar(ctx context.Context, empresaID strin
 		args = append(args, sedeIDs)
 		conds = append(conds, fmt.Sprintf("c.sede_id = ANY($%d::uuid[])", len(args)))
 	}
+	// El JOIN a modalidad es LEFT: si fuera interno, un contrato con una modalidad que el catálogo
+	// no tiene (el archivo de Coopeprofa trae «Semanal») desaparecería sin dejar rastro.
 	q := `
 		SELECT c.id::text, c.numero, c.fecha_primer_cobro, COALESCE(c.dia_pago,0), c.cuota_vigente,
-		       m.meses_ciclo, m.quincenal
+		       COALESCE(m.meses_ciclo,0), COALESCE(m.quincenal,false),
+		       ` + sqlMotivoNoGenerable + `
 		FROM contrato_cxc c
-		JOIN cxc_modalidad m ON m.id = c.modalidad_id
+		LEFT JOIN cxc_modalidad m ON m.id = c.modalidad_id
 		WHERE ` + strings.Join(conds, " AND ") + `
 		ORDER BY c.numero`
 	rows, err := r.pool.Query(ctx, q, args...)
@@ -299,16 +329,18 @@ func (r *pgRepository) ContratosParaGenerar(ctx context.Context, empresaID strin
 	for rows.Next() {
 		var (
 			g       ContratoGenerable
-			primer  time.Time
+			primer  *time.Time // nullable: ahora vienen también los contratos sin fecha, con su motivo
 			dia     int16
 			ciclo   int16
 			cuota   decimal.Decimal
 			quincen bool
 		)
-		if err := rows.Scan(&g.ID, &g.Numero, &primer, &dia, &cuota, &ciclo, &quincen); err != nil {
+		if err := rows.Scan(&g.ID, &g.Numero, &primer, &dia, &cuota, &ciclo, &quincen, &g.Motivo); err != nil {
 			return nil, fmt.Errorf("cxc: scan generable: %w", err)
 		}
-		g.PrimerCobro = primer.Format("2006-01-02")
+		if primer != nil {
+			g.PrimerCobro = primer.Format("2006-01-02")
+		}
 		g.DiaPago, g.Cuota, g.MesesCiclo, g.Quincenal = int(dia), cuota, int(ciclo), quincen
 		out = append(out, g)
 	}

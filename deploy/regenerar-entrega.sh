@@ -60,8 +60,32 @@ if [[ ! -s "$ENTREGA/schema.sql.nuevo" ]]; then
 	exit 1
 fi
 TABLAS=$(grep -c '^CREATE TABLE' "$ENTREGA/schema.sql.nuevo" || true)
+
+# La versión de las migraciones VA DENTRO del volcado.
+#
+# pg_dump --schema-only trae la tabla `schema_migrations` vacía, y eso deja una trampa: quien
+# restaure este archivo en una base limpia y arranque el backend hace que golang-migrate lea versión
+# NULL e intente aplicar la 0001 en adelante contra tablas que YA existen. La primera migración
+# falla, la base queda marcada `dirty`, y el mensaje no dice nada de esto.
+#
+# Con la fila puesta, el backend ve que el esquema ya está en su última versión y no intenta migrar.
+VERSION_MIG="$("${PSQL[@]}" "SELECT version FROM schema_migrations LIMIT 1" 2>/dev/null || true)"
+if [[ -n "${VERSION_MIG// /}" ]]; then
+	cat >> "$ENTREGA/schema.sql.nuevo" <<-SQL
+
+	--
+	-- Versión de las migraciones aplicadas, agregada por deploy/regenerar-entrega.sh.
+	--
+	-- Sin esta fila, el backend arranca creyendo que la base está sin migrar e intenta aplicar todo
+	-- desde la 0001 sobre tablas que ya existen: la primera falla y la base queda «dirty».
+	--
+	INSERT INTO public.schema_migrations (version, dirty) VALUES (${VERSION_MIG// /}, false)
+	    ON CONFLICT DO NOTHING;
+	SQL
+fi
+
 mv "$ENTREGA/schema.sql.nuevo" "$ENTREGA/schema.sql"
-verde "  schema.sql regenerado: $TABLAS tablas, $(wc -l < "$ENTREGA/schema.sql") líneas."
+verde "  schema.sql regenerado: $TABLAS tablas, $(wc -l < "$ENTREGA/schema.sql") líneas, migración ${VERSION_MIG:-?} sellada."
 
 titulo "2. ENDPOINTS.md (se verifica)"
 # Las rutas del código, tal como las registra Gin. Se toma el método y la ruta literal.

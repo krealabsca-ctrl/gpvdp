@@ -31,7 +31,7 @@ import {
   type BadgeTone,
 } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { etiquetaPeriodo, formatFecha, formatMonto, sinTildes, toNumber } from "@/lib/format";
+import { etiquetaPeriodo, formatFecha, formatMoneda, formatMonto, sinTildes, toNumber } from "@/lib/format";
 import { mensajeError } from "@/lib/apiError";
 import { usePeriodoActivo } from "@/app/PeriodoProvider";
 import {
@@ -60,13 +60,15 @@ import {
   usePropuestasTraslado,
   usePatrones,
   useReglas,
+  useReportesSegmentacion,
+  useResolverReporte,
   useResumenClasificacion,
 } from "@/features/bancos/hooks";
 import { ClasifCombobox, type ClasifElegida } from "@/features/bancos/components/ClasifCombobox";
 import { PatronesTab } from "@/features/bancos/components/PatronesTab";
 import { ResumenSeleccion } from "@/features/bancos/components/ResumenSeleccion";
 
-type Tab = "pendientes" | "patrones" | "traslados" | "reglas" | "clasificados";
+type Tab = "pendientes" | "patrones" | "traslados" | "reglas" | "clasificados" | "reportados";
 
 /** Lo que una pestaña le dice al encabezado sobre lo que está mostrando. */
 interface VistaResumen {
@@ -87,6 +89,9 @@ export function ClasificarPage() {
   const resumenQ = useResumenClasificacion(periodoFiltro);
   const reglasQ = useReglas();
   const patronesQ = usePatrones(periodoFiltro);
+  // Los avisos de los equipos que consultan por segmento. Sin período: un aviso de agosto sigue
+  // pendiente en setiembre, y esconderlo al cambiar de mes sería perderlo.
+  const reportesQ = useReportesSegmentacion(true);
 
   /**
    * Qué está mirando la pestaña activa, para que el resumen viva ARRIBA (jerarquía: primero
@@ -125,6 +130,10 @@ export function ClasificarPage() {
     { id: "traslados", label: "Traslados", count: r?.traslados },
     { id: "reglas", label: "Reglas", count: reglasQ.data?.length },
     { id: "clasificados", label: "Clasificados", count: clasificados },
+    // Lo que los equipos avisaron que quedó mal segmentado. Vive acá y no en una bandeja aparte:
+    // un movimiento reportado es un movimiento a reclasificar, y las herramientas ya están en
+    // esta pantalla. Dos lugares para clasificar terminan con uno sin mirar.
+    { id: "reportados", label: "Reportados", count: reportesQ.data?.reportes.length },
   ];
 
   return (
@@ -251,6 +260,172 @@ export function ClasificarPage() {
           onVista={setVista}
         />
       )}
+      {tab === "reportados" && <ReportadosTab />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Reportados: lo que los equipos avisaron que quedó mal segmentado
+// ---------------------------------------------------------------------------
+
+/**
+ * La cola de avisos. Cada fila trae el movimiento con la partida que tiene HOY —no la que tenía
+ * cuando alguien avisó—, porque eso es lo que hay que juzgar.
+ *
+ * Se cierra de dos maneras y las dos dejan rastro: «Ya lo corregí» después de reclasificar, o
+ * «Está bien» con una explicación que el equipo ve en su pantalla. La explicación es obligatoria
+ * en ese caso: cerrar sin decir por qué deja la misma duda y el mismo movimiento vuelve a
+ * reportarse el mes siguiente.
+ */
+function ReportadosTab() {
+  const toast = useToast();
+  const q = useReportesSegmentacion(true);
+  const resolver = useResolverReporte();
+  const [explicando, setExplicando] = useState<string | null>(null);
+  const [respuesta, setRespuesta] = useState("");
+
+  if (q.isPending) return <LoadingState label="Cargando los avisos" />;
+  if (q.isError) return <ErrorState message={mensajeError(q.error)} onRetry={() => q.refetch()} />;
+
+  const reportes = q.data?.reportes ?? [];
+  if (reportes.length === 0) {
+    return (
+      <EmptyState message="No hay avisos pendientes. Cuando un equipo marque un movimiento como mal segmentado, aparece acá." />
+    );
+  }
+
+  function cerrar(id: string, resolucion: "RECLASIFICADO" | "SIN_CAMBIO", texto = "") {
+    resolver.mutate(
+      { reporteId: id, resolucion, respuesta: texto },
+      {
+        onSuccess: () => {
+          toast.success("Aviso cerrado. El equipo ve la respuesta en su pantalla.");
+          setExplicando(null);
+          setRespuesta("");
+        },
+        onError: (err) => toast.error(mensajeError(err)),
+      },
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-sm text-content-muted">
+        Los equipos que consultan su partida avisaron de estos movimientos. Corregilos donde
+        corresponda —con «Por clasificar» o reclasificando— y cerrá el aviso. Los marcados{" "}
+        <b className="text-content">«No aparece en el banco»</b> son plata que el equipo esperaba y
+        no encontró: si existe, hay que clasificarla; si no entró, cerralo explicando eso.
+      </p>
+      <TableContainer>
+        <Table>
+          <THead>
+            <TR>
+              <TH>Fecha</TH>
+              <TH>Movimiento</TH>
+              <TH className="text-right">Monto</TH>
+              <TH>Partida actual</TH>
+              <TH>Quién avisó y por qué</TH>
+              <TH className="text-right">Acción</TH>
+            </TR>
+          </THead>
+          <TBody>
+            {reportes.map((rep) => (
+              <TR key={rep.id}>
+                <TD className="tabular-nums whitespace-nowrap">
+                  {rep.es_faltante ? rep.fecha_esperada : rep.fecha}
+                </TD>
+                <TD className="text-sm">
+                  {/* Un aviso de FALTANTE puede no tener movimiento: entonces lo único que hay para
+                      buscarlo es lo que el equipo esperaba. Decirlo así evita que la fila se lea
+                      como un movimiento sin descripción. */}
+                  {rep.es_faltante && !rep.movimiento_id ? (
+                    <>
+                      <p className="font-medium text-pendiente">No aparece en el banco</p>
+                      <p className="text-xs text-content-muted">
+                        {rep.referencia ? `Referencia: ${rep.referencia}` : "Sin referencia"}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p>{rep.descripcion || "—"}</p>
+                      <p className="text-xs text-content-muted">
+                        {rep.es_faltante && <>Faltante · </>}
+                        {rep.banco} · {rep.cuenta}
+                      </p>
+                    </>
+                  )}
+                </TD>
+                <TD className="text-right tabular-nums whitespace-nowrap">
+                  {formatMoneda(rep.es_faltante && !rep.movimiento_id ? rep.monto_esperado : rep.monto_crc)}
+                </TD>
+                <TD className="text-sm">
+                  {rep.es_faltante && !rep.movimiento_id ? (
+                    <span className="text-content-muted">— sin identificar</span>
+                  ) : rep.clasificacion ? (
+                    <span>
+                      {rep.concepto} › {rep.clasificacion}
+                    </span>
+                  ) : (
+                    <Badge tone="negativo">Sin clasificar</Badge>
+                  )}
+                </TD>
+                <TD className="text-sm">
+                  <p className="font-medium text-content">{rep.usuario}</p>
+                  <p className="text-xs text-content-muted">«{rep.motivo}»</p>
+                </TD>
+                <TD className="text-right">
+                  {explicando === rep.id ? (
+                    <div className="flex flex-col items-end gap-2">
+                      <Input
+                        aria-label="Por qué la partida está bien"
+                        value={respuesta}
+                        onChange={(e) => setRespuesta(e.target.value)}
+                        placeholder="Por qué está bien clasificado"
+                        className="w-64"
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          onClick={() => cerrar(rep.id, "SIN_CAMBIO", respuesta)}
+                          loading={resolver.isPending}
+                          disabled={!respuesta.trim()}
+                        >
+                          Enviar y cerrar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setExplicando(null);
+                            setRespuesta("");
+                          }}
+                        >
+                          Cancelar
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => cerrar(rep.id, "RECLASIFICADO")}
+                        loading={resolver.isPending}
+                      >
+                        Ya lo corregí
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setExplicando(rep.id)}>
+                        Está bien…
+                      </Button>
+                    </div>
+                  )}
+                </TD>
+              </TR>
+            ))}
+          </TBody>
+        </Table>
+      </TableContainer>
     </div>
   );
 }

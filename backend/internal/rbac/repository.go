@@ -18,6 +18,21 @@ var (
 	ErrRolBaseProtegido = errors.New("rbac: los roles base no se pueden eliminar")
 )
 
+// RolDeOtraEmpresaError indica que el rol pedido SÍ existe, pero es a medida de otra empresa.
+//
+// Un rol a medida pertenece a la empresa donde se creó (`rol.empresa_id`); los roles base valen para
+// todas. Así que llevar un usuario con rol a medida a otra empresa exige crear ese rol también allá.
+// Se distingue de «no encontrado» porque el camino a seguir es distinto y hay que decirlo.
+type RolDeOtraEmpresaError struct {
+	Codigo   string
+	Empresas string
+}
+
+func (e *RolDeOtraEmpresaError) Error() string {
+	return "el rol «" + e.Codigo + "» es a medida de " + e.Empresas +
+		", no de esta empresa. Creá un rol equivalente acá (Configuración › Seguridad) o elegí uno de los roles base"
+}
+
 // Repository es el acceso a datos de RBAC.
 type Repository struct{ pool *pgxpool.Pool }
 
@@ -119,9 +134,16 @@ func (r *Repository) SetPermisosDeRol(ctx context.Context, empresaID, rolCodigo 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// El `ORDER BY` no es decorativo: desde la migración 0067 un código puede pertenecer a un rol base
+	// Y a un rol a medida de esta empresa, y sin orden explícito `QueryRow` tomaría cualquiera de los
+	// dos —o sea, los permisos podrían caer en el rol equivocado sin ningún error—. Gana el a medida,
+	// el mismo criterio que usa la asignación de roles a usuarios.
 	var rolID string
 	err = tx.QueryRow(ctx,
-		`SELECT id::text FROM rol WHERE codigo = $1 AND (empresa_id IS NULL OR empresa_id = $2::uuid)`,
+		`SELECT id::text FROM rol
+		 WHERE codigo = $1 AND (empresa_id IS NULL OR empresa_id = $2::uuid)
+		 ORDER BY (empresa_id IS NOT NULL) DESC
+		 LIMIT 1`,
 		rolCodigo, empresaID).Scan(&rolID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrRolNoEncontrado

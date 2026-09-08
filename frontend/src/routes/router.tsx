@@ -10,10 +10,12 @@ import { DashboardPage } from "@/features/bancos/pages/DashboardPage";
 import { ImportadorPage } from "@/features/bancos/pages/ImportadorPage";
 import { ClasificarPage } from "@/features/bancos/pages/ClasificarPage";
 import { CatalogoPage } from "@/features/bancos/pages/CatalogoPage";
+import { MiSegmentoPage } from "@/features/bancos/pages/MiSegmentoPage";
 import { TipoCambioPage } from "@/features/bancos/pages/TipoCambioPage";
 import { ExportarPage } from "@/features/bancos/pages/ExportarPage";
 import { ProyeccionesPage } from "@/features/bancos/pages/ProyeccionesPage";
 import { AnalisisPage } from "@/features/bancos/pages/AnalisisPage";
+import { ControlPage } from "@/features/bancos/pages/ControlPage";
 import { SaldosDiariosPage } from "@/features/bancos/pages/SaldosDiariosPage";
 import { ConciliacionPage } from "@/features/bancos/pages/ConciliacionPage";
 import { AjustesPage } from "@/features/bancos/pages/AjustesPage";
@@ -27,6 +29,7 @@ import { ProveedoresPage } from "@/features/cxp/pages/ProveedoresPage";
 import { DepartamentosPage } from "@/features/cxp/pages/DepartamentosPage";
 import { ContabilidadPage } from "@/features/cxp/pages/ContabilidadPage";
 import { ValidacionRiesgoPage } from "@/features/cxp/pages/ValidacionRiesgoPage";
+import { CatalogoGastoPage } from "@/features/cxp/pages/CatalogoGastoPage";
 import { AnticiposPage } from "@/features/cxp/pages/AnticiposPage";
 import { CajaChicaPage } from "@/features/cxp/pages/CajaChicaPage";
 import { NuevoDocumentoPage } from "@/features/cxp/pages/NuevoDocumentoPage";
@@ -50,6 +53,17 @@ import { CorridasPage } from "@/features/rrhh/pages/CorridasPage";
 import { FiniquitosPage } from "@/features/rrhh/pages/FiniquitosPage";
 import { AusenciasPage } from "@/features/rrhh/pages/AusenciasPage";
 import { DashboardRRHHPage } from "@/features/rrhh/pages/DashboardRRHHPage";
+import { ExistenciasPage } from "@/features/inventario/pages/ExistenciasPage";
+import { EntradasPage } from "@/features/inventario/pages/EntradasPage";
+import { ServiciosPage } from "@/features/inventario/pages/ServiciosPage";
+import { TrasladosPage } from "@/features/inventario/pages/TrasladosPage";
+import { ReposicionPage } from "@/features/inventario/pages/ReposicionPage";
+import { RotacionPage } from "@/features/inventario/pages/RotacionPage";
+import { CatalogoInvPage } from "@/features/inventario/pages/CatalogoInvPage";
+import { ConteoPage } from "@/features/inventario/pages/ConteoPage";
+import { ConsignacionPage } from "@/features/inventario/pages/ConsignacionPage";
+// Vista consolidada del grupo: la única que cruza empresas, y solo lee.
+import { ConsolidadoPage } from "@/features/grupo/pages/ConsolidadoPage";
 
 /**
  * Definición de rutas.
@@ -87,9 +101,11 @@ export const router = createBrowserRouter([
           { path: "movimientos", element: <Navigate to="/clasificar" replace /> },
           { path: "revisar", element: <Navigate to="/clasificar" replace /> },
           { path: "catalogo", element: <CatalogoPage /> },
+          { path: "mi-segmento", element: <MiSegmentoPage /> },
           { path: "tipo-cambio", element: <TipoCambioPage /> },
           { path: "exportar", element: <ExportarPage /> },
           { path: "analisis", element: <AnalisisPage /> },
+          { path: "control", element: <ControlPage /> },
           { path: "proyecciones", element: <ProyeccionesPage /> },
           { path: "saldos-diarios", element: <SaldosDiariosPage /> },
           // Ruta vieja (se llamó «tesoreria» un día): el nombre chocaba con el módulo futuro.
@@ -107,6 +123,7 @@ export const router = createBrowserRouter([
           { path: "cxp/anticipos", element: <AnticiposPage /> },
           { path: "cxp/cajas", element: <CajaChicaPage /> },
           { path: "cxp/departamentos", element: <DepartamentosPage /> },
+          { path: "cxp/catalogo", element: <CatalogoGastoPage /> },
           { path: "cxp/contabilidad", element: <ContabilidadPage /> },
           { path: "cxp/validacion", element: <ValidacionRiesgoPage /> },
           { path: "cxp/documentos/nuevo", element: <NuevoDocumentoPage /> },
@@ -135,6 +152,18 @@ export const router = createBrowserRouter([
           { path: "rrhh/ausencias", element: <AusenciasPage /> },
           { path: "rrhh/finiquitos", element: <FiniquitosPage /> },
           { path: "rrhh/parametros", element: <ParametrosNominaPage /> },
+          // Módulo Inventario (Fase 1): cofres, urnas y suministros por sede.
+          { path: "inventario", element: <ExistenciasPage /> },
+          { path: "inventario/entradas", element: <EntradasPage /> },
+          { path: "inventario/servicios", element: <ServiciosPage /> },
+          { path: "inventario/traslados", element: <TrasladosPage /> },
+          { path: "inventario/conteo", element: <ConteoPage /> },
+          { path: "inventario/consignacion", element: <ConsignacionPage /> },
+          { path: "inventario/reposicion", element: <ReposicionPage /> },
+          { path: "inventario/rotacion", element: <RotacionPage /> },
+          { path: "inventario/catalogo", element: <CatalogoInvPage /> },
+          // Grupo: vista consolidada (gated por grupo.ver desde el registro de navegación).
+          { path: "grupo", element: <ConsolidadoPage /> },
         ],
       },
     ],

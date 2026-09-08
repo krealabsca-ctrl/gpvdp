@@ -164,7 +164,14 @@ export interface PlanCargos {
   hasta: string;
   contratos: number;
   cargos: number;
+  /** Contratos que no pueden generar, agrupados por motivo. */
   excluidos: Record<string, number> | null;
+  /** Suma de `excluidos`, para no tener que sumar un mapa en pantalla. */
+  excluidos_total: number;
+  /** Contratos sanos a los que no les toca cobrar en el rango. No es un problema. */
+  fuera_del_rango: number;
+  /** Total de contratos activos: contra este cierran los tres números de arriba. */
+  activos: number;
   sobre_el_tope: boolean;
   tope: number;
 }
@@ -210,6 +217,22 @@ export const cxcApi = {
     return apiFetch<PlanCargos>("/cxc/cargos/plan", { method: "GET", query: { desde, hasta } });
   },
   /** `total` es el número que el usuario vio en el plan: si cambió, el servidor aborta. */
+  /**
+   * PATCH de los datos que dejaron al contrato apartado.
+   *
+   * Solo se mandan los campos que se cambian: lo que no viaja queda como está. Si esto fuera un PUT,
+   * corregir la modalidad pondría la cuota en cero y volvería a apartar el contrato.
+   */
+  corregirContrato(
+    numero: string,
+    cambios: { cuota?: string; dia_pago?: number; modalidad_id?: string; nota?: string },
+  ): Promise<ContratoCxc> {
+    return apiFetch<ContratoCxc>(`/cxc/contratos/${encodeURIComponent(numero)}`, {
+      method: "PATCH",
+      json: cambios,
+    });
+  },
+
   generarCargos(desde: string, hasta: string, total: number): Promise<{ plan: PlanCargos; creados: number }> {
     return apiFetch<{ plan: PlanCargos; creados: number }>("/cxc/cargos/generar", {
       method: "POST",

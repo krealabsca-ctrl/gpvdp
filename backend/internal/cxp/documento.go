@@ -13,6 +13,11 @@ var (
 	ErrDocumentoDuplicado = errors.New("cxp: ya existe un documento con esa clave")
 	// ErrTransicionInvalida indica que el documento no está en el estado requerido para la acción.
 	ErrTransicionInvalida = errors.New("cxp: transición de estado no permitida")
+	// ErrDocumentoBloqueadoParaPago indica que el documento no puede avanzar hacia el pago porque
+	// está marcado como no pagable (una provisión que se reemplaza por la factura real, por ejemplo).
+	// Existe para no responder «transición de estado no permitida», que manda a revisar el estado
+	// cuando el estado está bien.
+	ErrDocumentoBloqueadoParaPago = errors.New("cxp: este documento no puede pagarse por banco")
 	// ErrYaAprobado indica que el usuario ya aprobó este documento.
 	ErrYaAprobado = errors.New("cxp: el usuario ya aprobó este documento")
 	// ErrCatalogoInvalido indica que el concepto/clasificación no existe en la empresa.
@@ -158,6 +163,12 @@ type Documento struct {
 	// funciones: quien decide que una factura se salta la validación de área no puede además
 	// firmarla. Sin esto, un solo usuario con los dos permisos cierra el ciclo completo.
 	ContabilidadMarcadoPor string `json:"contabilidad_marcado_por"`
+
+	// BloqueadoParaPago: no se puede programar ni entrar al archivo del banco, aunque el estado lo
+	// permitiría. Viaja al cliente para que la pantalla pueda EXPLICARLO: sin este campo, intentar
+	// programarlo devolvía «transición de estado no permitida» y nadie entendía por qué.
+	BloqueadoParaPago bool   `json:"bloqueado_para_pago"`
+	BloqueoMotivo     string `json:"bloqueo_motivo"`
 }
 
 // Orígenes posibles de la marca «de Contabilidad».
@@ -199,6 +210,12 @@ type DocumentoInput struct {
 	Descripcion  string
 	Vencimiento  string // YYYY-MM-DD o "" (para el archivo de pagos maestro)
 	Tipo         string // "" => CXP por defecto
+	// BloqueadoParaPago marca un documento que NO debe salir por el banco aunque su estado lo
+	// permita. Lo usan las provisiones que otro módulo genera y que se reemplazan por la factura
+	// REAL del proveedor en vez de pagarse: sin esto se podía pagar la provisión y después la
+	// factura verdadera, o sea el mismo gasto dos veces. Ver la migración 0072.
+	BloqueadoParaPago bool
+	BloqueoMotivo     string
 }
 
 // FiltrosDocumentos filtra la hoja de documentos.

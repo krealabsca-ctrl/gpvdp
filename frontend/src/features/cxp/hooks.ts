@@ -769,6 +769,58 @@ export function useCrearSubclasificacion() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Catálogo de gasto — la puerta de Contabilidad (cxp.catalogo)
+// ---------------------------------------------------------------------------
+//
+// Las claves que se invalidan son las de BANCOS a propósito: el catálogo es uno y lo leen los dos
+// módulos (el clasificador de gasto de CxP lee `bancos.conceptos`/`clasificaciones` con ámbito
+// «cxp»). Invalidar una clave de CxP dejaría el selector mostrando el catálogo viejo justo después
+// de abrir el rubro, que es cuando se lo va a usar.
+
+function invalidarCatalogoGasto(qc: QueryClient, empresaId: string): void {
+  void qc.invalidateQueries({ queryKey: queryKeys.bancos.conceptosRaiz(empresaId) });
+  void qc.invalidateQueries({ queryKey: queryKeys.bancos.clasificacionesRaiz(empresaId) });
+}
+
+export function useCrearConceptoGasto() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (nombre: string) => cxpApi.crearConceptoGasto(nombre),
+    onSuccess: () => invalidarCatalogoGasto(qc, empresaId),
+  });
+}
+
+export function useRenombrarConceptoGasto() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; nombre: string }) => cxpApi.renombrarConceptoGasto(vars.id, vars.nombre),
+    onSuccess: () => invalidarCatalogoGasto(qc, empresaId),
+  });
+}
+
+export function useCrearClasificacionGasto() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { conceptoId: string; nombre: string }) =>
+      cxpApi.crearClasificacionGasto(vars.conceptoId, vars.nombre),
+    onSuccess: () => invalidarCatalogoGasto(qc, empresaId),
+  });
+}
+
+export function useRenombrarClasificacionGasto() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; nombre: string }) =>
+      cxpApi.renombrarClasificacionGasto(vars.id, vars.nombre),
+    onSuccess: () => invalidarCatalogoGasto(qc, empresaId),
+  });
+}
+
 export function usePrioridadMasiva() {
   const empresaId = useEmpresaId();
   const qc = useQueryClient();

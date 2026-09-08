@@ -1,0 +1,932 @@
+<title>GPVDP · Inventario (maqueta)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;500;600&family=Noto+Sans+JP:wght@300;400;500;600;700&display=swap">
+<style>
+  /* ══════════════════════════════════════════════════════════════════════════
+     Maqueta del módulo de Inventario · estética sumi-e (tinta sobre papel).
+
+     Tres reglas que la sostienen:
+       · El vacío es estructura, no sobra: se separa con aire, no con cajas.
+       · Línea de 1 px como único trazo: nada de sombras ni esquinas redondeadas.
+       · Un solo acento fuerte (el bermellón del sello) y se usa una vez por pantalla.
+
+     Navegación 100 % CSS (radios + :checked): el visor de archivos no ejecuta
+     JavaScript, así que la maqueta tiene que funcionar sin scripts.
+     ══════════════════════════════════════════════════════════════════════════ */
+  :root {
+    --washi: #F3F3F0;        /* papel */
+    --washi-2: #FBFBF9;      /* papel levantado */
+    --washi-3: #EBEBE6;      /* papel hundido */
+    --sumi: #1C1C1A;         /* tinta */
+    --sumi-2: #55564F;       /* tinta aguada */
+    --sumi-3: #8C8D84;       /* tinta muy aguada */
+    --kasen: #DBDBD4;        /* línea */
+    --kasen-2: #C4C4BB;      /* línea marcada */
+    --ai: #2B4257;           /* índigo — estructura y acento frío */
+    --ai-soft: #E4E9ED;
+    --shu: #A8382C;          /* bermellón del sello — un solo uso por pantalla */
+    --shu-soft: #F4E7E4;
+    --matcha: #5F7647;       /* bien */
+    --matcha-soft: #E9EDE3;
+    --kincha: #9A7526;       /* atención */
+    --kincha-soft: #F3EEDF;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --washi: #14150F;
+      --washi-2: #1C1E17;
+      --washi-3: #101109;
+      --sumi: #EAEAE2;
+      --sumi-2: #A8A99E;
+      --sumi-3: #7A7B71;
+      --kasen: #2C2E26;
+      --kasen-2: #3D4036;
+      --ai: #8FB0C9;
+      --ai-soft: #1B2833;
+      --shu: #D9776A;
+      --shu-soft: #2E1A17;
+      --matcha: #9BB77C;
+      --matcha-soft: #1D2417;
+      --kincha: #CFA94F;
+      --kincha-soft: #2A2313;
+    }
+  }
+  :root[data-theme="dark"] {
+    --washi: #14150F; --washi-2: #1C1E17; --washi-3: #101109;
+    --sumi: #EAEAE2; --sumi-2: #A8A99E; --sumi-3: #7A7B71;
+    --kasen: #2C2E26; --kasen-2: #3D4036;
+    --ai: #8FB0C9; --ai-soft: #1B2833;
+    --shu: #D9776A; --shu-soft: #2E1A17;
+    --matcha: #9BB77C; --matcha-soft: #1D2417;
+    --kincha: #CFA94F; --kincha-soft: #2A2313;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--washi);
+    color: var(--sumi);
+    font-family: "Noto Sans JP", ui-sans-serif, system-ui, sans-serif;
+    font-size: 13.5px; font-weight: 400; line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4 { margin: 0; font-family: "Noto Serif JP", Georgia, serif; font-weight: 400; text-wrap: balance; }
+  .n { font-variant-numeric: tabular-nums lining-nums; }
+  :focus-visible { outline: 1px solid var(--ai); outline-offset: 3px; }
+  a { color: var(--ai); }
+
+  /* ── Navegación sin JavaScript ─────────────────────────────────────────── */
+  input.nav { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  main > section { display: none; }
+  #n1:checked ~ .shell #s1, #n2:checked ~ .shell #s2, #n3:checked ~ .shell #s3,
+  #n4:checked ~ .shell #s4, #n5:checked ~ .shell #s5, #n6:checked ~ .shell #s6,
+  #n7:checked ~ .shell #s7 { display: block; }
+  #n1:checked ~ .shell label[for=n1], #n2:checked ~ .shell label[for=n2],
+  #n3:checked ~ .shell label[for=n3], #n4:checked ~ .shell label[for=n4],
+  #n5:checked ~ .shell label[for=n5], #n6:checked ~ .shell label[for=n6],
+  #n7:checked ~ .shell label[for=n7] { color: var(--sumi); border-left-color: var(--shu); }
+  #n1:checked ~ .shell label[for=n1] .kan, #n2:checked ~ .shell label[for=n2] .kan,
+  #n3:checked ~ .shell label[for=n3] .kan, #n4:checked ~ .shell label[for=n4] .kan,
+  #n5:checked ~ .shell label[for=n5] .kan, #n6:checked ~ .shell label[for=n6] .kan,
+  #n7:checked ~ .shell label[for=n7] .kan { color: var(--shu); }
+
+  /* ── Cabecera ─────────────────────────────────────────────────────────── */
+  .top {
+    display: flex; align-items: center; gap: 18px;
+    padding: 16px 26px; background: var(--washi-2);
+    border-bottom: 1px solid var(--kasen);
+    position: sticky; top: 0; z-index: 30; flex-wrap: wrap;
+  }
+  .top .zaiko { font-family: "Noto Serif JP", serif; font-size: 19px; letter-spacing: .1em; color: var(--ai); }
+  .top h1 { font-size: 14px; font-weight: 500; letter-spacing: .01em; line-height: 1.3; }
+  .top h1 span { display: block; font-family: "Noto Sans JP", sans-serif; font-size: 10.5px; font-weight: 400; color: var(--sumi-3); letter-spacing: .06em; }
+  .sello {
+    margin-left: auto; display: flex; align-items: center; gap: 9px;
+    font-size: 10px; letter-spacing: .1em; color: var(--sumi-3);
+  }
+  .sello .hanko {
+    font-family: "Noto Serif JP", serif; font-size: 15px; font-weight: 500; line-height: 1;
+    color: #fff; background: var(--shu);
+    width: 34px; height: 34px; display: grid; place-items: center;
+    letter-spacing: 0;
+  }
+
+  /* ── Riel ─────────────────────────────────────────────────────────────── */
+  .shell { display: flex; align-items: stretch; min-height: calc(100vh - 67px); }
+  .rail {
+    width: 232px; flex: none; padding: 26px 0 26px;
+    border-right: 1px solid var(--kasen); background: var(--washi-2);
+  }
+  .rail .grupo {
+    font-size: 9.5px; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--sumi-3); padding: 0 22px 12px;
+  }
+  .rail label {
+    display: grid; grid-template-columns: 20px 1fr; gap: 12px; align-items: baseline;
+    padding: 9px 22px; cursor: pointer; color: var(--sumi-2);
+    border-left: 2px solid transparent;
+  }
+  .rail label:hover { background: var(--washi-3); color: var(--sumi); }
+  .rail label .kan { font-family: "Noto Serif JP", serif; font-size: 14px; color: var(--sumi-3); }
+  .rail label b { font-weight: 500; font-size: 13px; display: block; line-height: 1.4; }
+  .rail label em { font-style: normal; font-size: 10.5px; color: var(--sumi-3); display: block; line-height: 1.45; }
+  .rail .nota {
+    margin: 26px 22px 0; padding-top: 18px; border-top: 1px solid var(--kasen);
+    font-size: 10.5px; line-height: 1.6; color: var(--sumi-3);
+  }
+
+  /* ── Contenido ────────────────────────────────────────────────────────── */
+  .main { flex: 1; min-width: 0; padding: 42px 46px 96px; }
+  .cab { margin-bottom: 38px; }
+  .cab .eyebrow { font-size: 9.5px; letter-spacing: .2em; text-transform: uppercase; color: var(--sumi-3); }
+  .cab h2 { font-size: 27px; font-weight: 400; letter-spacing: .01em; margin-top: 10px; }
+  .cab h2 .kan { color: var(--sumi-3); font-size: 19px; margin-left: 12px; letter-spacing: .1em; }
+  .cab p { margin: 12px 0 0; color: var(--sumi-2); max-width: 66ch; }
+
+  /* Cifras: separadas por aire y una línea vertical, sin tarjetas. */
+  .cifras { display: flex; flex-wrap: wrap; gap: 0 44px; margin: 0 0 40px; }
+  .cifra { padding-left: 18px; border-left: 1px solid var(--kasen); min-width: 9rem; }
+  .cifra .k { font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--sumi-3); }
+  .cifra .v { font-family: "Noto Serif JP", serif; font-size: 26px; line-height: 1.25; font-variant-numeric: tabular-nums; }
+  .cifra .d { font-size: 10.5px; color: var(--sumi-3); line-height: 1.5; }
+  .cifra.aviso { border-left-color: var(--shu); }
+  .cifra.aviso .v { color: var(--shu); }
+
+  h3.sec {
+    font-size: 13px; font-weight: 500; letter-spacing: .02em;
+    margin: 44px 0 16px; padding-bottom: 9px;
+    border-bottom: 1px solid var(--kasen-2);
+    display: flex; align-items: baseline; gap: 12px;
+  }
+  h3.sec .kan { font-size: 11px; color: var(--sumi-3); letter-spacing: .1em; }
+  h3.sec .der { margin-left: auto; font-family: "Noto Sans JP", sans-serif; font-size: 10.5px; font-weight: 400; color: var(--sumi-3); }
+
+  /* ── Tablas: solo líneas horizontales, como un registro escrito ───────── */
+  .tabla { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th {
+    text-align: left; font-size: 9.5px; font-weight: 500;
+    letter-spacing: .13em; text-transform: uppercase; color: var(--sumi-3);
+    padding: 0 14px 9px 0; border-bottom: 1px solid var(--kasen-2); white-space: nowrap;
+  }
+  td { padding: 11px 14px 11px 0; border-bottom: 1px solid var(--kasen); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  td:last-child, th:last-child { padding-right: 0; }
+  .num, th.num { text-align: right; font-variant-numeric: tabular-nums lining-nums; white-space: nowrap; }
+  td.art { font-weight: 500; }
+  td .sub { display: block; font-size: 10.5px; color: var(--sumi-3); font-weight: 400; }
+  tr.total td { border-top: 1px solid var(--kasen-2); border-bottom: 0; font-weight: 500; padding-top: 12px; }
+
+  /* ── Marcas de estado: texto con un trazo, no globos de color ─────────── */
+  .marca { font-size: 10.5px; letter-spacing: .04em; white-space: nowrap; padding-left: 9px; border-left: 2px solid var(--kasen-2); }
+  .marca.ok { border-left-color: var(--matcha); color: var(--matcha); }
+  .marca.baja { border-left-color: var(--shu); color: var(--shu); }
+  .marca.tibia { border-left-color: var(--kincha); color: var(--kincha); }
+  .marca.gris { color: var(--sumi-3); }
+  .marca.ai { border-left-color: var(--ai); color: var(--ai); }
+
+  .barra { height: 3px; background: var(--washi-3); margin-top: 6px; width: 92px; }
+  .barra i { display: block; height: 3px; background: var(--matcha); }
+  .barra.baja i { background: var(--shu); }
+  .barra.tibia i { background: var(--kincha); }
+
+  /* ── Panel de nota: papel hundido con una línea índigo ────────────────── */
+  .panel {
+    background: var(--washi-2); border: 1px solid var(--kasen);
+    border-left: 2px solid var(--ai);
+    padding: 20px 24px; margin: 32px 0;
+  }
+  .panel.rojo { border-left-color: var(--shu); }
+  .panel .t { font-family: "Noto Serif JP", serif; font-size: 15px; margin-bottom: 8px; }
+  .panel p { margin: 0; color: var(--sumi-2); max-width: 74ch; }
+  .panel p + p { margin-top: 10px; }
+
+  /* ── Formularios de la maqueta (inertes, solo muestran la forma) ──────── */
+  .campos { display: grid; gap: 22px 30px; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); margin: 4px 0 0; }
+  .campo .k { font-size: 9.5px; letter-spacing: .13em; text-transform: uppercase; color: var(--sumi-3); display: block; margin-bottom: 7px; }
+  .campo .v {
+    border-bottom: 1px solid var(--kasen-2); padding-bottom: 7px;
+    font-size: 13.5px; min-height: 24px;
+  }
+  .campo .v.vacio { color: var(--sumi-3); }
+  .campo .h { font-size: 10.5px; color: var(--sumi-3); margin-top: 6px; line-height: 1.5; }
+  .acciones { display: flex; gap: 14px; align-items: center; margin-top: 34px; padding-top: 22px; border-top: 1px solid var(--kasen); flex-wrap: wrap; }
+  .btn { border: 1px solid var(--sumi); background: var(--sumi); color: var(--washi-2); padding: 9px 22px; font-size: 12.5px; font-family: inherit; }
+  .btn.sec { background: none; color: var(--sumi-2); border-color: var(--kasen-2); }
+  .acciones .h { font-size: 10.5px; color: var(--sumi-3); }
+
+  /* ── Recorrido de un cofre: pasos con línea de tiempo horizontal ──────── */
+  .flujo { display: flex; flex-wrap: wrap; gap: 0; margin: 8px 0 0; }
+  .paso { flex: 1 1 8rem; padding: 0 16px 0 0; border-top: 2px solid var(--kasen-2); padding-top: 12px; }
+  .paso.hecho { border-top-color: var(--ai); }
+  .paso.aqui { border-top-color: var(--shu); }
+  .paso .k { font-size: 9.5px; letter-spacing: .13em; text-transform: uppercase; color: var(--sumi-3); }
+  .paso b { display: block; font-size: 12.5px; font-weight: 500; margin-top: 4px; }
+  .paso em { font-style: normal; font-size: 10.5px; color: var(--sumi-3); }
+  .paso.aqui b { color: var(--shu); }
+
+  .dos { display: grid; gap: 40px; grid-template-columns: 1fr; }
+  @media (min-width: 1080px) { .dos { grid-template-columns: 1fr 1fr; } }
+
+  @media (max-width: 900px) {
+    .shell { flex-direction: column; }
+    .rail { width: auto; border-right: 0; border-bottom: 1px solid var(--kasen); display: flex; flex-wrap: wrap; padding: 12px; }
+    .rail .grupo, .rail .nota { display: none; }
+    .rail label { padding: 8px 14px; border-left: 0; border-bottom: 2px solid transparent; }
+    #n1:checked ~ .shell label[for=n1], #n2:checked ~ .shell label[for=n2],
+    #n3:checked ~ .shell label[for=n3], #n4:checked ~ .shell label[for=n4],
+    #n5:checked ~ .shell label[for=n5], #n6:checked ~ .shell label[for=n6],
+    #n7:checked ~ .shell label[for=n7] { border-left-color: transparent; border-bottom-color: var(--shu); }
+    .rail label em { display: none; }
+    .main { padding: 26px 20px 70px; }
+    .cab h2 { font-size: 22px; }
+  }
+</style>
+
+<input class="nav" type="radio" name="p" id="n1" checked>
+<input class="nav" type="radio" name="p" id="n2">
+<input class="nav" type="radio" name="p" id="n3">
+<input class="nav" type="radio" name="p" id="n4">
+<input class="nav" type="radio" name="p" id="n5">
+<input class="nav" type="radio" name="p" id="n6">
+<input class="nav" type="radio" name="p" id="n7">
+
+<div class="shell">
+
+  <header class="top">
+    <h1>Inventario<span>Finance Group VDP · Valle de Paz</span></h1>
+    <div class="sello">
+      <span>Maqueta para revisar<br>ningún dato es real</span>
+      <span class="hanko" aria-hidden="true">M</span>
+    </div>
+  </header>
+
+  <nav class="rail">
+    <div class="grupo">Inventario</div>
+    <label for="n1"><span class="kan">1</span><span><b>Existencias</b><em>Qué hay y en qué sede</em></span></label>
+    <label for="n2"><span class="kan">2</span><span><b>Entrada</b><em>Llegó mercadería</em></span></label>
+    <label for="n3"><span class="kan">3</span><span><b>Salida por servicio</b><em>Lo que consumió un funeral</em></span></label>
+    <label for="n4"><span class="kan">4</span><span><b>Traslados</b><em>Entre sedes, con lo que va en camino</em></span></label>
+    <label for="n5"><span class="kan">5</span><span><b>Conteo</b><em>Contar y explicar la diferencia</em></span></label>
+    <label for="n6"><span class="kan">6</span><span><b>Reposición</b><em>Qué pedir esta semana</em></span></label>
+    <label for="n7"><span class="kan">7</span><span><b>Rotación</b><em>Qué se mueve y qué está parado</em></span></label>
+    <p class="nota">
+      Maqueta sin funcionamiento: los botones no guardan nada. Sirve para acordar qué muestra cada
+      pantalla antes de construirla.
+    </p>
+  </nav>
+
+  <main class="main">
+
+    <!-- ══ 1 · EXISTENCIAS ══════════════════════════════════════════════════ -->
+    <section id="s1">
+      <div class="cab">
+        <div class="eyebrow">Pantalla 1 · Existencias</div>
+        <h2>Qué hay hoy</h2>
+        <p>
+          El cofre se cuenta <strong>por unidad</strong> porque cada uno tiene su costo y su
+          ubicación; la urna se cuenta <strong>por cantidad</strong> porque se pide cada semana y no
+          tiene identidad propia.
+        </p>
+      </div>
+
+      <div class="cifras">
+        <div class="cifra">
+          <div class="k">Cofres</div>
+          <div class="v n">47</div>
+          <div class="d">unidades en 6 sedes</div>
+        </div>
+        <div class="cifra">
+          <div class="k">Urnas</div>
+          <div class="v n">134</div>
+          <div class="d">en 9 modelos</div>
+        </div>
+        <div class="cifra">
+          <div class="k">Capital detenido</div>
+          <div class="v n">₡8,24 M</div>
+          <div class="d">al costo, sin consignadas</div>
+        </div>
+        <div class="cifra aviso">
+          <div class="k">Bajo el mínimo</div>
+          <div class="v n">4</div>
+          <div class="d">artículos en 3 sedes</div>
+        </div>
+        <div class="cifra">
+          <div class="k">Consignadas</div>
+          <div class="v n">12</div>
+          <div class="d">₡2,10 M que no son capital propio</div>
+        </div>
+      </div>
+
+      <h3 class="sec">Cofres · una fila por unidad
+        <span class="der">47 unidades · mostrando 6</span></h3>
+      <div class="tabla">
+        <table>
+          <thead>
+            <tr>
+              <th>Unidad</th><th>Modelo</th><th>Sede</th><th>Estado</th>
+              <th class="num">Costo</th><th>Ingresó</th><th>Origen</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="n">CF-0412</td>
+              <td class="art">Roble tallado<span class="sub">Cofres › Línea alta</span></td>
+              <td>Camposanto Cartago</td>
+              <td><span class="marca ok">disponible</span></td>
+              <td class="num">423 750</td><td class="n">02 dic 2025</td>
+              <td>Triple Oro</td>
+            </tr>
+            <tr>
+              <td class="n">CF-0451</td>
+              <td class="art">Roble tallado<span class="sub">Cofres › Línea alta</span></td>
+              <td>Sabana</td>
+              <td><span class="marca ai">exhibición</span></td>
+              <td class="num">423 750</td><td class="n">14 ago 2026</td>
+              <td>Triple Oro</td>
+            </tr>
+            <tr>
+              <td class="n">CF-0468</td>
+              <td class="art">Cedro clásico<span class="sub">Cofres › Línea media</span></td>
+              <td>Heredia</td>
+              <td><span class="marca tibia">reservada</span><span class="sub">Servicio SV-2026-0881</span></td>
+              <td class="num">130 653</td><td class="n">25 may 2026</td>
+              <td>Megasoluciones</td>
+            </tr>
+            <tr>
+              <td class="n">CF-0470</td>
+              <td class="art">Cedro clásico<span class="sub">Cofres › Línea media</span></td>
+              <td>en camino a Liberia<span class="sub">salió de Sabana el 20 ago</span></td>
+              <td><span class="marca gris">en tránsito</span></td>
+              <td class="num">130 653</td><td class="n">19 jun 2026</td>
+              <td>Megasoluciones</td>
+            </tr>
+            <tr>
+              <td class="n">CF-0473</td>
+              <td class="art">Pino económico<span class="sub">Cofres › Línea básica</span></td>
+              <td>Pérez Zeledón</td>
+              <td><span class="marca ok">disponible</span><span class="sub">consignada · Roca Eterna</span></td>
+              <td class="num">118 650</td><td class="n">18 may 2026</td>
+              <td>Roca Eterna</td>
+            </tr>
+            <tr>
+              <td class="n">CF-0402</td>
+              <td class="art">Pino económico<span class="sub">Cofres › Línea básica</span></td>
+              <td>Camposanto Carrillo</td>
+              <td><span class="marca gris">usada</span><span class="sub">Servicio SV-2026-0874</span></td>
+              <td class="num">70 000</td><td class="n">01 ene 2026</td>
+              <td>K. Chacón</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="sec">Urnas y suministros · por cantidad
+        <span class="der">mínimo y máximo por sede</span></h3>
+      <div class="tabla">
+        <table>
+          <thead>
+            <tr>
+              <th>Artículo</th><th>Sede</th><th class="num">Hay</th><th class="num">Mín</th>
+              <th class="num">Máx</th><th>Nivel</th><th class="num">Costo unit.</th><th class="num">Valor</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="art">Urna mármol claro<span class="sub">Urnas › Cremación</span></td>
+              <td>Sabana</td>
+              <td class="num">18</td><td class="num">10</td><td class="num">24</td>
+              <td><span class="marca ok">en rango</span><span class="barra"><i style="width:75%"></i></span></td>
+              <td class="num">38 900</td><td class="num">700 200</td>
+            </tr>
+            <tr>
+              <td class="art">Urna mármol claro<span class="sub">Urnas › Cremación</span></td>
+              <td>Camposanto Cartago</td>
+              <td class="num">4</td><td class="num">8</td><td class="num">20</td>
+              <td><span class="marca baja">bajo el mínimo</span><span class="barra baja"><i style="width:20%"></i></span></td>
+              <td class="num">38 900</td><td class="num">155 600</td>
+            </tr>
+            <tr>
+              <td class="art">Urna madera nogal<span class="sub">Urnas › Cremación</span></td>
+              <td>Sabana</td>
+              <td class="num">9</td><td class="num">8</td><td class="num">18</td>
+              <td><span class="marca tibia">cerca del mínimo</span><span class="barra tibia"><i style="width:50%"></i></span></td>
+              <td class="num">52 400</td><td class="num">471 600</td>
+            </tr>
+            <tr>
+              <td class="art">Urna biodegradable<span class="sub">Urnas › Cremación</span></td>
+              <td>Heredia</td>
+              <td class="num">11</td><td class="num">6</td><td class="num">15</td>
+              <td><span class="marca ok">en rango</span><span class="barra"><i style="width:73%"></i></span></td>
+              <td class="num">24 750</td><td class="num">272 250</td>
+            </tr>
+            <tr>
+              <td class="art">Juego de velación<span class="sub">Suministros › Velación</span></td>
+              <td>Liberia</td>
+              <td class="num">2</td><td class="num">6</td><td class="num">14</td>
+              <td><span class="marca baja">bajo el mínimo</span><span class="barra baja"><i style="width:14%"></i></span></td>
+              <td class="num">18 300</td><td class="num">36 600</td>
+            </tr>
+            <tr class="total">
+              <td colspan="7">Total urnas y suministros · 9 modelos en 6 sedes</td>
+              <td class="num">3 186 420</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <div class="t">Por qué el valor sale de la historia y no de un contador</div>
+        <p>
+          La existencia se calcula sumando entradas y salidas, igual que el saldo diario en Bancos.
+          Un número guardado a mano se desincroniza y entonces hay dos verdades: la del contador y la
+          de la bodega. Acá cada cifra se puede abrir y ver de qué movimientos está hecha.
+        </p>
+      </div>
+    </section>
+
+    <!-- ══ 2 · ENTRADA ═════════════════════════════════════════════════════ -->
+    <section id="s2">
+      <div class="cab">
+        <div class="eyebrow">Pantalla 2 · Entrada</div>
+        <h2>Llegó mercadería</h2>
+        <p>
+          Una entrada por remesa. Si el artículo se controla por unidad, el sistema crea las fichas y
+          pide el número de cada una; si se controla por cantidad, alcanza con cuántas.
+        </p>
+      </div>
+
+      <h3 class="sec">Registrar la entrada</h3>
+      <div class="campos">
+        <div class="campo">
+          <span class="k">Proveedor</span>
+          <div class="v">Megasoluciones Empresariales G.M.</div>
+          <div class="h">36 de las 51 facturas de producto del año</div>
+        </div>
+        <div class="campo">
+          <span class="k">Factura</span>
+          <div class="v n">FE 00104521</div>
+          <div class="h">queda enlazada a la cuenta por pagar</div>
+        </div>
+        <div class="campo">
+          <span class="k">Sede que recibe</span>
+          <div class="v">Camposanto Cartago</div>
+        </div>
+        <div class="campo">
+          <span class="k">Fecha</span>
+          <div class="v n">22 ago 2026</div>
+        </div>
+        <div class="campo">
+          <span class="k">Artículo</span>
+          <div class="v">Cedro clásico · Cofres › Línea media</div>
+          <div class="h">se controla por unidad</div>
+        </div>
+        <div class="campo">
+          <span class="k">Cantidad</span>
+          <div class="v n">3</div>
+          <div class="h">se van a crear 3 fichas: CF-0474 a CF-0476</div>
+        </div>
+        <div class="campo">
+          <span class="k">Costo por unidad</span>
+          <div class="v n">130 653,00</div>
+          <div class="h">es el costo de estas unidades, no un promedio</div>
+        </div>
+        <div class="campo">
+          <span class="k">¿Consignada?</span>
+          <div class="v vacio">No — el capital es nuestro</div>
+          <div class="h">si fuera consignada, la cuenta por pagar nace al usarla</div>
+        </div>
+      </div>
+      <div class="acciones">
+        <button class="btn" type="button">Registrar entrada</button>
+        <button class="btn sec" type="button">Cancelar</button>
+        <span class="h">Al guardar quedan las 3 fichas disponibles en Camposanto Cartago.</span>
+      </div>
+
+      <h3 class="sec">Últimas entradas
+        <span class="der">agosto 2026</span></h3>
+      <div class="tabla">
+        <table>
+          <thead>
+            <tr><th>Fecha</th><th>Proveedor</th><th>Artículo</th><th>Sede</th><th class="num">Cant.</th><th class="num">Costo total</th><th>Factura</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="n">21 ago</td><td>Triple Oro</td><td class="art">Roble tallado</td><td>Sabana</td><td class="num">1</td><td class="num">423 750</td><td class="n">FE 00104498</td></tr>
+            <tr><td class="n">19 ago</td><td>Megasoluciones</td><td class="art">Urna mármol claro</td><td>Sabana</td><td class="num">12</td><td class="num">466 800</td><td class="n">FE 00104466</td></tr>
+            <tr><td class="n">14 ago</td><td>Roca Eterna</td><td class="art">Pino económico<span class="sub">consignadas</span></td><td>Pérez Zeledón</td><td class="num">4</td><td class="num">474 600</td><td class="n">—</td></tr>
+            <tr><td class="n">07 ago</td><td>K. Chacón</td><td class="art">Juego de velación</td><td>Heredia</td><td class="num">10</td><td class="num">183 000</td><td class="n">FE 00104402</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <div class="t">Las consignadas no llevan factura al entrar</div>
+        <p>
+          Entran a la bodega pero no son capital propio: la cuenta por pagar aparece cuando la unidad
+          se usa. Por eso la fila de Roca Eterna no tiene número de factura, y sus 4 unidades no
+          suman al capital detenido de la primera pantalla.
+        </p>
+      </div>
+    </section>
+
+    <!-- ══ 3 · SALIDA POR SERVICIO ═════════════════════════════════════════ -->
+    <section id="s3">
+      <div class="cab">
+        <div class="eyebrow">Pantalla 3 · Salida por servicio</div>
+        <h2>Lo que consumió un funeral</h2>
+        <p>
+          Es la pantalla que hace que todo lo demás funcione: el stock baja acá. Hoy este registro
+          <strong>no existe en el sistema</strong>, y es la decisión que hay que tomar antes de
+          construir.
+        </p>
+      </div>
+
+      <div class="panel rojo">
+        <div class="t">La decisión que falta</div>
+        <p>
+          Alguien tiene que anotar el servicio prestado: quién y en qué momento. Si es la persona de
+          mostrador al momento, el inventario está al día siempre. Si es alguien al cierre del día,
+          hay unas horas de desfase — aceptable, pero hay que saberlo.
+        </p>
+        <p>
+          Lo que no funciona es que nadie lo anote: entonces el stock del sistema se despega del de
+          la bodega en una semana y la pantalla anterior deja de servir para decidir.
+        </p>
+      </div>
+
+      <h3 class="sec">Servicio prestado</h3>
+      <div class="campos">
+        <div class="campo">
+          <span class="k">Número</span>
+          <div class="v n">SV-2026-0881</div>
+          <div class="h">lo pone el sistema</div>
+        </div>
+        <div class="campo">
+          <span class="k">Sede</span>
+          <div class="v">Heredia</div>
+        </div>
+        <div class="campo">
+          <span class="k">Fecha del servicio</span>
+          <div class="v n">22 ago 2026</div>
+        </div>
+        <div class="campo">
+          <span class="k">A nombre de</span>
+          <div class="v">Familia Solano Vargas</div>
+          <div class="h">o el contrato, si es un plan de la asociación</div>
+        </div>
+      </div>
+
+      <h3 class="sec">Qué se usó
+        <span class="der">esto es lo que descarga el inventario</span></h3>
+      <div class="tabla">
+        <table>
+          <thead>
+            <tr><th>Artículo</th><th>Unidad</th><th class="num">Cant.</th><th class="num">Costo</th><th>Queda</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="art">Cedro clásico<span class="sub">Cofres › Línea media</span></td>
+              <td class="n">CF-0468<span class="sub">reservada desde el 21 ago</span></td>
+              <td class="num">1</td><td class="num">130 653</td>
+              <td><span class="marca gris">la ficha pasa a «usada»</span></td>
+            </tr>
+            <tr>
+              <td class="art">Juego de velación<span class="sub">Suministros › Velación</span></td>
+              <td class="n">—</td>
+              <td class="num">1</td><td class="num">18 300</td>
+              <td><span class="marca ok">quedan 10 en Heredia</span></td>
+            </tr>
+            <tr>
+              <td class="art">Arreglo floral mediano<span class="sub">Flores › Servicio</span></td>
+              <td class="n">—</td>
+              <td class="num">2</td><td class="num">46 000</td>
+              <td><span class="marca gris">se compra por servicio, no hay stock</span></td>
+            </tr>
+            <tr class="total">
+              <td colspan="3">Costo de producto del servicio</td>
+              <td class="num">194 953</td>
+              <td><span class="marca ai">alimenta el margen</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="acciones">
+        <button class="btn" type="button">Registrar el servicio</button>
+        <button class="btn sec" type="button">Guardar sin cerrar</button>
+        <span class="h">Al registrarlo, las existencias bajan y la unidad CF-0468 deja de estar disponible.</span>
+      </div>
+    </section>
+
+    <!-- ══ 4 · TRASLADOS ═══════════════════════════════════════════════════ -->
+    <section id="s4">
+      <div class="cab">
+        <div class="eyebrow">Pantalla 4 · Traslados</div>
+        <h2>Entre sedes</h2>
+        <p>
+          Con 15 plazas, el traslado es la operación donde se pierde el control. Una unidad que sale
+          de una sede <strong>no aparece en la otra hasta que alguien la recibe</strong>: mientras
+          tanto está en tránsito y tiene un responsable.
+        </p>
+      </div>
+
+      <div class="cifras">
+        <div class="cifra"><div class="k">En camino ahora</div><div class="v n">3</div><div class="d">unidades entre sedes</div></div>
+        <div class="cifra aviso"><div class="k">Sin recibir</div><div class="v n">1</div><div class="d">salió hace 6 días</div></div>
+        <div class="cifra"><div class="k">Traslados del mes</div><div class="v n">14</div><div class="d">11 recibidos</div></div>
+      </div>
+
+      <h3 class="sec">Lo que va en camino</h3>
+      <div class="tabla">
+        <table>
+          <thead>
+            <tr><th>Unidad / artículo</th><th>Sale de</th><th>Va a</th><th>Salió</th><th>Quién lo envió</th><th>Estado</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="art">CF-0470 · Cedro clásico</td>
+              <td>Sabana</td><td>Liberia</td><td class="n">20 ago</td><td>M. Rodríguez</td>
+              <td><span class="marca gris">en tránsito · 2 días</span></td>
+            </tr>
+            <tr>
+              <td class="art">Urna mármol claro <span class="sub">6 unidades</span></td>
+              <td>Sabana</td><td>Camposanto Cartago</td><td class="n">21 ago</td><td>M. Rodríguez</td>
+              <td><span class="marca gris">en tránsito · 1 día</span></td>
+            </tr>
+            <tr>
+              <td class="art">CF-0455 · Pino económico</td>
+              <td>Nicoya</td><td>Ciudad Neilly</td><td class="n">16 ago</td><td>J. Alvarado</td>
+              <td><span class="marca baja">6 días sin recibir</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="sec">El recorrido de un traslado</h3>
+      <div class="flujo">
+        <div class="paso hecho"><div class="k">Paso 1</div><b>Se prepara</b><em>quién envía y qué unidades</em></div>
+        <div class="paso hecho"><div class="k">Paso 2</div><b>Sale</b><em>deja de estar disponible en el origen</em></div>
+        <div class="paso aqui"><div class="k">Paso 3</div><b>En tránsito</b><em>nadie puede usarla · tiene responsable</em></div>
+        <div class="paso"><div class="k">Paso 4</div><b>Se recibe</b><em>alguien de la sede destino la confirma</em></div>
+        <div class="paso"><div class="k">Paso 5</div><b>Disponible allá</b><em>vuelve a poder usarse</em></div>
+      </div>
+
+      <div class="panel">
+        <div class="t">Por qué el paso 3 no se puede saltar</div>
+        <p>
+          Sin el estado en tránsito, una unidad extraviada en el camino desaparece del sistema sin
+          que nadie tenga que responder por ella: figura como si nunca hubiera salido, o como si ya
+          hubiera llegado. Los 6 días de CF-0455 son exactamente el aviso que hace falta.
+        </p>
+      </div>
+    </section>
+
+    <!-- ══ 5 · CONTEO ══════════════════════════════════════════════════════ -->
+    <section id="s5">
+      <div class="cab">
+        <div class="eyebrow">Pantalla 5 · Conteo</div>
+        <h2>Contar y explicar</h2>
+        <p>
+          No se para la operación para un inventario general: se cuenta por partes. Lo caro varias
+          veces al año, lo barato una vez. La diferencia se muestra y se explica —
+          <strong>nunca se ajusta en silencio</strong>.
+        </p>
+      </div>
+
+      <h3 class="sec">Conteo del 22 de agosto
+        <span class="der">Camposanto Cartago · Cofres y urnas</span></h3>
+      <div class="tabla">
+        <table>
+          <thead>
+            <tr><th>Artículo</th><th class="num">Sistema</th><th class="num">Contado</th><th class="num">Diferencia</th><th>Explicación</th><th>Estado</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="art">Roble tallado</td>
+              <td class="num">3</td><td class="num">3</td><td class="num">0</td>
+              <td class="n">—</td><td><span class="marca ok">cuadra</span></td>
+            </tr>
+            <tr>
+              <td class="art">Cedro clásico</td>
+              <td class="num">6</td><td class="num">5</td><td class="num">−1</td>
+              <td>CF-0463 se usó el 19 y no se registró el servicio</td>
+              <td><span class="marca tibia">explicada</span></td>
+            </tr>
+            <tr>
+              <td class="art">Urna mármol claro</td>
+              <td class="num">4</td><td class="num">4</td><td class="num">0</td>
+              <td class="n">—</td><td><span class="marca ok">cuadra</span></td>
+            </tr>
+            <tr>
+              <td class="art">Urna madera nogal</td>
+              <td class="num">7</td><td class="num">5</td><td class="num">−2</td>
+              <td class="n vacio">—</td>
+              <td><span class="marca baja">sin explicar</span></td>
+            </tr>
+            <tr class="total">
+              <td>4 artículos contados</td>
+              <td class="num">20</td><td class="num">17</td><td class="num">−3</td>
+              <td>1 explicada · 1 pendiente</td>
+              <td><span class="marca baja">no se puede cerrar</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="acciones">
+        <button class="btn sec" type="button">Cerrar el conteo</button>
+        <span class="h">
+          El conteo no se cierra con diferencias sin explicar. Las 2 urnas de nogal necesitan un
+          motivo: se rompieron, se usaron sin registrar, o se contaron mal.
+        </span>
+      </div>
+
+      <h3 class="sec">Cuándo toca contar cada cosa</h3>
+      <div class="tabla">
+        <table>
+          <thead><tr><th>Grupo</th><th>Qué incluye</th><th>Cada cuánto</th><th>Último conteo</th><th>Estado</th></tr></thead>
+          <tbody>
+            <tr><td class="art">Cofres línea alta</td><td>Los más caros — 8 unidades</td><td>cada mes</td><td class="n">22 ago 2026</td><td><span class="marca ok">al día</span></td></tr>
+            <tr><td class="art">Cofres línea media y básica</td><td>39 unidades</td><td>cada 3 meses</td><td class="n">14 jun 2026</td><td><span class="marca tibia">toca en 3 semanas</span></td></tr>
+            <tr><td class="art">Urnas</td><td>134 en 9 modelos</td><td>cada 3 meses</td><td class="n">02 may 2026</td><td><span class="marca baja">atrasado</span></td></tr>
+            <tr><td class="art">Suministros</td><td>Velación, limpieza, oficina</td><td>una vez al año</td><td class="n">18 ene 2026</td><td><span class="marca ok">al día</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ══ 6 · REPOSICIÓN ══════════════════════════════════════════════════ -->
+    <section id="s6">
+      <div class="cab">
+        <div class="eyebrow">Pantalla 6 · Reposición</div>
+        <h2>Qué pedir esta semana</h2>
+        <p>
+          Agrupado por proveedor, porque se pide por proveedor. El sistema propone la cantidad y
+          muestra de dónde sale el número; <strong>una persona aprueba</strong>. El módulo nunca
+          pide solo.
+        </p>
+      </div>
+
+      <div class="cifras">
+        <div class="cifra aviso"><div class="k">Bajo el mínimo</div><div class="v n">4</div><div class="d">artículos en 3 sedes</div></div>
+        <div class="cifra"><div class="k">A pedir</div><div class="v n">₡1,12 M</div><div class="d">si se aprueba todo</div></div>
+        <div class="cifra"><div class="k">Proveedores</div><div class="v n">3</div><div class="d">para 4 líneas</div></div>
+      </div>
+
+      <h3 class="sec">Megasoluciones Empresariales G.M.
+        <span class="der">entrega: 2 semanas</span></h3>
+      <div class="tabla">
+        <table>
+          <thead>
+            <tr><th>Artículo</th><th>Sede</th><th class="num">Hay</th><th class="num">Mín</th><th class="num">Consumo</th><th class="num">Sugerido</th><th>De dónde sale</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="art">Urna mármol claro</td><td>Camposanto Cartago</td>
+              <td class="num">4</td><td class="num">8</td><td class="num">3 / sem</td><td class="num">16</td>
+              <td>3 × 2 semanas + 4 de colchón, hasta el máximo de 20</td>
+            </tr>
+            <tr>
+              <td class="art">Urna madera nogal</td><td>Sabana</td>
+              <td class="num">9</td><td class="num">8</td><td class="num">2 / sem</td><td class="num">9</td>
+              <td>2 × 2 semanas + 3 de colchón, hasta el máximo de 18</td>
+            </tr>
+            <tr>
+              <td class="art">Cedro clásico</td><td>Heredia</td>
+              <td class="num">2</td><td class="num">3</td><td class="num">1 / sem</td><td class="num">3</td>
+              <td>1 × 2 semanas + 1 de colchón</td>
+            </tr>
+            <tr class="total">
+              <td colspan="5">3 líneas</td><td class="num">28</td>
+              <td class="num">₡1 010 559</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="sec">K. Chacón Martínez
+        <span class="der">entrega: 1 semana</span></h3>
+      <div class="tabla">
+        <table>
+          <thead>
+            <tr><th>Artículo</th><th>Sede</th><th class="num">Hay</th><th class="num">Mín</th><th class="num">Consumo</th><th class="num">Sugerido</th><th>De dónde sale</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="art">Juego de velación</td><td>Liberia</td>
+              <td class="num">2</td><td class="num">6</td><td class="num">4 / sem</td><td class="num">6</td>
+              <td>4 × 1 semana + 2 de colchón</td>
+            </tr>
+            <tr class="total"><td colspan="5">1 línea</td><td class="num">6</td><td class="num">₡109 800</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="acciones">
+        <button class="btn" type="button">Aprobar y armar los pedidos</button>
+        <button class="btn sec" type="button">Ajustar cantidades</button>
+        <span class="h">Se arma un pedido por proveedor. No se envía nada al proveedor: eso sigue siendo por el canal de siempre.</span>
+      </div>
+
+      <div class="panel">
+        <div class="t">Los primeros meses el mínimo lo pone usted</div>
+        <p>
+          La columna «consumo» necesita historia real. Hasta que haya dos o tres meses de servicios
+          registrados, la pantalla va a decir que todavía no puede sugerir en vez de inventar un
+          número con aire de certeza.
+        </p>
+      </div>
+    </section>
+
+    <!-- ══ 7 · ROTACIÓN ════════════════════════════════════════════════════ -->
+    <section id="s7">
+      <div class="cab">
+        <div class="eyebrow">Pantalla 7 · Rotación</div>
+        <h2>Qué se mueve y qué está parado</h2>
+        <p>
+          En este negocio hay que tener surtido, y el surtido inmoviliza plata. Esta pantalla dice
+          cuánta y dónde, para poder decidir qué modelo dejar de reponer.
+        </p>
+      </div>
+
+      <div class="cifras">
+        <div class="cifra"><div class="k">Capital detenido</div><div class="v n">₡8,24 M</div><div class="d">47 cofres + 134 urnas, al costo</div></div>
+        <div class="cifra aviso"><div class="k">Parado &gt; 90 días</div><div class="v n">₡1,69 M</div><div class="d">5 unidades sin movimiento</div></div>
+        <div class="cifra"><div class="k">Rotación del año</div><div class="v n">4,2×</div><div class="d">promedio de cofres</div></div>
+      </div>
+
+      <h3 class="sec">Por modelo de cofre
+        <span class="der">últimos 12 meses</span></h3>
+      <div class="tabla">
+        <table>
+          <thead>
+            <tr><th>Modelo</th><th class="num">En stock</th><th class="num">Usados 12 m</th><th class="num">Rotación</th><th class="num">Días de stock</th><th class="num">Capital</th><th>Lectura</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="art">Pino económico</td>
+              <td class="num">14</td><td class="num">96</td><td class="num">6,9×</td><td class="num">53</td><td class="num">980 000</td>
+              <td><span class="marca ok">sano</span></td>
+            </tr>
+            <tr>
+              <td class="art">Cedro clásico</td>
+              <td class="num">22</td><td class="num">104</td><td class="num">4,7×</td><td class="num">77</td><td class="num">2 874 366</td>
+              <td><span class="marca ok">sano</span></td>
+            </tr>
+            <tr>
+              <td class="art">Roble tallado</td>
+              <td class="num">8</td><td class="num">11</td><td class="num">1,4×</td><td class="num">265</td><td class="num">3 390 000</td>
+              <td><span class="marca tibia">mucho capital, poca salida</span></td>
+            </tr>
+            <tr>
+              <td class="art">Caoba con herrajes</td>
+              <td class="num">3</td><td class="num">1</td><td class="num">0,3×</td><td class="num">1 095</td><td class="num">996 000</td>
+              <td><span class="marca baja">3 años de stock</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="sec">Sin movimiento hace más de 90 días</h3>
+      <div class="tabla">
+        <table>
+          <thead><tr><th>Unidad</th><th>Modelo</th><th>Sede</th><th class="num">Días quieta</th><th class="num">Costo</th><th>Qué se puede hacer</th></tr></thead>
+          <tbody>
+            <tr><td class="n">CF-0318</td><td class="art">Caoba con herrajes</td><td>Camposanto Cartago</td><td class="num">412</td><td class="num">332 000</td><td>trasladar a Sabana, donde sí se piden</td></tr>
+            <tr><td class="n">CF-0319</td><td class="art">Caoba con herrajes</td><td>Camposanto Cartago</td><td class="num">412</td><td class="num">332 000</td><td>dejar de reponer el modelo</td></tr>
+            <tr><td class="n">CF-0327</td><td class="art">Caoba con herrajes</td><td>Nicoya</td><td class="num">388</td><td class="num">332 000</td><td>pasar a exhibición</td></tr>
+            <tr><td class="n">CF-0361</td><td class="art">Roble tallado</td><td>Limón</td><td class="num">201</td><td class="num">423 750</td><td>trasladar</td></tr>
+            <tr><td class="n">CF-0374</td><td class="art">Roble tallado</td><td>San Ramón</td><td class="num">154</td><td class="num">269 750</td><td>trasladar</td></tr>
+            <tr class="total"><td colspan="4">5 unidades quietas</td><td class="num">1 689 500</td><td>20 % del capital detenido</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="sec">Capital por sede</h3>
+      <div class="tabla">
+        <table>
+          <thead><tr><th>Sede</th><th class="num">Cofres</th><th class="num">Urnas</th><th class="num">Capital</th><th class="num">Parado</th><th>Reparto</th></tr></thead>
+          <tbody>
+            <tr><td class="art">Sabana</td><td class="num">16</td><td class="num">42</td><td class="num">2 918 400</td><td class="num">0</td><td><span class="barra"><i style="width:100%"></i></span></td></tr>
+            <tr><td class="art">Camposanto Cartago</td><td class="num">11</td><td class="num">28</td><td class="num">2 214 300</td><td class="num">664 000</td><td><span class="barra tibia"><i style="width:76%"></i></span></td></tr>
+            <tr><td class="art">Heredia</td><td class="num">8</td><td class="num">31</td><td class="num">1 401 200</td><td class="num">0</td><td><span class="barra"><i style="width:48%"></i></span></td></tr>
+            <tr><td class="art">Liberia</td><td class="num">5</td><td class="num">14</td><td class="num">746 800</td><td class="num">0</td><td><span class="barra"><i style="width:26%"></i></span></td></tr>
+            <tr><td class="art">Nicoya</td><td class="num">4</td><td class="num">11</td><td class="num">618 300</td><td class="num">332 000</td><td><span class="barra baja"><i style="width:21%"></i></span></td></tr>
+            <tr><td class="art">Pérez Zeledón</td><td class="num">3</td><td class="num">8</td><td class="num">341 000</td><td class="num">0</td><td><span class="barra"><i style="width:12%"></i></span></td></tr>
+            <tr class="total"><td>6 sedes con bodega</td><td class="num">47</td><td class="num">134</td><td class="num">8 240 000</td><td class="num">1 689 500</td><td></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <div class="t">Las otras 9 plazas</div>
+        <p>
+          En sus datos aparecen 15 plazas (Carrillo, Ciudad Neilly, Limón, Puntarenas, San Carlos,
+          San Ramón, Tres Ríos, Religiosa de Cartago y más). Esta maqueta asume que solo 6 tienen
+          bodega y las demás piden a la sede más cercana. <strong>Es un supuesto mío, no un
+          dato</strong>: es la pregunta 3 de la propuesta.
+        </p>
+      </div>
+    </section>
+
+  </main>
+</div>

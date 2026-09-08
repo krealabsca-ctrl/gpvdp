@@ -54,17 +54,17 @@ type OpcionesReporte struct {
 // formato contable. El detalle sale agrupado por partida con subtotales o como listado corrido,
 // según `op`. Trae además una hoja de resumen por partida y otra por cuenta bancaria: son las dos
 // preguntas que se hacen al abrir el archivo, y no dependen de la presentación elegida.
-func (s *Service) ExportarMovimientosXLSX(ctx context.Context, empresaID string, f FiltrosMovimientos, usuarioID string, op OpcionesReporte) ([]byte, int, error) {
+func (s *Service) ExportarMovimientosXLSX(ctx context.Context, empresaID string, f FiltrosMovimientos, usuarioID string, op OpcionesReporte) ([]byte, int, string, error) {
 	movs, err := s.repo.MovimientosParaExport(ctx, empresaID, f)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, "", err
 	}
 	if len(movs) == 0 {
-		return nil, 0, ErrExportacionVacia
+		return nil, 0, "", ErrExportacionVacia
 	}
 	empresa, detalleEmpresa, usuario, err := s.repo.EncabezadoReporte(ctx, empresaID, usuarioID)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, "", err
 	}
 
 	titulo := "Detalle de movimientos bancarios"
@@ -87,7 +87,10 @@ func (s *Service) ExportarMovimientosXLSX(ctx context.Context, empresaID string,
 		}
 	}
 	avisos := []string{
-		"Los totales están en colones y salen de la columna «Equivalente CRC». " +
+		// La nota nombra la columna tal como sale en la hoja. Cuando la columna se renombró a
+		// «Equivalencia», esta línea quedó citando un nombre que ya no existía en ninguna parte del
+		// archivo, y una nota que manda a buscar una columna inexistente es peor que no tenerla.
+		"Los totales están en colones y salen de la columna «Equivalencia». " +
 			"Débito y Crédito van en la moneda de cada cuenta.",
 	}
 	if sinTC > 0 {
@@ -116,10 +119,82 @@ func (s *Service) ExportarMovimientosXLSX(ctx context.Context, empresaID string,
 	}
 	buf, err := ConstruirLibro(hojas)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, "", err
 	}
 	s.auditarExport(ctx, empresaID, usuarioID, "movimientos", etiquetaPeriodos(f), len(movs))
-	return buf, len(movs), nil
+	// El nombre lo arma quien armó el contenido: describe lo que el archivo TRAE (las
+	// clasificaciones que de verdad tuvieron movimientos), y eso solo se sabe acá.
+	return buf, len(movs), nombreArchivoMovimientos(empresa, f, movs), nil
+}
+
+// nombreArchivoMovimientos arma el nombre de descarga del detalle: «VDP Asoc + Dep Agosto 03092026».
+//
+// Las clasificaciones se leen de lo EXPORTADO y no de los IDs del filtro, por la misma razón que el
+// encabezado (ver describirFiltros): una clasificación no se identifica sola —dos conceptos pueden
+// tener «Comisiones»— y en los movimientos ya viene resuelta. Además así el nombre describe lo que
+// el archivo TRAE: si el filtro pedía cinco clasificaciones y solo tres tuvieron movimientos, el
+// nombre nombra esas tres.
+func nombreArchivoMovimientos(empresa string, f FiltrosMovimientos, movs []MovimientoExport) string {
+	clasifs := []string{}
+	// Solo se nombran cuando se FILTRÓ por clasificación. Sin filtro el archivo es «Completo», y
+	// listar las 40 partidas que aparecieron no sería un nombre de archivo.
+	if len(f.ClasificacionIDs) > 0 || f.ClasificacionID != "" {
+		clasifs = clasificacionesEnOrdenDelFiltro(f, movs)
+	}
+	return NombreArchivoReporte(empresa, EtiquetaClasificaciones(clasifs), MesDelReporte(f, AhoraCR()), AhoraCR(), "")
+}
+
+// clasificacionesEnOrdenDelFiltro devuelve los nombres de las clasificaciones EXPORTADAS, en el
+// orden en que el usuario las eligió en el filtro (decisión del usuario, 2026-09-03).
+//
+// Ese orden es el que él escribe a mano —«Serv + Dep», no «Dep + Serv»—, así que el archivo sale
+// como lo archiva. La alternativa era el orden alfabético, más estable pero ajeno: obligaba a
+// renombrar.
+//
+// Se ordena por el ID y no por el nombre porque dos conceptos distintos pueden tener una
+// clasificación con el mismo nombre, y ahí el nombre no alcanza para saber cuál eligió.
+func clasificacionesEnOrdenDelFiltro(f FiltrosMovimientos, movs []MovimientoExport) []string {
+	// Posición de cada clasificación en el filtro. La singular va primero: es como pide la hoja de
+	// trabajo, que elige de a una.
+	posicion := map[string]int{}
+	pedidos := append([]string{}, f.ClasificacionID)
+	pedidos = append(pedidos, f.ClasificacionIDs...)
+	for _, id := range pedidos {
+		if id == "" {
+			continue
+		}
+		if _, ya := posicion[id]; !ya {
+			posicion[id] = len(posicion)
+		}
+	}
+
+	// Nombre de cada clasificación que DE VERDAD salió, con su posición.
+	type entrada struct {
+		nombre string
+		pos    int
+	}
+	vistas := map[string]bool{}
+	out := []entrada{}
+	for _, m := range movs {
+		if m.Clasificacion == "" || vistas[m.ClasificacionID] {
+			continue
+		}
+		vistas[m.ClasificacionID] = true
+		pos, enElFiltro := posicion[m.ClasificacionID]
+		if !enElFiltro {
+			// No debería pasar (el filtro las acotó), pero si pasa van al final en vez de
+			// desaparecer: un nombre incompleto es peor que uno con una partida de más.
+			pos = len(posicion) + len(out)
+		}
+		out = append(out, entrada{nombre: m.Clasificacion, pos: pos})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].pos < out[j].pos })
+
+	nombres := make([]string, 0, len(out))
+	for _, e := range out {
+		nombres = append(nombres, e.nombre)
+	}
+	return nombres
 }
 
 // hojaDetalleMovimientos arma el detalle en la forma pedida. Las DOS tienen que servir:
@@ -149,20 +224,83 @@ func conPresentacion(meta MetaReporte, texto string) MetaReporte {
 	return m
 }
 
-func hojaDetalleAgrupado(meta MetaReporte, movs []MovimientoExport) HojaReporte {
-	meta = conPresentacion(meta, "Agrupado por partida con subtotales")
-	cols := []ColumnaReporte{
+// columnasDetalle es el layout ÚNICO de las dos hojas de detalle, en el orden que fijó el negocio
+// (2026-09-03):
+//
+//	Fecha · Consecutivo · Débito · Crédito · Equivalencia · Descripción · Banco Cuenta ·
+//	Concepto · Clasificación · Consecutivo largo
+//
+// Los tres montos van juntos y ANTES de la descripción: es el orden en que se lee un estado de
+// cuenta, y deja las tres columnas que se suman una al lado de la otra.
+//
+// Nombres: son los que usa el negocio, no los de la base. «Consecutivo» es `documento` (la
+// referencia que da el banco) y «Equivalencia» es el monto en colones. «Banco Cuenta» es UNA columna
+// con las dos cosas —«Davivienda · Colones»—, y trae de vuelta la cuenta: el débito y el crédito
+// están en la moneda ORIGINAL, así que saber en qué cuenta cayó el movimiento es lo que dice si esos
+// montos son colones o dólares.
+//
+// Está en una sola función a propósito: cuando cada hoja armaba sus columnas por su lado, terminaron
+// con nombres distintos para el mismo dato.
+func columnasDetalle() []ColumnaReporte {
+	return []ColumnaReporte{
 		{Titulo: "Fecha", Ancho: 11, Tipo: "fecha"},
-		{Titulo: "Banco", Ancho: 15, Tipo: "texto"},
-		{Titulo: "Cuenta", Ancho: 22, Tipo: "texto"},
-		{Titulo: "Documento", Ancho: 18, Tipo: "texto"},
-		{Titulo: "Descripción", Ancho: 62, Tipo: "texto"},
-		{Titulo: "Mon.", Ancho: 6, Tipo: "texto"},
+		{Titulo: "Consecutivo", Ancho: 18, Tipo: "texto"},
 		{Titulo: "Débito", Ancho: 15, Tipo: "montoDebito"},
 		{Titulo: "Crédito", Ancho: 15, Tipo: "monto"},
-		{Titulo: "Equivalente CRC", Ancho: 17, Tipo: "monto"},
+		{Titulo: "Equivalencia", Ancho: 17, Tipo: "monto"},
+		{Titulo: "Descripción", Ancho: 52, Tipo: "texto"},
+		{Titulo: "Banco Cuenta", Ancho: 30, Tipo: "texto"},
+		{Titulo: "Concepto", Ancho: 22, Tipo: "texto"},
+		{Titulo: "Clasificación", Ancho: 28, Tipo: "texto"},
 		{Titulo: "Consecutivo largo", Ancho: 27, Tipo: "texto"},
 	}
+}
+
+// filaDetalle arma la fila en el MISMO orden que columnasDetalle. Las dos van juntas: separarlas es
+// lo que produce un .xlsx con los montos corridos una columna.
+func filaDetalle(m MovimientoExport, concepto, clasificacion string) []any {
+	return []any{
+		m.Fecha, m.Documento,
+		montoNum(m.Debito), montoNum(m.Credito), montoNum(m.MontoCRC),
+		m.Descripcion, bancoCuenta(m),
+		concepto, clasificacion,
+		ConsecutivoLargo(m.Banco, m.Descripcion),
+	}
+}
+
+// bancoCuenta identifica en UNA columna en qué cuenta cayó el movimiento.
+//
+// No concatena a ciegas: en esta empresa el alias de la cuenta YA nombra el banco en 13 de las 15
+// cuentas («Davivienda Colones», «BN Jardines Dólares»), así que pegar los dos daba
+// «Davivienda · Davivienda Colones». Un dato repetido en cada fila se lee como un error del sistema.
+//
+// Así que el banco se antepone solo cuando el alias no lo menciona —el caso de «BP Negocios», que
+// nombra al Banco Popular por su abreviatura—, y ahí sí hace falta para no adivinar.
+func bancoCuenta(m MovimientoExport) string {
+	switch {
+	case m.Cuenta == "":
+		return m.Banco
+	case m.Banco == "":
+		return m.Cuenta
+	case strings.Contains(norm(m.Cuenta), norm(m.Banco)):
+		return m.Cuenta
+	default:
+		return m.Banco + " · " + m.Cuenta
+	}
+}
+
+// nombreOSinClasificar nombra lo que no tiene partida en vez de dejar la celda vacía: una celda en
+// blanco se lee como «se me olvidó» y no como «está pendiente de clasificar».
+func nombreOSinClasificar(s string) string {
+	if s == "" {
+		return "Sin clasificar"
+	}
+	return s
+}
+
+func hojaDetalleAgrupado(meta MetaReporte, movs []MovimientoExport) HojaReporte {
+	meta = conPresentacion(meta, "Agrupado por partida con subtotales")
+	cols := columnasDetalle()
 	// Ordenadas por partida y luego por fecha: así la agrupación sale contigua.
 	ordenadas := make([]MovimientoExport, len(movs))
 	copy(ordenadas, movs)
@@ -176,13 +314,12 @@ func hojaDetalleAgrupado(meta MetaReporte, movs []MovimientoExport) HojaReporte 
 
 	filas := make([]FilaReporte, 0, len(ordenadas))
 	for _, m := range ordenadas {
+		// El concepto y la clasificación también van en la FILA, no solo en el encabezado del
+		// grupo: así cada fila se sostiene sola cuando alguien filtra o hace una tabla dinámica
+		// sobre la hoja, que es lo que la gente hace con un .xlsx.
 		filas = append(filas, FilaReporte{
-			Grupo: partidaDe(m),
-			Valores: []any{
-				m.Fecha, m.Banco, m.Cuenta, m.Documento, m.Descripcion, m.Moneda,
-				montoNum(m.Debito), montoNum(m.Credito), montoNum(m.MontoCRC),
-				ConsecutivoLargo(m.Banco, m.Descripcion),
-			},
+			Grupo:   partidaDe(m),
+			Valores: filaDetalle(m, nombreOSinClasificar(m.Concepto), nombreOSinClasificar(m.Clasificacion)),
 		})
 	}
 	return HojaReporte{
@@ -192,37 +329,13 @@ func hojaDetalleAgrupado(meta MetaReporte, movs []MovimientoExport) HojaReporte 
 
 func hojaDetalleCorrido(meta MetaReporte, movs []MovimientoExport) HojaReporte {
 	meta = conPresentacion(meta, "Listado corrido por fecha")
-	cols := []ColumnaReporte{
-		{Titulo: "Fecha", Ancho: 11, Tipo: "fecha"},
-		{Titulo: "Banco", Ancho: 15, Tipo: "texto"},
-		{Titulo: "Cuenta", Ancho: 22, Tipo: "texto"},
-		{Titulo: "Documento", Ancho: 18, Tipo: "texto"},
-		{Titulo: "Descripción", Ancho: 52, Tipo: "texto"},
-		{Titulo: "Concepto", Ancho: 22, Tipo: "texto"},
-		{Titulo: "Clasificación", Ancho: 28, Tipo: "texto"},
-		{Titulo: "Mon.", Ancho: 6, Tipo: "texto"},
-		{Titulo: "Débito", Ancho: 15, Tipo: "montoDebito"},
-		{Titulo: "Crédito", Ancho: 15, Tipo: "monto"},
-		{Titulo: "Equivalente CRC", Ancho: 17, Tipo: "monto"},
-		{Titulo: "Consecutivo largo", Ancho: 27, Tipo: "texto"},
-	}
+	cols := columnasDetalle()
 	// `MovimientosParaExport` ya viene ORDER BY fecha, id: el listado corrido es cronológico, que
 	// es como se lee un estado de cuenta. No se reordena.
 	filas := make([]FilaReporte, 0, len(movs))
 	for _, m := range movs {
-		concepto, clasificacion := m.Concepto, m.Clasificacion
-		if concepto == "" {
-			// Lo no clasificado se nombra, no se deja en blanco: una celda vacía se lee como
-			// «se me olvidó» y no como «está pendiente de clasificar».
-			concepto = "Sin clasificar"
-		}
 		filas = append(filas, FilaReporte{
-			Valores: []any{
-				m.Fecha, m.Banco, m.Cuenta, m.Documento, m.Descripcion,
-				concepto, clasificacion, m.Moneda,
-				montoNum(m.Debito), montoNum(m.Credito), montoNum(m.MontoCRC),
-				ConsecutivoLargo(m.Banco, m.Descripcion),
-			},
+			Valores: filaDetalle(m, nombreOSinClasificar(m.Concepto), m.Clasificacion),
 		})
 	}
 	return HojaReporte{
@@ -258,7 +371,7 @@ func hojaResumenPorPartida(meta MetaReporte, movs []MovimientoExport) HojaReport
 		{Titulo: "Movimientos", Ancho: 13, Tipo: "entero"},
 		{Titulo: "Débitos", Ancho: 17, Tipo: "montoDebito"},
 		{Titulo: "Créditos", Ancho: 17, Tipo: "monto"},
-		{Titulo: "Equivalente CRC", Ancho: 17, Tipo: "monto"},
+		{Titulo: "Equivalencia", Ancho: 17, Tipo: "monto"},
 	}
 	filas := make([]FilaReporte, 0, len(orden))
 	for _, p := range orden {
@@ -300,7 +413,7 @@ func hojaResumenPorCuenta(meta MetaReporte, movs []MovimientoExport) HojaReporte
 		{Titulo: "Movimientos", Ancho: 13, Tipo: "entero"},
 		{Titulo: "Débitos", Ancho: 17, Tipo: "montoDebito"},
 		{Titulo: "Créditos", Ancho: 17, Tipo: "monto"},
-		{Titulo: "Equivalente CRC", Ancho: 17, Tipo: "monto"},
+		{Titulo: "Equivalencia", Ancho: 17, Tipo: "monto"},
 	}
 	filas := make([]FilaReporte, 0, len(orden))
 	for _, k := range orden {

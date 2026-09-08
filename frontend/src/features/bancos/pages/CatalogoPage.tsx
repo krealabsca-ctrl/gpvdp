@@ -43,6 +43,7 @@ import type {
 import { DiccionarioPanel } from "@/features/bancos/components/DiccionarioPanel";
 import {
   useActualizarCuenta,
+  useAlcanceConsulta,
   useBancosCatalogo,
   useCambiarActivoBanco,
   useCambiarActivoCuenta,
@@ -61,6 +62,7 @@ import {
   useEliminarCuenta,
   useFusionarClasificacion,
   useFusionarConcepto,
+  useGuardarConsultaDePartida,
   useRenombrarBanco,
   useReasignarConceptoClasificacion,
   useRenombrarClasificacion,
@@ -1177,6 +1179,10 @@ function ClasificacionesTab() {
               <TR>
                 <TH>Concepto</TH>
                 <TH>Clasificación</TH>
+                {/* El alcance de consulta se edita ACÁ y no en Seguridad: segmentar la partida y
+                    decir quién la consulta son el mismo acto, y la lista a elegir son 3 o 4 roles
+                    en vez de 170 partidas. En Seguridad se LEE el espejo por rol. */}
+                <TH>Quién la consulta</TH>
                 <TH className="text-right">Acción</TH>
               </TR>
             </THead>
@@ -1207,6 +1213,9 @@ function ClasificacionesTab() {
                     ) : (
                       c.nombre
                     )}
+                  </TD>
+                  <TD>
+                    <ConsultaDePartida clasificacionId={c.id} nombre={c.nombre} />
                   </TD>
                   <TD className="text-right">
                     {editId === c.id ? (
@@ -1298,6 +1307,96 @@ function ClasificacionesTab() {
         <strong> «Fusionar…»</strong>: le pasa todo a la clasificación correcta —incluso de otro concepto—
         y borra esta. No hace falta reclasificar a mano.
       </p>
+      <p className="text-xs text-content-muted">
+        <strong>Quién la consulta:</strong> el equipo marcado ve en «Mi partida» los <em>ingresos</em> de
+        esa partida y nada más —ni otras partidas, ni gastos, ni saldos, ni el módulo—. Sin nadie marcado
+        no la consulta ningún equipo, que es el estado normal de casi todas. Los roles que aparecen son
+        los que tienen el permiso <span className="font-mono">bancos.ver_mi_segmento</span>; se crean en
+        Configuración › Seguridad.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * La columna «Quién la consulta» de una partida.
+ *
+ * Se elige de una lista corta de roles y se guarda al instante. El alcance vive en una tabla
+ * rol × clasificación; esta celda es la puerta de edición y la vista por rol de Seguridad es el
+ * espejo de lectura: un solo dato, dos formas de verlo.
+ */
+function ConsultaDePartida({ clasificacionId, nombre }: { clasificacionId: string; nombre: string }) {
+  const toast = useToast();
+  const q = useAlcanceConsulta();
+  const guardar = useGuardarConsultaDePartida();
+  const [abierto, setAbierto] = useState(false);
+
+  const roles = q.data?.roles ?? [];
+  const asignados = (q.data?.asignaciones ?? []).filter((a) => a.clasificacion_id === clasificacionId);
+  const asignadosIds = new Set(asignados.map((a) => a.rol_id));
+
+  // Sin roles de consulta creados todavía no hay nada que ofrecer, y una celda con un botón que
+  // abre una lista vacía se lee como un error del sistema.
+  if (q.isPending) return <span className="text-xs text-content-muted">…</span>;
+  if (roles.length === 0) {
+    return <span className="text-xs text-content-muted">—</span>;
+  }
+
+  function alternar(rolId: string) {
+    const nuevos = asignadosIds.has(rolId)
+      ? [...asignadosIds].filter((id) => id !== rolId)
+      : [...asignadosIds, rolId];
+    guardar.mutate(
+      { clasificacionId, rolIds: nuevos },
+      {
+        onSuccess: () => {
+          const rol = roles.find((r) => r.id === rolId)?.nombre ?? "el rol";
+          toast.success(
+            asignadosIds.has(rolId)
+              ? `«${nombre}» ya no la consulta ${rol}.`
+              : `${rol} ya consulta «${nombre}».`,
+          );
+        },
+        onError: (err) => toast.error(mensajeError(err)),
+      },
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {asignados.map((a) => (
+        <Badge key={a.rol_id} tone="accent">
+          {a.rol_nombre}
+        </Badge>
+      ))}
+      {asignados.length === 0 && !abierto && (
+        <span className="text-xs text-content-muted">nadie</span>
+      )}
+      {abierto ? (
+        <div className="flex flex-col gap-1 rounded-lg border border-border bg-surface-raised p-2">
+          {roles.map((r) => (
+            <label key={r.id} className="flex items-center gap-2 text-xs text-content">
+              <input
+                type="checkbox"
+                checked={asignadosIds.has(r.id)}
+                onChange={() => alternar(r.id)}
+                disabled={guardar.isPending}
+              />
+              {r.nombre}
+              <span className="text-content-muted">
+                {r.usuarios === 1 ? "1 usuario" : `${r.usuarios} usuarios`}
+              </span>
+            </label>
+          ))}
+          <Button size="sm" variant="ghost" onClick={() => setAbierto(false)}>
+            Listo
+          </Button>
+        </div>
+      ) : (
+        <Button size="sm" variant="ghost" onClick={() => setAbierto(true)}>
+          {asignados.length === 0 ? "+ equipo" : "Cambiar"}
+        </Button>
+      )}
     </div>
   );
 }

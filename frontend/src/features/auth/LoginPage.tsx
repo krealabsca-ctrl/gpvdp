@@ -58,7 +58,8 @@ export function LoginPage() {
           <Card className="w-full">
           <CardHeader>
             <CardTitle>Iniciar sesión</CardTitle>
-            <CardDescription>Finance Group VDP — sistema de registro financiero</CardDescription>
+            {/* Antes repetía el nombre y el subtítulo que ya están en el logo de arriba. */}
+            <CardDescription>Ingresá con el correo de tu empresa.</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>

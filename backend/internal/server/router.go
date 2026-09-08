@@ -13,6 +13,8 @@ import (
 	"github.com/gpvdp/erp/internal/config"
 	"github.com/gpvdp/erp/internal/cxc"
 	"github.com/gpvdp/erp/internal/cxp"
+	"github.com/gpvdp/erp/internal/grupo"
+	"github.com/gpvdp/erp/internal/inventario"
 	"github.com/gpvdp/erp/internal/nomina"
 	"github.com/gpvdp/erp/internal/plantillas"
 	"github.com/gpvdp/erp/internal/rbac"
@@ -20,7 +22,8 @@ import (
 )
 
 // NewRouter construye el motor Gin. `perms` es el checker RBAC (permiso × rol × empresa).
-func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH *bancos.Handler, cxpH *cxp.Handler, cxcH *cxc.Handler, nominaH *nomina.Handler, rbacH *rbac.Handler, plantillasH *plantillas.Handler, perms tenant.PermisoChecker) *gin.Engine {
+func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH *bancos.Handler, cxpH *cxp.Handler, cxcH *cxc.Handler, nominaH *nomina.Handler, rbacH *rbac.Handler, plantillasH *plantillas.Handler,
+	inventarioH *inventario.Handler, grupoH *grupo.Handler, perms tenant.PermisoChecker) *gin.Engine {
 	if cfg.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -29,14 +32,17 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 
 	// P(permiso) exige ese permiso vía la matriz RBAC (deny-by-default; ADMIN bypass).
 	P := func(permiso string) gin.HandlerFunc { return tenant.RequirePermiso(perms, permiso) }
+	// PAlguno exige AL MENOS UNO de los permisos: para las rutas que sirven a más de una pantalla
+	// (o a otro módulo). Ver el comentario de tenant.RequireAlgunPermiso.
+	PAlguno := func(permisos ...string) gin.HandlerFunc {
+		return tenant.RequireAlgunPermiso(perms, permisos...)
+	}
 
 	v1 := r.Group("/v1")
 	v1.GET("/healthz", health)
 
 	// Públicos. Con límite de frecuencia por IP para frenar fuerza bruta / credential stuffing.
-	// login: 10/min (un humano no falla 10 veces por minuto); refresh: 30/min (el cliente lo
-	// llama de forma legítima al vencer el access token). La IP sale de c.ClientIP(): como el
-	// backend solo recibe tráfico de Caddy, es la IP real que Caddy pone en X-Forwarded-For.
+	// login: 10/min; refresh: 30/min (el cliente lo llama al vencer el access token).
 	v1.POST("/auth/login", rateLimit(10, time.Minute), authH.Login)
 	v1.POST("/auth/refresh", rateLimit(30, time.Minute), authH.Refresh)
 
@@ -58,41 +64,84 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			// ── Módulo Bancos ──
 			// Lectura (bancos.ver)
 			scoped.GET("/bancos/cuentas", P("bancos.ver"), bancosH.Cuentas)
-			scoped.GET("/bancos/movimientos", P("bancos.ver"), bancosH.Movimientos)
+			scoped.GET("/bancos/movimientos", PAlguno("bancos.ver_clasificar", "bancos.ver_dashboard", "bancos.exportar", "inventario.entrada"), bancosH.Movimientos)
 			// Resumen de la selección activa: mismos filtros que la lista, agregados.
-			scoped.GET("/bancos/movimientos/resumen", P("bancos.ver"), bancosH.ResumenSeleccion)
-			scoped.GET("/bancos/reglas", P("bancos.ver"), bancosH.Reglas)
-			scoped.GET("/bancos/reglas/sugerencia", P("bancos.ver"), bancosH.SugerenciaRegla)
-			scoped.GET("/bancos/clasificacion/resumen", P("bancos.ver"), bancosH.ResumenClasificacion)
-			scoped.GET("/bancos/catalogo/conceptos", P("bancos.ver"), bancosH.Conceptos)
-			scoped.GET("/bancos/catalogo/clasificaciones", P("bancos.ver"), bancosH.Clasificaciones)
+			scoped.GET("/bancos/movimientos/resumen", P("bancos.ver_clasificar"), bancosH.ResumenSeleccion)
+			scoped.GET("/bancos/reglas", P("bancos.ver_clasificar"), bancosH.Reglas)
+			scoped.GET("/bancos/reglas/sugerencia", P("bancos.ver_clasificar"), bancosH.SugerenciaRegla)
+			scoped.GET("/bancos/clasificacion/resumen", P("bancos.ver_clasificar"), bancosH.ResumenClasificacion)
+			// Dato de referencia COMPARTIDO: la bandeja de CxP lo lee para clasificar sus facturas
+			// (GastoCombobox importa este mismo endpoint). Con solo `bancos.ver` un usuario de
+			// Contabilidad sin acceso a Bancos no podía ni ver el catálogo de gasto.
+			scoped.GET("/bancos/catalogo/conceptos", PAlguno("bancos.ver", "cxp.ver"), bancosH.Conceptos)
+			scoped.GET("/bancos/catalogo/clasificaciones", PAlguno("bancos.ver", "cxp.ver"), bancosH.Clasificaciones)
 			scoped.GET("/bancos/catalogo/bancos", P("bancos.ver"), bancosH.Bancos)
-			scoped.GET("/bancos/tipo-cambio/:anio/:mes", P("bancos.ver"), bancosH.EstadoTC)
-			scoped.GET("/bancos/tipo-cambio/ultimo-sync", P("bancos.ver"), bancosH.UltimoSyncBCCR)
+			// ── Consulta por SEGMENTO (mig 0077) ──
+			// La puerta del equipo. Es propia y no `/bancos/movimientos` a propósito: ese listado lo
+			// usan cuatro superficies y agregarle un recorte por alcance es como se le muestra a
+			// alguien, un día, lo que no debía. Acá el recorte se aplica siempre.
+			scoped.GET("/bancos/mi-segmento/movimientos", P("bancos.ver_mi_segmento"), bancosH.MiSegmento)
+			// Avisar va con consultar: sin esto la pantalla solo sirve para mirar y el aviso vuelve
+			// a irse por WhatsApp, que es donde se pierde.
+			scoped.POST("/bancos/mi-segmento/reportes", P("bancos.ver_mi_segmento"), bancosH.ReportarSegmentacion)
+			// Buscar un movimiento que NO aparece, y avisar si igual no está (mig 0078). La búsqueda
+			// es POST porque audita cada consulta y para que el monto no viaje en la URL.
+			scoped.POST("/bancos/mi-segmento/buscar", P("bancos.ver_mi_segmento"), bancosH.BuscarFaltante)
+			scoped.POST("/bancos/mi-segmento/faltantes", P("bancos.ver_mi_segmento"), bancosH.ReportarFaltante)
+			// El alcance se administra desde el catálogo: quien segmenta es quien dice quién consulta.
+			scoped.GET("/bancos/catalogo/consulta", P("bancos.catalogo"), bancosH.AlcanceConsulta)
+			scoped.PUT("/bancos/catalogo/clasificaciones/:id/consulta", P("bancos.catalogo"), bancosH.GuardarConsultaDePartida)
+			// La cola de avisos vive en Clasificar: un movimiento reportado es uno a reclasificar.
+			scoped.GET("/bancos/reportes-segmentacion", PAlguno("bancos.ver_clasificar", "bancos.catalogo"), bancosH.ReportesSegmentacion)
+			scoped.POST("/bancos/reportes-segmentacion/:id/resolver", P("bancos.clasificar"), bancosH.ResolverReporte)
+			scoped.GET("/bancos/tipo-cambio/:anio/:mes", P("bancos.ver_tc"), bancosH.EstadoTC)
+			scoped.GET("/bancos/tipo-cambio/ultimo-sync", P("bancos.ver_tc"), bancosH.UltimoSyncBCCR)
 			scoped.GET("/bancos/parametros", P("bancos.ver"), bancosH.Parametros)
-			scoped.GET("/bancos/cuadre", P("bancos.ver"), bancosH.Cuadre)
-			scoped.GET("/bancos/cuadre/arbol", P("bancos.ver"), bancosH.CuadreArbol)
-			scoped.GET("/bancos/dashboard", P("bancos.ver"), bancosH.Dashboard)
-			scoped.GET("/bancos/analisis/serie-mensual", P("bancos.ver"), bancosH.SerieMensual)
-			scoped.GET("/bancos/analisis/calendario", P("bancos.ver"), bancosH.CalendarioDiario)
-			scoped.GET("/bancos/analisis/cuentas", P("bancos.ver"), bancosH.ResumenPorCuenta)
-			scoped.GET("/bancos/analisis/partidas", P("bancos.ver"), bancosH.AnalisisPartidas)
-			scoped.GET("/bancos/proyecciones", P("bancos.ver"), bancosH.Proyeccion)
-			scoped.POST("/bancos/proyecciones", P("bancos.ver"), bancosH.GuardarEscenario)
-			scoped.GET("/bancos/proyecciones/escenarios", P("bancos.ver"), bancosH.Escenarios)
-			scoped.GET("/bancos/traslados/propuestas", P("bancos.ver"), bancosH.PropuestasTraslados)
+			scoped.GET("/bancos/cuadre", PAlguno("bancos.ver_dashboard", "bancos.exportar"), bancosH.Cuadre)
+			scoped.GET("/bancos/cuadre/arbol", P("bancos.ver_dashboard"), bancosH.CuadreArbol)
+			scoped.GET("/bancos/dashboard", P("bancos.ver_dashboard"), bancosH.Dashboard)
+			scoped.GET("/bancos/analisis/serie-mensual", P("bancos.ver_dashboard"), bancosH.SerieMensual)
+			scoped.GET("/bancos/analisis/calendario", P("bancos.ver_dashboard"), bancosH.CalendarioDiario)
+			scoped.GET("/bancos/analisis/cuentas", P("bancos.ver_dashboard"), bancosH.ResumenPorCuenta)
+			scoped.GET("/bancos/analisis/partidas", P("bancos.ver_analisis"), bancosH.AnalisisPartidas)
+			// Dimensiones del gasto (departamento y sede) y control presupuestario.
+			scoped.GET("/bancos/catalogo/sedes", PAlguno("bancos.ver", "inventario.ver", "cxc.ver"), bancosH.Sedes)
+			scoped.GET("/bancos/catalogo/departamentos", P("bancos.ver"), bancosH.Departamentos)
+			scoped.GET("/bancos/control", P("bancos.ver_control"), bancosH.ControlPresupuestario)
+			scoped.GET("/bancos/control/partidas", P("bancos.ver_control"), bancosH.PartidasDeDimension)
+			scoped.GET("/bancos/presupuesto", P("bancos.ver_control"), bancosH.Presupuesto)
+			scoped.GET("/bancos/catalogo/sedes/:id/uso", P("bancos.ver"), bancosH.UsoDeSede)
+			scoped.GET("/bancos/catalogo/departamentos/:id/uso", P("bancos.ver"), bancosH.UsoDeDepartamento)
+			scoped.POST("/bancos/catalogo/sedes", P("bancos.catalogo"), bancosH.CrearSede)
+			scoped.PATCH("/bancos/catalogo/sedes/:id", P("bancos.catalogo"), bancosH.ActualizarSede)
+			scoped.POST("/bancos/catalogo/sedes/:id/activo", P("bancos.catalogo"), bancosH.CambiarActivoSede)
+			scoped.DELETE("/bancos/catalogo/sedes/:id", P("bancos.catalogo"), bancosH.EliminarSede)
+			// El catálogo de departamentos es la MISMA tabla que administra CxP (mig 0026). Acá se
+			// abre la segunda puerta, con el permiso de catálogo de Bancos.
+			scoped.POST("/bancos/catalogo/departamentos", P("bancos.catalogo"), bancosH.CrearDepartamento)
+			scoped.PATCH("/bancos/catalogo/departamentos/:id", P("bancos.catalogo"), bancosH.ActualizarDepartamento)
+			scoped.POST("/bancos/catalogo/departamentos/:id/activo", P("bancos.catalogo"), bancosH.CambiarActivoDepartamento)
+			scoped.DELETE("/bancos/catalogo/departamentos/:id", P("bancos.catalogo"), bancosH.EliminarDepartamento)
+			scoped.PATCH("/bancos/clasificaciones/:id/dimensiones", P("bancos.catalogo"), bancosH.AsignarDimensionesPartida)
+			scoped.PATCH("/bancos/movimientos/:id/dimensiones", P("bancos.clasificar"), bancosH.AsignarDimensionesMovimiento)
+			scoped.PUT("/bancos/presupuesto", P("bancos.ajustes"), bancosH.GuardarPresupuesto)
+			scoped.DELETE("/bancos/presupuesto", P("bancos.ajustes"), bancosH.BorrarPresupuesto)
+			scoped.GET("/bancos/proyecciones", P("bancos.ver_proyecciones"), bancosH.Proyeccion)
+			scoped.POST("/bancos/proyecciones", P("bancos.ver_proyecciones"), bancosH.GuardarEscenario)
+			scoped.GET("/bancos/proyecciones/escenarios", P("bancos.ver_proyecciones"), bancosH.Escenarios)
+			scoped.GET("/bancos/traslados/propuestas", P("bancos.ver_clasificar"), bancosH.PropuestasTraslados)
 			// Tesorería: saldo diario por cuenta y checklist de carga del mes
-			scoped.GET("/bancos/tesoreria", P("bancos.ver"), bancosH.Tesoreria)
+			scoped.GET("/bancos/tesoreria", P("bancos.ver_saldos"), bancosH.Tesoreria)
 			scoped.PUT("/bancos/saldos", P("bancos.saldos"), bancosH.GuardarSaldos)
-			scoped.GET("/bancos/carga", P("bancos.ver"), bancosH.CargaDelPeriodo)
+			scoped.GET("/bancos/carga", P("bancos.ver_saldos"), bancosH.CargaDelPeriodo)
 			// Conciliación bancaria mensual: acta por cuenta, partidas en tránsito y firma.
 			// Quien captura el saldo no firma el acta ni congela el día (segregación).
 			// Patrones: agrupa lo que quedó sin clasificar y propone la regla de cada grupo.
-			scoped.GET("/bancos/patrones", P("bancos.ver"), bancosH.Patrones)
+			scoped.GET("/bancos/patrones", P("bancos.ver_clasificar"), bancosH.Patrones)
 			// Huella Bancos↔CxP: empareja los pagos del banco con su factura. Corre solo al
 			// importar; el endpoint sirve para repetirlo sobre lo ya cargado.
 			scoped.POST("/bancos/conciliacion-cxp", P("cxp.tesoreria"), bancosH.ConciliarCxP)
-			scoped.GET("/bancos/conciliacion", P("bancos.ver"), bancosH.Conciliacion)
+			scoped.GET("/bancos/conciliacion", P("bancos.ver_conciliacion"), bancosH.Conciliacion)
 			scoped.POST("/bancos/conciliacion/partidas", P("bancos.conciliar"), bancosH.RegistrarPartida)
 			scoped.DELETE("/bancos/conciliacion/partidas/:id", P("bancos.conciliar"), bancosH.AnularPartida)
 			scoped.POST("/bancos/conciliacion/firmar", P("bancos.conciliar"), bancosH.FirmarActa)
@@ -156,6 +205,19 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.GET("/cxp/dashboard", P("cxp.dashboard"), cxpH.Dashboard)
 			scoped.GET("/cxp/bandeja", P("cxp.ver"), cxpH.Bandeja)
 			scoped.GET("/cxp/catalogo/subclasificaciones", P("cxp.ver"), cxpH.ListarSubclasificaciones)
+			// ── La SEGUNDA PUERTA del catálogo de gasto: la de Contabilidad ──
+			//
+			// Mismo catálogo que Bancos (mismas tablas), otra puerta y otro permiso. Es el patrón que
+			// ya usa el catálogo de departamentos, más abajo.
+			//
+			// Existe porque una factura de un gasto que no está en el catálogo no se puede clasificar
+			// y queda trancada: el 2026-09-03 había 834 facturas sin clasificar esperando validación
+			// de área, con solo 4 de 22 conceptos visibles para CxP. El handler fuerza el alcance —solo
+			// rubros visibles para CxP— y lo creado nace visible para CxP.
+			scoped.POST("/cxp/catalogo/conceptos", P("cxp.catalogo"), bancosH.CrearConceptoCxP)
+			scoped.PATCH("/cxp/catalogo/conceptos/:id", P("cxp.catalogo"), bancosH.RenombrarConceptoCxP)
+			scoped.POST("/cxp/catalogo/clasificaciones", P("cxp.catalogo"), bancosH.CrearClasificacionCxP)
+			scoped.PATCH("/cxp/catalogo/clasificaciones/:id", P("cxp.catalogo"), bancosH.RenombrarClasificacionCxP)
 			scoped.GET("/cxp/departamentos", P("cxp.ver"), cxpH.ListarDepartamentos)
 			scoped.GET("/cxp/departamentos/:id/validadores", P("cxp.ver"), cxpH.ListarValidadores)
 			scoped.GET("/cxp/usuarios", P("cxp.departamentos"), cxpH.ListarUsuarios)
@@ -309,10 +371,68 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 
 			// ── Administración RBAC (permiso admin.roles) ──
 			scoped.GET("/rbac/permisos", P("admin.roles"), rbacH.Permisos)
+			// ── Inventario: cofres, urnas y suministros por sede ──────────────────
+			// Ver es un permiso; mover el inventario son varios, porque quien registra un
+			// servicio en el mostrador no es quien administra el catálogo ni quien ajusta.
+			scoped.GET("/inventario/categorias", P("inventario.ver"), inventarioH.Categorias)
+			scoped.GET("/inventario/articulos", P("inventario.ver"), inventarioH.Articulos)
+			scoped.GET("/inventario/articulos/:id/niveles", P("inventario.ver"), inventarioH.NivelesDeArticulo)
+			scoped.GET("/inventario/existencias", P("inventario.ver"), inventarioH.Existencias)
+			scoped.GET("/inventario/unidades", P("inventario.ver"), inventarioH.Unidades)
+			scoped.GET("/inventario/movimientos", P("inventario.ver"), inventarioH.Movimientos)
+			scoped.GET("/inventario/servicios", P("inventario.ver"), inventarioH.Servicios)
+			// El detalle va DESPUÉS de la lista: Gin resuelve por orden de registro y un `:id`
+			// registrado antes se tragaría cualquier ruta hermana.
+			scoped.GET("/inventario/servicios/:id", P("inventario.ver"), inventarioH.Servicio)
+			scoped.GET("/inventario/unidades/:numero", P("inventario.ver"), inventarioH.Unidad)
+			scoped.GET("/inventario/traslados", P("inventario.ver"), inventarioH.Traslados)
+			// Conteo cíclico (Fase 2): «plan» va ANTES de «:id» para que Gin no lo lea como un id.
+			scoped.GET("/inventario/conteos/plan", P("inventario.ver"), inventarioH.PlanDeConteo)
+			scoped.GET("/inventario/conteos", P("inventario.ver"), inventarioH.Conteos)
+			scoped.GET("/inventario/conteos/:id", P("inventario.ver"), inventarioH.Conteo)
+			scoped.POST("/inventario/conteos", P("inventario.conteo"), inventarioH.AbrirConteo)
+			scoped.PUT("/inventario/conteos/:id/lineas/:linea", P("inventario.conteo"), inventarioH.GuardarLineaConteo)
+			scoped.POST("/inventario/conteos/:id/cerrar", P("inventario.conteo"), inventarioH.CerrarConteo)
+			scoped.POST("/inventario/conteos/:id/anular", P("inventario.conteo"), inventarioH.AnularConteo)
+			scoped.GET("/inventario/reposicion", P("inventario.ver"), inventarioH.Reposicion)
+			scoped.GET("/inventario/rotacion", P("inventario.ver"), inventarioH.Rotacion)
+			// Consignación (Fase 3). Ver la cola es lectura de inventario; facturar CREA una cuenta
+			// por pagar, así que tiene su propio permiso: no es lo mismo saber qué se le debe al
+			// proveedor que comprometer la plata.
+			// ── Grupo: la ÚNICA vista que cruza empresas ─────────────────────────
+			//
+			// Vive en el mismo grupo autenticado y con empresa activa que todo lo demás:
+			// el token sigue llevando UNA empresa. Lo que cambia es que el servicio
+			// resuelve, desde las MEMBRESÍAS del usuario, cuáles otras puede sumar — y
+			// solo aquellas donde ya tiene bancos.ver. No hay parámetro que amplíe eso.
+			scoped.GET("/grupo/resumen", P("grupo.ver"), grupoH.Resumen)
+
+			scoped.GET("/inventario/consignacion", P("inventario.ver"), inventarioH.Consignadas)
+			scoped.GET("/inventario/consignacion/:unidadId/candidatas", P("inventario.ver"), inventarioH.CandidatasConciliacion)
+			scoped.POST("/inventario/consignacion/:unidadId/facturar", P("inventario.consignacion"), inventarioH.FacturarConsignada)
+			scoped.POST("/inventario/consignacion/:unidadId/conciliar", P("inventario.consignacion"), inventarioH.ConciliarConsignada)
+			scoped.POST("/inventario/categorias", P("inventario.catalogo"), inventarioH.CrearCategoria)
+			scoped.PATCH("/inventario/categorias/:id", P("inventario.catalogo"), inventarioH.ActualizarCategoria)
+			scoped.POST("/inventario/articulos", P("inventario.catalogo"), inventarioH.CrearArticulo)
+			scoped.PATCH("/inventario/articulos/:id", P("inventario.catalogo"), inventarioH.ActualizarArticulo)
+			scoped.PUT("/inventario/articulos/:id/nivel", P("inventario.catalogo"), inventarioH.FijarNivel)
+			scoped.POST("/inventario/entradas", P("inventario.entrada"), inventarioH.RegistrarEntrada)
+			// El servicio prestado: es lo que descarga las existencias.
+			scoped.POST("/inventario/servicios", P("inventario.servicio"), inventarioH.RegistrarServicio)
+			scoped.POST("/inventario/traslados", P("inventario.traslado"), inventarioH.CrearTraslado)
+			scoped.POST("/inventario/traslados/:id/recibir", P("inventario.traslado"), inventarioH.RecibirTraslado)
+			// Ajustar y dar de baja mueve el activo sin que haya habido una venta: permiso propio.
+			scoped.POST("/inventario/ajustes", P("inventario.ajuste"), inventarioH.RegistrarAjuste)
+
 			scoped.GET("/rbac/roles", P("admin.roles"), rbacH.Roles)
 			scoped.GET("/rbac/matriz", P("admin.roles"), rbacH.Matriz)
 			scoped.PUT("/rbac/roles/:codigo/permisos", P("admin.roles"), rbacH.SetPermisos)
 			scoped.POST("/rbac/roles", P("admin.roles"), rbacH.CrearRol)
+			// Traer a esta empresa un rol a medida que ya existe en otra (con sus permisos).
+			// `traibles` va ANTES de cualquier `/rbac/roles/:algo` para que Gin no lo tome como
+			// parámetro de ruta.
+			scoped.GET("/rbac/roles/traibles", P("admin.roles"), rbacH.RolesTraibles)
+			scoped.POST("/rbac/roles/traer", P("admin.roles"), rbacH.TraerRol)
 			// Usuarios (Administración) — gestión por empresa activa.
 			scoped.GET("/rbac/usuarios", P("admin.roles"), rbacH.ListarUsuarios)
 			scoped.POST("/rbac/usuarios", P("admin.roles"), rbacH.CrearUsuario)
@@ -326,6 +446,10 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.GET("/cxc/catalogos", P("cxc.ver"), cxcH.Catalogos)
 			scoped.GET("/cxc/contratos", P("cxc.ver"), cxcH.Contratos)
 			scoped.GET("/cxc/contratos/:numero", P("cxc.ver"), cxcH.Contrato)
+			// Corregir lo que el archivo del origen trajo incompleto. Va con `cxc.importar` —el
+			// permiso de quien carga la cartera— porque es arreglar lo que la carga dejó a medias,
+			// no operar la cobranza.
+			scoped.PATCH("/cxc/contratos/:numero", P("cxc.importar"), cxcH.CorregirContrato)
 			scoped.GET("/cxc/cargos/plan", P("cxc.ver"), cxcH.PlanCargos)
 			scoped.POST("/cxc/cargos/generar", P("cxc.importar"), cxcH.GenerarCargos)
 			scoped.POST("/cxc/importaciones/contratos/previsualizar", P("cxc.importar"), cxcH.PrevisualizarImportacion)

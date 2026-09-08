@@ -276,7 +276,15 @@ func (h *Handler) CrearConcepto(c *gin.Context) {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, err.Error())
 		return
 	}
-	visible := true
+	// Un concepto creado desde BANCOS nace INVISIBLE para CxP (decisión del usuario, 2026-09-03):
+	// «lo que crea en conta lo puedo ver en Bancos, pero lo que creo en Bancos no lo puede ver conta
+	// a menos que lo marque como visible». Bancos abre rubros bancarios —traslados, ahorro,
+	// overnight— que no son gasto a pagar, y llenarle el selector de Contabilidad con eso es
+	// exactamente lo que hace que clasificar sea difícil.
+	//
+	// Se puede pedir visible explícitamente en el cuerpo: quien crea desde acá tiene
+	// `bancos.catalogo` y puede decidirlo. Lo que cambió es el DEFAULT.
+	visible := false
 	if req.VisibleCxP != nil {
 		visible = *req.VisibleCxP
 	}

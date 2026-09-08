@@ -40,19 +40,14 @@ func (h *Handler) ExportarMovimientos(c *gin.Context) {
 		return
 	}
 	op := OpcionesReporte{AgruparPorPartida: agruparDeQuery(c)}
-	buf, _, err := h.svc.ExportarMovimientosXLSX(c.Request.Context(), claims.EmpresaID, f, claims.UsuarioID(), op)
+	// El nombre lo devuelve el servicio: «VDP Asoc + Dep Agosto 03092026.xlsx» —sigla de la empresa,
+	// las clasificaciones filtradas abreviadas, el mes de los datos y la fecha de descarga—. Lo arma
+	// allá porque las clasificaciones se leen de lo exportado, no de los IDs del filtro.
+	buf, _, nombre, err := h.svc.ExportarMovimientosXLSX(c.Request.Context(), claims.EmpresaID, f, claims.UsuarioID(), op)
 	if err != nil {
 		h.responderError(c, err, "exportar-movimientos")
 		return
 	}
-	// Nomenclatura del usuario: «VDP 17082026.xlsx» (sigla de la empresa + fecha). El detalle
-	// distingue las dos presentaciones: sin él, las dos descargas del mismo día se pisarían en la
-	// carpeta y no se sabría cuál es cuál.
-	detalle := ""
-	if !op.AgruparPorPartida {
-		detalle = "corrido"
-	}
-	nombre := h.svc.NombreArchivo(c.Request.Context(), claims.EmpresaID, claims.UsuarioID(), detalle)
 	c.Header("Content-Disposition", "attachment; filename=\""+nombre+"\"")
 	c.Data(http.StatusOK, xlsxContentType, buf)
 }

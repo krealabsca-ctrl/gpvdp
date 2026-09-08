@@ -11,6 +11,9 @@
 
 import { apiFetch } from "@/api/client";
 import type { Moneda } from "@/lib/format";
+// El catálogo de gasto es el MISMO de Bancos, con dos puertas: se reusan sus tipos a propósito,
+// para que la forma del rubro no pueda divergir entre la puerta de Bancos y la de Contabilidad.
+import type { ClasificacionCatalogo, ConceptoCatalogo } from "@/api/bancos";
 
 // ---------------------------------------------------------------------------
 // Tipos (mirror de components.schemas del OpenAPI CxP)
@@ -1050,6 +1053,30 @@ export const cxpApi = {
       method: "POST",
       json: { clasificacion_id: clasificacionId, nombre },
     });
+  },
+
+  // --- Catálogo de gasto: la puerta de Contabilidad (permiso cxp.catalogo) ---
+  //
+  // El catálogo es UNO y vive en Bancos; estos endpoints son el otro acceso, con alcance recortado:
+  // crear y renombrar, solo sobre lo visible para CxP. Apagar, fusionar y declarar la naturaleza
+  // (el EBITDA) siguen siendo de `bancos.catalogo`. Lo creado acá nace visible para CxP.
+  /** Abre un rubro de gasto nuevo. Nace visible para CxP: el backend no acepta otra cosa. */
+  crearConceptoGasto(nombre: string): Promise<ConceptoCatalogo> {
+    return apiFetch<ConceptoCatalogo>("/cxp/catalogo/conceptos", { method: "POST", json: { nombre } });
+  },
+  /** Renombra un rubro. 404 si no es de los visibles para CxP. */
+  renombrarConceptoGasto(id: string, nombre: string): Promise<void> {
+    return apiFetch<void>(`/cxp/catalogo/conceptos/${id}`, { method: "PATCH", json: { nombre } });
+  },
+  /** Cuelga una clasificación de un rubro visible para CxP. */
+  crearClasificacionGasto(conceptoId: string, nombre: string): Promise<ClasificacionCatalogo> {
+    return apiFetch<ClasificacionCatalogo>("/cxp/catalogo/clasificaciones", {
+      method: "POST",
+      json: { concepto_id: conceptoId, nombre },
+    });
+  },
+  renombrarClasificacionGasto(id: string, nombre: string): Promise<void> {
+    return apiFetch<void>(`/cxp/catalogo/clasificaciones/${id}`, { method: "PATCH", json: { nombre } });
   },
   /** Marca el tipo de factura (CXP/ANTICIPO/VIATICOS/REINTEGRO) de un lote. */
   tipoMasivo(ids: string[], tipo: TipoFactura): Promise<ResultadoMasivo> {

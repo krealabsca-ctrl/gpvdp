@@ -17,6 +17,10 @@ type MovimientoExport struct {
 	Clasificacion string
 	Estado        string
 	EsTraslado    bool
+	// ClasificacionID no sale en ninguna hoja. Está para nombrar el archivo respetando el ORDEN en
+	// que el usuario eligió las clasificaciones en el filtro: por nombre no se puede ordenar, porque
+	// dos conceptos distintos pueden tener una clasificación con el mismo nombre.
+	ClasificacionID string
 }
 
 // ConsecutivoLargo deriva el "Consecutivo Largo" de Davivienda desde la descripción

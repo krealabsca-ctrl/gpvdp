@@ -1,7 +1,7 @@
 /**
  * CxP — Validación por riesgo (/cxp/validacion).
  *
- * Los cuatro umbrales que deciden QUÉ factura necesita que el área confirme la conformidad y qué
+ * Los umbrales que deciden QUÉ factura necesita que el área confirme la conformidad y qué
  * gasto sigue derecho a aprobación. Mover uno de estos números cambia cuánto dinero se paga sin
  * revisión humana, así que la pantalla nunca muestra solo el formulario: arriba va el EFECTO
  * medido —cuántas facturas y cuánto monto le está pidiendo confirmación la regla vigente—, porque
@@ -56,6 +56,13 @@ const UMBRALES: { clave: string; titulo: string; unidad: string; ayuda: string }
     unidad: "facturas",
     ayuda:
       "Un proveedor con esta cantidad de facturas o menos es nuevo o esporádico: no hay historial contra el que comparar, así que alguien lo mira. Con 0 se desactiva el criterio.",
+  },
+  {
+    clave: "VALIDACION_PROVEEDOR_NUEVO_PISO_MONTO",
+    titulo: "Piso del criterio de proveedor nuevo",
+    unidad: "CRC",
+    ayuda:
+      "Estrenar proveedor solo manda al área si la factura supera este monto. Tiene que ser un piso propio y no el umbral general: ese se evalúa antes, así que exigirle los mismos ₡250.000 dejaría el criterio muerto. Medido el 3 de setiembre de 2026: sin este piso, «proveedor nuevo» traía 437 facturas —el 44 % de todas las validaciones— para proteger ₡9,3M, el 1 % del dinero, con una mediana de ₡5.650.",
   },
   {
     clave: "VALIDACION_DESVIO_PCT",
@@ -208,7 +215,7 @@ function TarjetaEfecto({
   );
 }
 
-/** Un umbral: valor editable + qué hace. Se guarda de a uno, para no mover cuatro cosas a la vez. */
+/** Un umbral: valor editable + qué hace. Se guarda de a uno, para no mover varias cosas a la vez. */
 function FilaUmbral({
   def,
   param,

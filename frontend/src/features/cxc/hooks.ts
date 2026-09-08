@@ -84,6 +84,31 @@ export function useConfirmarContratos() {
   });
 }
 
+/**
+ * Corregir un contrato apartado.
+ *
+ * Invalida el módulo completo porque el arreglo cambia más de lo que se ve: el contrato sale de la
+ * lista «en revisión», entra a la cola de cobro y al preventivo, y el plan de cargos deja de
+ * contarlo como excluido. Invalidar solo la lista de contratos dejaría esos otros números viejos.
+ */
+export function useCorregirContrato() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      numero,
+      ...cambios
+    }: {
+      numero: string;
+      cuota?: string;
+      dia_pago?: number;
+      modalidad_id?: string;
+      nota?: string;
+    }) => cxcApi.corregirContrato(numero, cambios),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.cxc.raiz(empresaId) }),
+  });
+}
+
 export function useGenerarCargos() {
   const empresaId = useEmpresaId();
   const qc = useQueryClient();

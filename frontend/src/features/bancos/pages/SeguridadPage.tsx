@@ -205,17 +205,25 @@ export function SeguridadPage() {
           <CardTitle>Crear rol a medida</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={crearRol} className="flex flex-wrap items-end gap-3">
-            <Input
-              label="Nombre del rol"
-              value={nombreRol}
-              onChange={(e) => setNombreRol(e.target.value)}
-              placeholder="Ej. Tesorería, Solo Bancos"
-              className="min-w-56"
-            />
-            <Button type="submit" loading={creando} disabled={!nombreRol.trim()}>
-              Crear rol
-            </Button>
+          {/* Alineado por arriba y sin texto de ayuda bajo el campo: el hint deja el campo más alto
+              que el botón. La aclaración va debajo del formulario completo. */}
+          <form onSubmit={crearRol} className="flex flex-wrap items-start gap-3">
+            <div className="min-w-56">
+              <Input
+                label="Nombre del rol"
+                value={nombreRol}
+                onChange={(e) => setNombreRol(e.target.value)}
+                placeholder="Ej. Tesorería, Solo Bancos"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium text-transparent" aria-hidden="true">
+                &nbsp;
+              </span>
+              <Button type="submit" loading={creando} disabled={!nombreRol.trim()}>
+                Crear rol
+              </Button>
+            </div>
           </form>
           <p className="mt-2 text-xs text-content-muted">
             Nace con lo mínimo (ver Bancos y CxP); luego marcá sus permisos en la matriz. Los cambios de la
@@ -223,6 +231,112 @@ export function SeguridadPage() {
           </p>
         </CardContent>
       </Card>
+
+      <TraerRolDeOtraEmpresa empresaActual={empresaActiva?.nombre ?? "esta empresa"} />
     </div>
+  );
+}
+
+/**
+ * Traer a esta empresa un rol a medida que ya existe en otra.
+ *
+ * Existe porque un rol a medida pertenece a la empresa donde se creó y sus permisos se guardan por
+ * empresa: «el mismo rol en dos empresas» son en realidad dos roles con el mismo código. Rehacerlo a
+ * mano obliga a volver a marcar cada permiso, y con el tiempo los dos dejan de ser iguales sin que
+ * nadie lo note. Solo aparecen roles de empresas a las que quien mira tiene acceso.
+ */
+function TraerRolDeOtraEmpresa({ empresaActual }: { empresaActual: string }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const { empresaActiva } = useAuth();
+  const empId = empresaActiva?.id ?? "none";
+
+  const traiblesQ = useQuery({
+    queryKey: ["rbac", "traibles", empId],
+    queryFn: () => rbacApi.rolesTraibles(),
+  });
+  const [elegido, setElegido] = useState("");
+  const [trayendo, setTrayendo] = useState(false);
+
+  const traibles = traiblesQ.data ?? [];
+
+  async function traer() {
+    // El valor del select empaqueta las dos claves porque el backend necesita las dos y el mismo
+    // código puede venir de empresas distintas.
+    const [empresaID, codigo] = elegido.split("|");
+    if (!empresaID || !codigo) {
+      toast.error("Elegí el rol que querés traer.");
+      return;
+    }
+    setTrayendo(true);
+    try {
+      const r = await rbacApi.traerRol(empresaID, codigo);
+      toast.success(
+        `«${r.rol.nombre}» quedó en ${empresaActual} con ${r.permisos_copiados} permiso(s) copiado(s). Desde acá los dos roles se editan por separado.`,
+      );
+      setElegido("");
+      void qc.invalidateQueries({ queryKey: ["rbac"] });
+    } catch (err) {
+      toast.error(mensajeError(err));
+    } finally {
+      setTrayendo(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Traer un rol de otra empresa</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {traiblesQ.isPending ? (
+          <LoadingState label="Buscando roles en tus otras empresas" />
+        ) : traiblesQ.isError ? (
+          <ErrorState message={mensajeError(traiblesQ.error)} onRetry={() => traiblesQ.refetch()} />
+        ) : traibles.length === 0 ? (
+          <p className="text-sm text-content-muted">
+            No hay roles a medida en tus otras empresas que no existan ya acá.
+          </p>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-start gap-3">
+              <div className="flex min-w-72 flex-col gap-1.5">
+                <label htmlFor="rol-traible" className="text-sm font-medium text-content">
+                  Rol
+                </label>
+                <select
+                  id="rol-traible"
+                  value={elegido}
+                  onChange={(e) => setElegido(e.target.value)}
+                  className={cn(
+                    "h-10 w-full rounded-lg border border-border bg-surface-raised px-3 text-sm text-content shadow-sm",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent",
+                  )}
+                >
+                  <option value="">— elegí un rol —</option>
+                  {traibles.map((t) => (
+                    <option key={`${t.empresa_id}|${t.codigo}`} value={`${t.empresa_id}|${t.codigo}`}>
+                      {t.nombre} — de {t.empresa_nombre} ({t.cuantos_permisos} permisos)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-sm font-medium text-transparent" aria-hidden="true">
+                  &nbsp;
+                </span>
+                <Button onClick={traer} loading={trayendo} disabled={!elegido}>
+                  Traer a {empresaActual}
+                </Button>
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-content-muted">
+              Se crea acá un rol con el mismo nombre y los mismos permisos. Es una <strong>copia</strong>:
+              después, cambiarle un permiso en una empresa no lo cambia en la otra.
+            </p>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }

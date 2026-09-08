@@ -95,6 +95,7 @@ func (r *pgRepository) DocumentosParaPagoPorLote(ctx context.Context, empresaID,
 		FROM documento_cxp d
 		JOIN proveedor p ON p.id = d.proveedor_id
 		WHERE d.empresa_id = $1::uuid AND d.lote_id = $2::uuid
+		  AND NOT d.bloqueado_para_pago
 		ORDER BY p.nombre`
 	rows, err := r.pool.Query(ctx, q, empresaID, loteID)
 	if err != nil {
@@ -120,7 +121,8 @@ func (r *pgRepository) ProgramarAprobados(ctx context.Context, empresaID string,
 		UPDATE documento_cxp
 		SET estado = 'PROGRAMADO', fecha_pago_programada = $3::date,
 		    huella = 'CXP-' || UPPER(LEFT(REPLACE(id::text, '-', ''), 12)), actualizado_en = now()
-		WHERE empresa_id = $1::uuid AND id = ANY($2::uuid[]) AND estado = 'APROBADO'`
+		WHERE empresa_id = $1::uuid AND id = ANY($2::uuid[]) AND estado = 'APROBADO'
+		  AND NOT bloqueado_para_pago`
 	tag, err := r.pool.Exec(ctx, q, empresaID, ids, fecha)
 	if err != nil {
 		return 0, fmt.Errorf("cxp: programar aprobados: %w", err)

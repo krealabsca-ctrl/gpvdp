@@ -40,7 +40,11 @@ func (r *pgRepository) MovimientosParaExport(ctx context.Context, empresaID stri
 		       COALESCE(b.nombre,''), COALESCE(cb.alias,''),
 		       m.debito, m.credito, m.moneda_original, m.monto_crc,
 		       COALESCE(co.nombre,''), COALESCE(cl.nombre,''),
-		       m.estado_clasificacion, m.es_traslado
+		       m.estado_clasificacion, m.es_traslado,
+		       -- El id de la clasificación no se muestra en ninguna hoja: sirve para nombrar el
+		       -- archivo respetando el ORDEN en que el usuario eligió las clasificaciones en el
+		       -- filtro. Por nombre no se puede: dos conceptos pueden tener la misma clasificación.
+		       COALESCE(m.clasificacion_id::text,'')
 		FROM movimiento_bancario m
 		LEFT JOIN concepto co ON co.id = m.concepto_id
 		LEFT JOIN clasificacion cl ON cl.id = m.clasificacion_id
@@ -63,7 +67,8 @@ func (r *pgRepository) MovimientosParaExport(ctx context.Context, empresaID stri
 			mcrc      decimal.Decimal
 		)
 		if err := rows.Scan(&fecha, &m.Documento, &m.Descripcion, &m.Banco, &m.Cuenta,
-			&deb, &cred, &m.Moneda, &mcrc, &m.Concepto, &m.Clasificacion, &m.Estado, &m.EsTraslado); err != nil {
+			&deb, &cred, &m.Moneda, &mcrc, &m.Concepto, &m.Clasificacion, &m.Estado, &m.EsTraslado,
+			&m.ClasificacionID); err != nil {
 			return nil, fmt.Errorf("bancos: scan export: %w", err)
 		}
 		m.Fecha = fecha.Format("2006-01-02")
