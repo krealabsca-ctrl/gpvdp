@@ -181,6 +181,18 @@ type PlanCargos struct {
 	// Excluidos: contratos que no pueden generar y por qué. Sin esto, un contrato que
 	// nunca cobra pasaría inadvertido para siempre.
 	Excluidos map[string]int `json:"excluidos"`
+	// ExcluidosTotal es la suma del mapa. Va aparte para que la pantalla pueda decir «9.779
+	// generan · 2.452 no» sin sumar un mapa, y para que el número exista aunque nadie despliegue
+	// el detalle: un total que solo se ve abriendo un acordeón es un total que nadie ve.
+	ExcluidosTotal int `json:"excluidos_total"`
+	// FueraDelRango: contratos sanos a los que simplemente no les toca cobrar en estas fechas
+	// (su primer cobro es posterior, o el ciclo no cae en el rango). NO es un problema y por eso
+	// no va con los excluidos, pero se informa para que las cuentas CIERREN: sin este número,
+	// «12.231 contratos» arriba y «9.779 + 2.451» abajo dejan uno sin explicar, y quien revisa no
+	// tiene forma de saber si le falta un dato o si el sistema perdió un contrato.
+	FueraDelRango int `json:"fuera_del_rango"`
+	// Activos es el total contra el que cierran los tres números de arriba.
+	Activos int `json:"activos"`
 	// SobreElTope avisa que el volumen exige confirmación explícita.
 	SobreElTope bool `json:"sobre_el_tope"`
 	Tope        int  `json:"tope"`
@@ -214,13 +226,16 @@ func (s *Service) PrevisualizarCargos(ctx context.Context, empresaID, rol, usuar
 		Desde: d.Format("2006-01-02"), Hasta: h.Format("2006-01-02"),
 		Excluidos: map[string]int{}, Tope: TopeCargosPorCorrida,
 	}
+	plan.Activos = len(contratos)
 	for _, c := range contratos {
 		cargos, motivo := planDe(c, d, h)
 		if motivo != "" {
 			plan.Excluidos[motivo]++
+			plan.ExcluidosTotal++
 			continue
 		}
 		if len(cargos) == 0 {
+			plan.FueraDelRango++
 			continue
 		}
 		plan.Contratos++
@@ -280,6 +295,11 @@ func (s *Service) GenerarCargos(ctx context.Context, empresaID, rol, usuarioID, 
 // exclusión en vez de un error para poder AGRUPARLOS en el reporte: con 70 000 contratos,
 // «12 sin fecha de primer cobro» es útil y 12 errores sueltos no.
 func planDe(c ContratoGenerable, desde, hasta time.Time) ([]CargoPlan, string) {
+	// El motivo que ya resolvió el SQL manda: es el que explica el ORIGEN del problema (el dato
+	// llegó incompleto), y no tiene sentido intentar calcular un plan sobre él.
+	if c.Motivo != "" {
+		return nil, c.Motivo
+	}
 	primer, err := time.Parse("2006-01-02", c.PrimerCobro)
 	if err != nil {
 		return nil, "fecha de primer cobro ilegible"

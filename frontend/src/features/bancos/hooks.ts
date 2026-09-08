@@ -246,6 +246,113 @@ export function useMovimientos(filtros: FiltrosMovimientos) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Consulta por segmento (mig 0077)
+// ---------------------------------------------------------------------------
+
+/**
+ * Los créditos de las partidas que consulta el rol del usuario.
+ *
+ * `retry: false` a propósito: si el rol no tiene alcance el backend responde 200 con
+ * `sin_alcance`, así que un error acá es real (sesión, red o permiso) y reintentarlo solo demora
+ * el mensaje.
+ */
+export function useMiSegmento(filtros: FiltrosMovimientos) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.bancos.miSegmento(empresaId, filtros),
+    queryFn: () => bancosApi.miSegmento(filtros),
+    placeholderData: (prev) => prev,
+    retry: false,
+  });
+}
+
+export function useReportarSegmentacion() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { movimientoId: string; motivo: string }) =>
+      bancosApi.reportarSegmentacion(vars.movimientoId, vars.motivo),
+    onSuccess: () => {
+      // Su propia pantalla (para que la fila muestre el motivo) y la cola de quien clasifica.
+      void qc.invalidateQueries({ queryKey: queryKeys.bancos.miSegmentoRaiz(empresaId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.bancos.reportesSegmentacionRaiz(empresaId) });
+    },
+  });
+}
+
+/**
+ * Busca un movimiento que no aparece. Es una MUTACIÓN aunque solo lea: cada consulta deja un
+ * evento de auditoría, así que no puede correr sola al montar la pantalla ni quedar en caché.
+ */
+export function useBuscarFaltante() {
+  return useMutation({
+    mutationFn: (vars: { fecha: string; monto: string }) =>
+      bancosApi.buscarFaltante(vars.fecha, vars.monto),
+  });
+}
+
+export function useReportarFaltante() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { fecha: string; monto: string; referencia: string; motivo: string }) =>
+      bancosApi.reportarFaltante(vars.fecha, vars.monto, vars.referencia, vars.motivo),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.bancos.reportesSegmentacionRaiz(empresaId) });
+    },
+  });
+}
+
+/** Los roles elegibles y el alcance ya asignado (columna «quién la consulta» del catálogo). */
+export function useAlcanceConsulta() {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.bancos.alcanceConsulta(empresaId),
+    queryFn: () => bancosApi.alcanceConsulta(),
+    staleTime: 60_000,
+  });
+}
+
+export function useGuardarConsultaDePartida() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { clasificacionId: string; rolIds: string[] }) =>
+      bancosApi.guardarConsultaDePartida(vars.clasificacionId, vars.rolIds),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.bancos.alcanceConsulta(empresaId) });
+      // Cambiar el alcance cambia lo que ve el equipo: si alguien lo tiene abierto, que se refresque.
+      void qc.invalidateQueries({ queryKey: queryKeys.bancos.miSegmentoRaiz(empresaId) });
+    },
+  });
+}
+
+export function useReportesSegmentacion(soloPendientes = true) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.bancos.reportesSegmentacion(empresaId, soloPendientes),
+    queryFn: () => bancosApi.reportesSegmentacion(soloPendientes),
+    staleTime: 30_000,
+  });
+}
+
+export function useResolverReporte() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      reporteId: string;
+      resolucion: "RECLASIFICADO" | "SIN_CAMBIO";
+      respuesta?: string;
+    }) => bancosApi.resolverReporte(vars.reporteId, vars.resolucion, vars.respuesta ?? ""),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.bancos.reportesSegmentacionRaiz(empresaId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.bancos.miSegmentoRaiz(empresaId) });
+    },
+  });
+}
+
 /**
  * Resumen (cuántos y cuánto) de la selección activa de la hoja de trabajo.
  * Recibe los MISMOS filtros que useMovimientos: es el encabezado de esa misma lista.
@@ -423,6 +530,250 @@ export function useSerieMensual(hasta: string) {
   return useQuery({
     queryKey: queryKeys.bancos.serieMensual(empresaId, hasta),
     queryFn: () => bancosApi.serieMensual(hasta, 12),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Dimensiones del gasto (departamento y sede) y control presupuestario
+// ---------------------------------------------------------------------------
+
+/** Las sedes de la empresa. */
+export function useSedes(incluirInactivas = false) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.bancos.sedes(empresaId, incluirInactivas),
+    queryFn: () => bancosApi.sedes(incluirInactivas),
+    staleTime: 5 * 60_000,
+  });
+}
+
+/**
+ * Los departamentos de la empresa. Es el MISMO catálogo que administra CxP (una sola tabla): lo que
+ * se crea o renombra acá se ve allá.
+ */
+export function useDepartamentosDeBancos() {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.bancos.departamentosBancos(empresaId),
+    queryFn: () => bancosApi.departamentosDeBancos(),
+    staleTime: 5 * 60_000,
+  });
+}
+
+/**
+ * De qué cuelga un departamento. Se pide ANTES de ofrecer el botón de eliminar para poder decir
+ * «tiene 128 movimientos, solo se puede desactivar» en vez de dejar apretar y devolver un error.
+ */
+export function useUsoDeDepartamento(id: string, habilitado: boolean) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: [...queryKeys.bancos.departamentosBancos(empresaId), "uso", id],
+    queryFn: () => bancosApi.usoDeDepartamento(id),
+    enabled: habilitado && id !== "",
+  });
+}
+
+/**
+ * Invalidación del catálogo de departamentos.
+ *
+ * Toca el tablero completo además del catálogo: el nombre del departamento se muestra en el control
+ * y en el presupuesto, y dejarlo con el viejo haría dudar de si el cambio se guardó.
+ */
+function useInvalidarDepartamentos() {
+  const qc = useQueryClient();
+  const empresaId = useEmpresaId();
+  return () => {
+    void qc.invalidateQueries({ queryKey: queryKeys.bancos.departamentosBancos(empresaId) });
+    void qc.invalidateQueries({ queryKey: ["bancos", "dashboard", empresaId] });
+    void qc.invalidateQueries({ queryKey: queryKeys.bancos.presupuestoRaiz(empresaId) });
+    // El catálogo es compartido con CxP: sus pantallas también quedan viejas.
+    void qc.invalidateQueries({ queryKey: ["cxp", empresaId] });
+  };
+}
+
+export function useCrearDepartamento() {
+  const invalidar = useInvalidarDepartamentos();
+  return useMutation({
+    mutationFn: (v: { nombre: string; codigo?: string }) =>
+      bancosApi.crearDepartamento(v.nombre, v.codigo ?? ""),
+    onSuccess: invalidar,
+  });
+}
+
+export function useRenombrarDepartamento() {
+  const invalidar = useInvalidarDepartamentos();
+  return useMutation({
+    mutationFn: (v: { id: string; nombre: string; codigo?: string }) =>
+      bancosApi.renombrarDepartamento(v.id, v.nombre, v.codigo ?? ""),
+    onSuccess: invalidar,
+  });
+}
+
+export function useCambiarActivoDepartamento() {
+  const invalidar = useInvalidarDepartamentos();
+  return useMutation({
+    mutationFn: (v: { id: string; activo: boolean }) =>
+      bancosApi.cambiarActivoDepartamento(v.id, v.activo),
+    onSuccess: invalidar,
+  });
+}
+
+export function useEliminarDepartamento() {
+  const invalidar = useInvalidarDepartamentos();
+  return useMutation({
+    mutationFn: (id: string) => bancosApi.eliminarDepartamento(id),
+    onSuccess: invalidar,
+  });
+}
+
+export function useCrearSede() {
+  const qc = useQueryClient();
+  const empresaId = useEmpresaId();
+  return useMutation({
+    mutationFn: (v: { nombre: string; codigo?: string }) => bancosApi.crearSede(v.nombre, v.codigo ?? ""),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.bancos.sedesRaiz(empresaId) });
+    },
+  });
+}
+
+export function useRenombrarSede() {
+  const qc = useQueryClient();
+  const empresaId = useEmpresaId();
+  return useMutation({
+    mutationFn: (v: { id: string; nombre: string; codigo?: string }) =>
+      bancosApi.renombrarSede(v.id, v.nombre, v.codigo ?? ""),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.bancos.sedesRaiz(empresaId) });
+      // El nombre de la sede se muestra en el control: dejarlo con el viejo haría dudar del cambio.
+      void qc.invalidateQueries({ queryKey: ["bancos", "dashboard", empresaId] });
+    },
+  });
+}
+
+export function useCambiarActivoSede() {
+  const qc = useQueryClient();
+  const empresaId = useEmpresaId();
+  return useMutation({
+    mutationFn: (v: { id: string; activo: boolean }) => bancosApi.cambiarActivoSede(v.id, v.activo),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.bancos.sedesRaiz(empresaId) });
+    },
+  });
+}
+
+/**
+ * Asigna el departamento y la sede POR DEFECTO de una partida.
+ *
+ * Invalida el tablero completo porque el efecto es retroactivo: con un clic cambia la atribución de
+ * toda la historia de esa partida, y dejar la pantalla con los números viejos haría pensar que no
+ * pasó nada.
+ */
+export function useAsignarDimensionesPartida() {
+  const qc = useQueryClient();
+  const empresaId = useEmpresaId();
+  return useMutation({
+    mutationFn: (v: { clasificacionId: string; departamento_id: string; sede_id: string }) =>
+      bancosApi.asignarDimensionesPartida(v.clasificacionId, {
+        departamento_id: v.departamento_id,
+        sede_id: v.sede_id,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["bancos", "dashboard", empresaId] });
+      void qc.invalidateQueries({ queryKey: queryKeys.bancos.clasificacionesRaiz(empresaId) });
+    },
+  });
+}
+
+/** La excepción de un movimiento puntual. */
+export function useAsignarDimensionesMovimiento() {
+  const qc = useQueryClient();
+  const empresaId = useEmpresaId();
+  return useMutation({
+    mutationFn: (v: { movimientoId: string; departamento_id: string; sede_id: string }) =>
+      bancosApi.asignarDimensionesMovimiento(v.movimientoId, {
+        departamento_id: v.departamento_id,
+        sede_id: v.sede_id,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["bancos", "dashboard", empresaId] });
+      void qc.invalidateQueries({ queryKey: queryKeys.bancos.movimientosRaiz(empresaId) });
+    },
+  });
+}
+
+/** El control presupuestario del rango. */
+export function useControl(
+  desde: string,
+  hasta: string,
+  agruparPor: "departamento" | "sede",
+  umbral: string,
+) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.bancos.control(empresaId, desde, hasta, agruparPor, umbral),
+    queryFn: () => bancosApi.control(desde, hasta, agruparPor, umbral),
+  });
+}
+
+/** En qué partidas gastó una dimensión. `id` vacío = el gasto sin atribuir. */
+export function usePartidasDeDimension(
+  desde: string,
+  hasta: string,
+  agruparPor: "departamento" | "sede",
+  id: string,
+  habilitado: boolean,
+  umbral = "",
+) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    // El umbral entra en la clave: es lo que decide el semáforo de cada partida, y sin él dos
+    // umbrales distintos compartirían caché y la pantalla mostraría el estado del anterior.
+    queryKey: [
+      ...queryKeys.bancos.partidasDimension(empresaId, desde, hasta, agruparPor, id),
+      umbral,
+    ],
+    queryFn: () => bancosApi.partidasDeDimension(desde, hasta, agruparPor, id, umbral),
+    enabled: habilitado,
+  });
+}
+
+export function usePresupuesto(desde: string, hasta: string) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.bancos.presupuesto(empresaId, desde, hasta),
+    queryFn: () => bancosApi.presupuesto(desde, hasta),
+  });
+}
+
+export function useGuardarPresupuesto() {
+  const qc = useQueryClient();
+  const empresaId = useEmpresaId();
+  return useMutation({
+    mutationFn: (v: {
+      departamento_id: string;
+      periodo: string;
+      monto: string;
+      nota?: string;
+      clasificacion_id?: string;
+    }) => bancosApi.guardarPresupuesto(v),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.bancos.presupuestoRaiz(empresaId) });
+      void qc.invalidateQueries({ queryKey: ["bancos", "dashboard", empresaId] });
+    },
+  });
+}
+
+export function useBorrarPresupuesto() {
+  const qc = useQueryClient();
+  const empresaId = useEmpresaId();
+  return useMutation({
+    mutationFn: (v: { departamento_id: string; periodo: string; clasificacion_id?: string }) =>
+      bancosApi.borrarPresupuesto(v.departamento_id, v.periodo, v.clasificacion_id ?? ""),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.bancos.presupuestoRaiz(empresaId) });
+      void qc.invalidateQueries({ queryKey: ["bancos", "dashboard", empresaId] });
+    },
   });
 }
 

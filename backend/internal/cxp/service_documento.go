@@ -2,10 +2,12 @@ package cxp
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
+	"go.uber.org/zap"
 
 	"github.com/gpvdp/erp/internal/shared"
 )
@@ -27,6 +29,21 @@ func (s *Service) CrearDocumento(ctx context.Context, empresaID string, in Docum
 	if tipo == TipoAnticipo && strings.TrimSpace(in.Descripcion) == "" {
 		return Documento{}, ErrMotivoAnticipoRequerido
 	}
+	// Los viáticos NO se pagan por banco: son gastos ya desembolsados —por caja chica o de su
+	// bolsillo— que se archivan con el estado LIQUIDADA. Eso estaba escrito en el comentario del tipo
+	// desde el principio, pero las tres consultas que arman el archivo de pagos filtran solo por
+	// `estado = 'PROGRAMADO'` y nunca por tipo, así que un viático PROGRAMADO habría salido al banco
+	// como cualquier factura. Se marca acá, en el service, y no con una lista negra en cada consulta:
+	// una marca positiva no se le puede olvidar a la próxima consulta que se escriba.
+	if tipo == TipoViaticos {
+		in.BloqueadoParaPago = true
+		if strings.TrimSpace(in.BloqueoMotivo) == "" {
+			in.BloqueoMotivo = "los viáticos no se pagan por banco: ya se desembolsaron, y se " +
+				"archivan con «liquidar» en vez de programarse"
+		}
+	}
+	in.Tipo = tipo
+
 	totalCRC := in.Total
 	var tc *decimal.Decimal
 	if in.Moneda == "USD" {
@@ -62,6 +79,12 @@ func (s *Service) ListarDocumentos(ctx context.Context, empresaID, rol, usuarioI
 	}
 	f.DepartamentoIDs = deptIDs // nil = ve todo; no-nil = solo esas áreas
 	return s.repo.ListarDocumentos(ctx, empresaID, f)
+}
+
+// DocumentoPorClave trae el documento por su llave anti-duplicado. Lo usa otro módulo para
+// recuperarse de su propio rechazo por duplicado: ver el repositorio.
+func (s *Service) DocumentoPorClave(ctx context.Context, empresaID, clave string) (Documento, error) {
+	return s.repo.DocumentoPorClave(ctx, empresaID, clave)
 }
 
 func (s *Service) DocumentoPorID(ctx context.Context, empresaID, id string) (Documento, error) {
@@ -348,6 +371,30 @@ func (s *Service) Anular(ctx context.Context, empresaID, id, usuarioID string) (
 		[]string{EstRecibido, EstRevisado, EstValidadoDepto, EstAprobado, EstProgramado}, EstAnulado, "ANULAR_DOCUMENTO", usuarioID)
 }
 
+// AnularConMotivo anula el documento y deja escrito POR QUÉ, en el mismo campo que usa la anulación
+// masiva (`nota_revision`).
+//
+// Existe porque un documento anulado sin motivo obliga a adivinar: cuando otro módulo anula una
+// factura por programa —por ejemplo la provisión de una consignación que se reemplazó por la factura
+// electrónica real del proveedor— el motivo tiene que quedar en el documento, no solo en el log del
+// módulo que lo pidió. Guardar la nota es best-effort a propósito: si falla, la anulación ya está
+// hecha y no se deshace por no haber podido escribir el comentario.
+func (s *Service) AnularConMotivo(ctx context.Context, empresaID, id, motivo, usuarioID string) (Documento, error) {
+	doc, err := s.Anular(ctx, empresaID, id, usuarioID)
+	if err != nil {
+		return Documento{}, err
+	}
+	if motivo == "" {
+		return doc, nil
+	}
+	if e := s.repo.GuardarNotaRevision(ctx, empresaID, id, motivo); e != nil {
+		s.log.Warn("cxp: no se pudo guardar el motivo de la anulación", zap.Error(e))
+		return doc, nil
+	}
+	doc.NotaRevision = motivo
+	return doc, nil
+}
+
 // Liquidar: RECIBIDO/REVISADO → LIQUIDADA (viáticos/almuerzos ya pagados: se archivan sin pago).
 func (s *Service) Liquidar(ctx context.Context, empresaID, id, usuarioID string) (Documento, error) {
 	return s.transicionarMulti(ctx, empresaID, id, []string{EstRecibido, EstRevisado}, EstLiquidada, "LIQUIDAR_DOCUMENTO", usuarioID)
@@ -412,8 +459,15 @@ func (s *Service) transicionar(ctx context.Context, empresaID, id, de, a, accion
 
 // conflictoOTransicion distingue documento inexistente de estado incorrecto (0 filas afectadas).
 func (s *Service) conflictoOTransicion(ctx context.Context, empresaID, id string) (Documento, error) {
-	if _, err := s.repo.DocumentoPorID(ctx, empresaID, id); err != nil {
+	doc, err := s.repo.DocumentoPorID(ctx, empresaID, id)
+	if err != nil {
 		return Documento{}, err // ErrDocumentoNoEncontrado
+	}
+	// Un documento bloqueado para pago falla la transición por una razón concreta, y decir
+	// «transición de estado no permitida» manda a revisar el estado, que está bien. El motivo del
+	// bloqueo es lo único que explica qué hacer.
+	if doc.BloqueadoParaPago {
+		return Documento{}, fmt.Errorf("%w: %s", ErrDocumentoBloqueadoParaPago, doc.BloqueoMotivo)
 	}
 	return Documento{}, ErrTransicionInvalida
 }

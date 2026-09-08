@@ -3,7 +3,7 @@
 **Generado desde el catálogo de PostgreSQL de la base en operación.** No escrito a mano: refleja
 exactamente lo que existe hoy. Se regenera cuando cambia el esquema.
 
-**72 tablas · 789 columnas**
+**86 tablas · 936 columnas**
 
 ## Cómo leer las tablas
 
@@ -112,6 +112,52 @@ por ella tomándola del token. Ver el manual técnico, sección 6.1.
 | `rol_id` | `uuid` | **NN** | — | **PK** → `rol.id` |
 | `permiso_id` | `uuid` | **NN** | — | **PK** → `permiso.id` |
 | `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `rol_clasificacion_consulta`
+
+El ALCANCE de la consulta por segmento (mig 0077): qué partidas de gasto/ingreso puede consultar
+cada rol en la pantalla «Mi partida». Es una capa distinta del permiso: `bancos.ver_mi_segmento`
+dice **qué pantalla** abre el rol; esta tabla dice **cuáles filas** ve ahí.
+
+Sin filas para un rol, ese rol no ve NADA (nunca «todo»): el servicio corta antes de consultar y
+el repositorio agrega una condición imposible. Es el estado normal de casi todos los roles.
+
+4 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `empresa_id` | `uuid` | **NN** | — | **PK** → `empresa.id` |
+| `rol_id` | `uuid` | **NN** | — | **PK** → `rol.id` |
+| `clasificacion_id` | `uuid` | **NN** | — | **PK** → `clasificacion.id` |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `movimiento_reporte_segmentacion`
+
+Los avisos «este movimiento está mal segmentado» que levantan los equipos de consulta. El equipo
+señala; corregir la partida sigue siendo de quien clasifica.
+
+El estado se DERIVA de `resuelto_en` (nulo = pendiente): no hay columna «estado» que mantener
+sincronizada. Un índice único parcial sobre `movimiento_id WHERE resuelto_en IS NULL` deja **un
+solo aviso abierto por movimiento**, para que tres personas avisando del mismo no generen tres
+colas. El histórico de avisos resueltos del mismo movimiento sí admite varias filas.
+
+13 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `movimiento_id` | `uuid` | sí | — | → `movimiento_bancario.id`. **Nulo en un aviso de FALTANTE** que no se pudo enganchar (mig 0078) |
+| `usuario_id` | `uuid` | **NN** | — | → `usuario.id` (quién avisó) |
+| `motivo` | `text` | **NN** | — | obligatorio: sin él no se puede corregir |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `resuelto_en` | `timestamptz` | sí | — | nulo = pendiente |
+| `resuelto_por` | `uuid` | sí | — | → `usuario.id` |
+| `resolucion` | `text` | sí | — | `RECLASIFICADO` \| `SIN_CAMBIO` |
+| `respuesta` | `text` | sí | — | obligatoria si `SIN_CAMBIO`; la ve el equipo |
+| `fecha_esperada` | `date` | sí | — | Aviso de FALTANTE: el día en que el equipo esperaba el movimiento |
+| `monto_esperado` | `numeric(16,2)` | sí | — | Aviso de FALTANTE: el monto exacto que esperaba |
+| `referencia` | `text` | sí | — | Nº de recibo o comprobante con el que buscarlo |
 
 ### `sesion`
 
@@ -501,7 +547,17 @@ por ella tomándola del token. Ver el manual técnico, sección 6.1.
 
 ### `documento_cxp`
 
-41 columnas.
+43 columnas.
+
+**`bloqueado_para_pago` es un candado contra el doble pago, y es una marca POSITIVA a propósito.** Las
+tres consultas que arman el archivo de pagos filtran por `estado = 'PROGRAMADO'`; ninguna mira el
+tipo. La provisión que genera Inventario al usar un cofre consignado es de tipo `INTERNO` —vía
+expresa, aprobable directo desde RECIBIDO—, así que recorría ese camino completo: si alguien la pagaba
+antes de conciliarla, después entraba la factura electrónica real del proveedor y se pagaba el mismo
+cofre dos veces. Con la marca, `Programar` la rechaza (y el mensaje dice el motivo) y el archivo de
+pagos la excluye. El default en `false` deja intactas las facturas existentes: solo afecta lo que se
+marque a propósito. Negar tipo por tipo sería peor — bastaría que una consulta futura se olvidara de
+la lista.
 
 | Columna | Tipo | Nulo | Default | Notas |
 |---|---|---|---|---|
@@ -546,6 +602,8 @@ por ella tomándola del token. Ver el manual técnico, sección 6.1.
 | `contabilidad_marcado_en` | `timestamptz` | sí | — | — |
 | `requiere_validacion` | `boolean` | sí | — | — |
 | `validacion_motivo` | `text` | sí | — | — |
+| `bloqueado_para_pago` | `boolean` | **NN** | `false` | no se puede programar ni entrar al archivo del banco (mig 0072) |
+| `bloqueo_motivo` | `text` | sí | — | por qué está bloqueado, en palabras |
 
 ### `documento_cxp_aprobacion`
 
@@ -1352,3 +1410,199 @@ por ella tomándola del token. Ver el manual técnico, sección 6.1.
 | `total` | `numeric(14,2)` | **NN** | — | — |
 | `creado_por` | `uuid` | sí | — | — |
 | `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+## Inventario
+
+8 tablas, 83 columnas.
+
+Cofres, urnas y suministros por sede. **La existencia nunca se guarda en un campo: se deriva.**
+Para los artículos de modo UNIDAD sale de las fichas de `inv_unidad` (su estado y su sede);
+para los de modo CANTIDAD, de sumar `inv_movimiento`. Así no hay ningún contador que alguien
+tenga que acordarse de actualizar, que es lo que se desincroniza.
+
+### `inv_categoria`
+
+7 columnas. Categorías del catálogo, con un nivel de subcategoría (`padre_id`). La unicidad del nombre son DOS índices parciales, no un UNIQUE: con `padre_id` NULL, un UNIQUE no impide repetir el nombre entre las categorías raíz (en PostgreSQL NULL nunca es igual a NULL).
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `padre_id` | `uuid` | sí | — | → `inv_categoria.id` |
+| `nombre` | `text` | **NN** | — | — |
+| `activo` | `boolean` | **NN** | `true` | — |
+| `orden` | `integer` | **NN** | `0` | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `inv_articulo`
+
+14 columnas. El catálogo. `modo_control` es la decisión central del módulo: **UNIDAD** = cada objeto físico es una fila de `inv_unidad` (cofres); **CANTIDAD** = solo se cuenta (urnas, suministros). No se cambia con historia encima.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id`, único |
+| `categoria_id` | `uuid` | **NN** | — | → `inv_categoria.id` |
+| `codigo` | `text` | **NN** | — | único |
+| `nombre` | `text` | **NN** | — | — |
+| `modo_control` | `text` | **NN** | — | — |
+| `unidad_medida` | `text` | **NN** | `'unidad'::text` | — |
+| `proveedor_id` | `uuid` | sí | — | → `proveedor.id` |
+| `clasificacion_id` | `uuid` | sí | — | — |
+| `activo` | `boolean` | **NN** | `true` | — |
+| `nota` | `text` | sí | — | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `actualizado_en` | `timestamptz` | **NN** | `now()` | — |
+| `creado_por` | `uuid` | sí | — | → `usuario.id` |
+
+### `inv_nivel`
+
+6 columnas. Mínimo y máximo por artículo Y SEDE. Va en su propia tabla porque el mínimo de una urna en Cartago no tiene relación con el de Sabana. Mínimo 0 = sin nivel definido: entonces no hay semáforo ni sugerencia de pedido.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id`, **PK** |
+| `articulo_id` | `uuid` | **NN** | — | → `inv_articulo.id`, **PK** |
+| `sede_id` | `uuid` | **NN** | — | → `sede.id`, **PK** |
+| `minimo` | `integer` | **NN** | `0` | — |
+| `maximo` | `integer` | **NN** | `0` | — |
+| `actualizado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `inv_unidad`
+
+14 columnas. Una fila por objeto físico (solo para artículos de modo UNIDAD). La fila ES el objeto: su `sede_id` y `estado` son la existencia, sin contador que mantener. `sede_id` en NULL solo mientras el estado es EN_TRANSITO: salió del origen y nadie la recibió, así que no cuenta en ninguna de las dos sedes.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id`, único |
+| `articulo_id` | `uuid` | **NN** | — | → `inv_articulo.id` |
+| `numero` | `text` | **NN** | — | único |
+| `sede_id` | `uuid` | sí | — | → `sede.id` |
+| `sede_destino_id` | `uuid` | sí | — | → `sede.id` |
+| `estado` | `text` | **NN** | `'DISPONIBLE'::text` | 8 valores · solo DISPONIBLE, RESERVADA y EXHIBICION son existencia |
+| `costo_crc` | `numeric(14,2)` | **NN** | `0` | — |
+| `es_consignada` | `boolean` | **NN** | `false` | el capital es del proveedor · solo aplica a modo UNIDAD · obliga `proveedor_id` |
+| `proveedor_id` | `uuid` | sí | — | → `proveedor.id` · obligatorio si `es_consignada` |
+| `documento_cxp_id` | `uuid` | sí | — | → `documento_cxp.id` · la factura con la que se COMPRÓ |
+| `cxp_consignacion_id` | `uuid` | sí | — | → `documento_cxp.id` · la que NACIÓ al usarla (mig 0071) |
+| `ingresada_en` | `date` | **NN** | — | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `actualizado_en` | `timestamptz` | **NN** | `now()` | — |
+
+**Las dos columnas de CxP son dos hechos distintos y por eso son dos columnas.** `documento_cxp_id`
+es «la factura con la que compré esta unidad»; `cxp_consignacion_id` es «la factura que se generó
+porque la usé». Sobrecargar la primera con los dos sentidos es el mismo defecto que corrigió la
+migración 0070 con el estado `NO_APARECIO`. El índice único parcial `uq_inv_unidad_cxp_consignacion`
+(WHERE NOT NULL, porque en Postgres NULL ≠ NULL y el caso normal es no tener factura) impide que una
+unidad genere dos cuentas por pagar. El estado «pendiente de pago» se DERIVA de esa columna: no hay
+ninguna marca de «pagado», así que anular la factura en CxP devuelve la unidad sola a la cola.
+
+### `inv_servicio`
+
+10 columnas. El funeral prestado: el hecho que DESCARGA el inventario. Antes de este módulo no se registraba en ninguna parte del sistema (CxC lleva la cartera de asociados, que es otra cosa).
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id`, único |
+| `numero` | `text` | **NN** | — | único |
+| `sede_id` | `uuid` | sí | — | → `sede.id` |
+| `fecha` | `date` | **NN** | — | — |
+| `a_nombre_de` | `text` | **NN** | `''::text` | — |
+| `contrato_id` | `uuid` | sí | — | → `contrato_cxc.id` |
+| `nota` | `text` | sí | — | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `creado_por` | `uuid` | sí | — | → `usuario.id` |
+
+### `inv_movimiento`
+
+17 columnas. El libro mayor del inventario, append-only. Toda existencia se deriva de acá. `cantidad` es SIEMPRE positiva y el sentido lo da el `tipo`: guardar negativos obligaría a que cada consulta recordara el signo. Por eso el ajuste son dos tipos (AJUSTE_MAS / AJUSTE_MENOS).
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `articulo_id` | `uuid` | **NN** | — | → `inv_articulo.id` |
+| `unidad_id` | `uuid` | sí | — | → `inv_unidad.id` |
+| `tipo` | `text` | **NN** | — | — |
+| `cantidad` | `integer` | **NN** | — | — |
+| `sede_id` | `uuid` | sí | — | → `sede.id` |
+| `sede_contra_id` | `uuid` | sí | — | → `sede.id` |
+| `costo_unitario_crc` | `numeric(14,2)` | **NN** | `0` | — |
+| `fecha` | `date` | **NN** | — | — |
+| `servicio_id` | `uuid` | sí | — | → `inv_servicio.id` |
+| `proveedor_id` | `uuid` | sí | — | → `proveedor.id` |
+| `documento_cxp_id` | `uuid` | sí | — | → `documento_cxp.id` |
+| `traslado_id` | `uuid` | sí | — | — |
+| `motivo` | `text` | sí | — | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `creado_por` | `uuid` | sí | — | → `usuario.id` |
+
+### `inv_traslado`
+
+12 columnas. Envío entre sedes, con estado propio: sale, viaja y alguien lo recibe. `traslado_id` en `inv_movimiento` une la salida con su entrada. Sin el paso intermedio, una unidad extraviada en el camino desaparecería del sistema sin que nadie responda por ella.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id`, único |
+| `numero` | `text` | **NN** | — | único |
+| `sede_origen_id` | `uuid` | **NN** | — | → `sede.id` |
+| `sede_destino_id` | `uuid` | **NN** | — | → `sede.id` |
+| `estado` | `text` | **NN** | `'EN_TRANSITO'::text` | — |
+| `enviado_en` | `date` | **NN** | — | — |
+| `recibido_en` | `date` | sí | — | — |
+| `enviado_por` | `uuid` | sí | — | → `usuario.id` |
+| `recibido_por` | `uuid` | sí | — | → `usuario.id` |
+| `nota` | `text` | sí | — | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `inv_conteo`
+
+12 columnas. La hoja de un conteo cíclico: una sede, opcionalmente una categoría, y un estado. Solo puede haber UNA hoja abierta por sede a la vez (índice único parcial `uq_inv_conteo_abierto_por_sede`), porque dos hojas simultáneas sobre la misma bodega producirían dos verdades y ajustes que se pisan. Anular existe para no dejar una sede bloqueada por una hoja que nadie va a terminar: forzar el cierre generaría ajustes falsos.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id`, único |
+| `numero` | `text` | **NN** | — | único · `CT-AAAA-NNNN` |
+| `sede_id` | `uuid` | **NN** | — | → `sede.id` |
+| `categoria_id` | `uuid` | sí | — | → `inv_categoria.id` · NULL = toda la sede |
+| `estado` | `text` | **NN** | `'ABIERTO'::text` | ABIERTO · CERRADO · ANULADO |
+| `abierto_en` | `date` | **NN** | — | — |
+| `cerrado_en` | `date` | sí | — | CHECK: existe si y solo si está CERRADO |
+| `abierto_por` | `uuid` | sí | — | → `usuario.id` |
+| `cerrado_por` | `uuid` | sí | — | → `usuario.id` |
+| `nota` | `text` | sí | — | al anular se le concatena el motivo |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `inv_conteo_linea`
+
+10 columnas. Una fila por cosa a contar: por artículo si se cuenta por cantidad, por unidad física si se cuenta por unidad. `cantidad_sistema` es la FOTO congelada al abrir la hoja —no se recalcula—, así que un movimiento registrado mientras alguien cuenta no altera la comparación. `cantidad_contada` en NULL significa «nadie la miró todavía», que es distinto de contar cero: por eso es nullable y no `DEFAULT 0`. El cierre exige que ninguna quede en NULL y que toda diferencia traiga `motivo`.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id`, único |
+| `conteo_id` | `uuid` | **NN** | — | → `inv_conteo.id` ON DELETE CASCADE |
+| `articulo_id` | `uuid` | **NN** | — | → `inv_articulo.id` |
+| `unidad_id` | `uuid` | sí | — | → `inv_unidad.id` · NULL = la línea es de cantidad |
+| `cantidad_sistema` | `integer` | **NN** | — | congelada al abrir |
+| `cantidad_contada` | `integer` | sí | — | NULL = sin contar (≠ contar 0) |
+| `motivo` | `text` | sí | — | obligatorio si hay diferencia |
+| `contado_en` | `timestamptz` | sí | — | — |
+| `contado_por` | `uuid` | sí | — | → `usuario.id` |
+
+Dos índices únicos, no uno: `(empresa_id, conteo_id, articulo_id, unidad_id)` para las líneas de unidad y el parcial `uq_inv_conteo_linea_articulo … WHERE unidad_id IS NULL` para las de cantidad. En Postgres `NULL ≠ NULL`, así que sin el parcial se podrían cargar dos líneas del mismo artículo en la misma hoja.
+
+### `inv_consecutivo`
+
+3 columnas. Consecutivos por empresa y ámbito (SERVICIO, TRASLADO, CONTEO, o el código del artículo cuyas unidades se numeran). Se toma con un solo `INSERT … ON CONFLICT … RETURNING`, así que dos operaciones simultáneas no pueden llevarse el mismo número.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id`, **PK** |
+| `ambito` | `text` | **NN** | — | **PK** |
+| `siguiente` | `integer` | **NN** | `1` | — |
+

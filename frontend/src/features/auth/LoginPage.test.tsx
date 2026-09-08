@@ -18,6 +18,7 @@ vi.mock("@/api/auth", () => ({
 import { authApi } from "@/api/auth";
 import { AuthProvider } from "@/features/auth/AuthContext";
 import { LoginPage } from "@/features/auth/LoginPage";
+import { PublicOnlyRoute } from "@/routes/PublicOnlyRoute";
 import type { LoginResponse } from "@/api/types";
 
 // Token JWT falso con claim empresa_id (payload base64url) para el flujo de 1 empresa.
@@ -25,6 +26,12 @@ import type { LoginResponse } from "@/api/types";
 const TOKEN_CON_EMPRESA =
   "eyJhbGciOiJIUzI1NiJ9.eyJlbXByZXNhX2lkIjoiZW1wLTEifQ.sig";
 
+/**
+ * Se monta el guard REAL (`PublicOnlyRoute`) envolviendo /login, porque la navegación después de
+ * entrar no la hace LoginPage: la hace el guard al ver que el estado pasó a autenticado. Sin el
+ * guard, este test esperaba una redirección que nadie iba a disparar —y por eso estaba en rojo
+ * aunque el login funcionara—.
+ */
 function renderLogin() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -34,7 +41,9 @@ function renderLogin() {
       <AuthProvider>
         <MemoryRouter initialEntries={["/login"]}>
           <Routes>
-            <Route path="/login" element={<LoginPage />} />
+            <Route element={<PublicOnlyRoute />}>
+              <Route path="/login" element={<LoginPage />} />
+            </Route>
             <Route path="/" element={<div>Dashboard OK</div>} />
             <Route path="/seleccionar-empresa" element={<div>Selector OK</div>} />
           </Routes>

@@ -14,7 +14,15 @@ import { cn } from "@/lib/cn";
 
 interface BrandLogoProps {
   className?: string;
-  /** Muestra el subtítulo con las empresas del grupo (para login/selector). */
+  /**
+   * Muestra el subtítulo de marca.
+   *
+   * **No enumera empresas.** Antes decía «Valle de Paz · Coopeprofa · Memorial Pets», y en la
+   * pantalla de login —donde todavía no se sabe quién está entrando— eso se leía como la lista de
+   * empresas a las que la persona tiene acceso: un supervisor creado en una sola empresa parecía
+   * tener las tres. Las empresas de cada usuario se muestran DESPUÉS de identificarse, en el
+   * selector, y ahí salen de sus membresías reales.
+   */
   tagline?: boolean;
   /** Tamaño de la insignia en px (por defecto 32). */
   size?: number;
@@ -28,7 +36,7 @@ export function BrandLogo({ className, tagline = false, size = 32 }: BrandLogoPr
         <span className="text-base font-semibold tracking-tight text-content">Finance Group VDP</span>
         {tagline && (
           <span className="text-[11px] font-medium uppercase tracking-wider text-content-muted">
-            Valle de Paz · Coopeprofa · Memorial Pets
+            Sistema de registro financiero
           </span>
         )}
       </span>

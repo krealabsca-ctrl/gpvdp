@@ -18,4 +18,9 @@ type UsuarioAdmin struct {
 	DebeCambiar bool   `json:"debe_cambiar_password"`
 	RolCodigo   string `json:"rol_codigo"`
 	RolNombre   string `json:"rol_nombre"`
+	// OtrasEmpresas son las OTRAS empresas del grupo a las que este usuario entra, separadas por
+	// « · ». Vacío = solo esta. El acceso a cada empresa es una MEMBRESÍA (una fila en
+	// usuario_empresa_rol), no un permiso: por eso no aparece en la matriz de permisos, y por eso
+	// hace falta verlo acá.
+	OtrasEmpresas string `json:"otras_empresas"`
 }

@@ -9,6 +9,7 @@
  */
 
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Badge,
   Button,
@@ -283,12 +284,39 @@ export function ImportarCxcPage() {
                 <Dato k="Hasta" v={formatFecha(plan.hasta)} />
               </div>
 
+              {/* La cuenta tiene que CERRAR contra los contratos activos. Sin esta línea, «9.779
+                  contratos» arriba se lee como si fueran todos, y quien revisa no sabe si le falta
+                  un dato o si el sistema perdió contratos por el camino. */}
+              {plan.activos > 0 && (
+                <p className="text-xs text-content-muted">
+                  De <b className="text-content">{plan.activos.toLocaleString("es-CR")}</b> contratos
+                  activos: <b className="text-content">{plan.contratos.toLocaleString("es-CR")}</b> generan
+                  {plan.excluidos_total > 0 && (
+                    <>
+                      {" · "}
+                      <b className="text-pendiente">{plan.excluidos_total.toLocaleString("es-CR")}</b> no
+                      pueden
+                    </>
+                  )}
+                  {plan.fuera_del_rango > 0 && (
+                    <> {" · "}{plan.fuera_del_rango.toLocaleString("es-CR")} sin cobro en estas fechas</>
+                  )}
+                  .
+                </p>
+              )}
+
               {plan.excluidos && Object.keys(plan.excluidos).length > 0 && (
                 <div className="rounded-lg border border-pendiente/40 bg-pendiente/5 px-3 py-2 text-xs">
                   <b>Contratos que no generan cargos:</b>{" "}
                   {Object.entries(plan.excluidos)
-                    .map(([motivo, n]) => `${n} ${motivo}`)
+                    .map(([motivo, n]) => `${n.toLocaleString("es-CR")} ${motivo}`)
                     .join(" · ")}
+                  {/* El que no puede cobrar hay que poder ARREGLARLO, no solo contarlo. */}
+                  <div className="mt-1">
+                    <Link to="/cxc/cartera?en_revision=1" className="text-accent underline">
+                      Ver y corregir esos contratos en Cartera →
+                    </Link>
+                  </div>
                 </div>
               )}
 

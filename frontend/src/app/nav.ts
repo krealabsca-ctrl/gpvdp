@@ -76,25 +76,52 @@ export const MODULES: NavModule[] = [
     icon: Landmark,
     to: "/",
     disponible: true,
+    // `bancos.ver` es la ENTRADA al módulo (los catálogos de referencia), no un pase a todo.
+    // Cada página declara su propio permiso de lectura: así se le puede dar a la tesorera la
+    // captura de saldos sin mostrarle el EBITDA, el presupuesto ni las proyecciones de la empresa,
+    // que era imposible cuando «Ver Bancos» abría las diez pantallas de una vez.
+    //
+    // El riel muestra el módulo si el usuario puede ver AL MENOS UNA página, y `PermisoGate`
+    // aterriza a cada uno en la primera que sí puede abrir.
     permiso: "bancos.ver",
     pages: [
-      { label: "Dashboard", descripcion: "KPIs del período", to: "/", end: true, icon: LayoutDashboard },
-      { label: "Clasificar", descripcion: "Bandeja: motor, traslados y reglas", to: "/clasificar", icon: ClipboardCheck },
+      // Va PRIMERA a propósito: para los roles de consulta por segmento es la única página del
+      // módulo, y `primeraRutaAccesible` recorre esta lista en orden para aterrizarlos. Si
+      // estuviera al final, el equipo de Asociaciones entraría a «Sin acceso» y de ahí se iría.
+      { label: "Mi partida", descripcion: "Lo que entró en tu segmento", to: "/mi-segmento", icon: Landmark, permiso: "bancos.ver_mi_segmento" },
+      { label: "Dashboard", descripcion: "KPIs del período", to: "/", end: true, icon: LayoutDashboard, permiso: "bancos.ver_dashboard" },
+      { label: "Clasificar", descripcion: "Bandeja: motor, traslados y reglas", to: "/clasificar", icon: ClipboardCheck, permiso: "bancos.ver_clasificar" },
       // Nombres de PÁGINA, distintos de los módulos futuros «Tesorería» y «Conciliación
       // bancaria» del riel: acá se captura el saldo del día y se firma el acta del mes.
-      { label: "Saldos diarios", descripcion: "Saldo del día y disponible", to: "/saldos-diarios", icon: Banknote },
-      { label: "Actas de conciliación", descripcion: "Una por cuenta y mes", to: "/conciliacion", icon: GitCompare },
-      { label: "Importador", descripcion: "Subir estados de cuenta", to: "/importador", icon: Upload },
-      { label: "Catálogo", descripcion: "Conceptos y clasificaciones", to: "/catalogo", icon: BookOpen },
-      { label: "Tipo de cambio", descripcion: "Cotizaciones", to: "/tipo-cambio", icon: Coins },
+      { label: "Saldos diarios", descripcion: "Saldo del día y disponible", to: "/saldos-diarios", icon: Banknote, permiso: "bancos.ver_saldos" },
+      { label: "Actas de conciliación", descripcion: "Una por cuenta y mes", to: "/conciliacion", icon: GitCompare, permiso: "bancos.ver_conciliacion" },
+      // El Importador no tiene nada que LEER: es el formulario de carga. Su permiso de lectura es
+      // el mismo de la acción, porque verlo sin poder subir nada no sirve de nada.
+      { label: "Importador", descripcion: "Subir estados de cuenta", to: "/importador", icon: Upload, permiso: "bancos.importar" },
+      // La PANTALLA de catálogo es de administración: crea, renombra, fusiona y elimina. Por eso
+      // pide `bancos.catalogo` y no el permiso base. `bancos.ver` sigue dejando LEER conceptos y
+      // clasificaciones —lo que necesitan los selectores de las otras pantallas—, pero no abre esta.
+      //
+      // La diferencia se vio probando: con solo `bancos.ver` + saldos, la tesorera aterrizaba bien
+      // en Saldos diarios pero también le aparecía el Catálogo, que no es su trabajo.
+      { label: "Catálogo", descripcion: "Conceptos y clasificaciones", to: "/catalogo", icon: BookOpen, permiso: "bancos.catalogo" },
+      { label: "Tipo de cambio", descripcion: "Cotizaciones", to: "/tipo-cambio", icon: Coins, permiso: "bancos.ver_tc" },
       { label: "Exportar", descripcion: "Salidas y reportes", to: "/exportar", icon: Download, permiso: "bancos.exportar" },
       {
         label: "Análisis y tendencias",
         descripcion: "Cada partida contra su historia",
         to: "/analisis",
         icon: LineChart,
+        permiso: "bancos.ver_analisis",
       },
-      { label: "Proyecciones", descripcion: "Cierre de mes", to: "/proyecciones", icon: TrendingUp },
+      {
+        label: "Control y presupuesto",
+        descripcion: "Gasto por departamento y sede",
+        to: "/control",
+        icon: PiggyBank,
+        permiso: "bancos.ver_control",
+      },
+      { label: "Proyecciones", descripcion: "Cierre de mes", to: "/proyecciones", icon: TrendingUp, permiso: "bancos.ver_proyecciones" },
       { label: "Ajustes", descripcion: "Parámetros de la empresa", to: "/ajustes", icon: Settings, permiso: "bancos.ajustes" },
     ],
   },
@@ -113,6 +140,10 @@ export const MODULES: NavModule[] = [
       { label: "Anticipos", descripcion: "Saldos a favor del proveedor", to: "/cxp/anticipos", icon: Coins, permiso: "cxp.anticipos" },
       { label: "Caja chica", descripcion: "Fondos fijos y vales", to: "/cxp/cajas", icon: PiggyBank, permiso: "cxp.caja_ver" },
       { label: "Departamentos", descripcion: "Áreas / centros de costo", to: "/cxp/departamentos", icon: Building, permiso: "cxp.departamentos" },
+      // La SEGUNDA PUERTA del catálogo de gasto (el mismo de Bancos, con alcance recortado): sin
+      // esto, una factura de un gasto que nadie abrió todavía no se puede clasificar y queda
+      // trancada esperando a alguien con `bancos.catalogo`.
+      { label: "Catálogo de gasto", descripcion: "Abrir rubros para clasificar", to: "/cxp/catalogo", icon: BookOpen, permiso: "cxp.catalogo" },
       // Las excepciones de validación de área tienen que estar a la vista en una pantalla: si solo
       // se pueden consultar abriendo proveedor por proveedor, nadie las audita.
       { label: "De Contabilidad", descripcion: "Gasto sin validación de área", to: "/cxp/contabilidad", icon: Receipt, permiso: "cxp.marcar_contabilidad" },
@@ -154,6 +185,31 @@ export const MODULES: NavModule[] = [
     ],
   },
   {
+    // Inventario (Fase 1): el orden de las páginas es el del trabajo diario, no el del modelo de
+    // datos. Existencias primero porque es la consulta; el catálogo último porque se toca una vez.
+    id: "inventario",
+    label: "Inventario",
+    icon: Boxes,
+    to: "/inventario",
+    disponible: true,
+    permiso: "inventario.ver",
+    pages: [
+      { label: "Existencias", descripcion: "Qué hay y en qué sede", to: "/inventario", icon: Boxes, end: true },
+      { label: "Entradas", descripcion: "Lo que llegó del proveedor", to: "/inventario/entradas", icon: Upload, permiso: "inventario.entrada" },
+      // El servicio prestado es lo que descarga el stock: sin esta pantalla el módulo no se sostiene.
+      { label: "Servicios prestados", descripcion: "El funeral y qué consumió", to: "/inventario/servicios", icon: ClipboardCheck, permiso: "inventario.servicio" },
+      { label: "Traslados", descripcion: "Entre sedes, con lo que va en camino", to: "/inventario/traslados", icon: GitCompare, permiso: "inventario.traslado" },
+      // El conteo va antes de la reposición: primero se sabe qué hay de verdad, después qué pedir.
+      { label: "Conteo", descripcion: "Contar por partes y explicar las diferencias", to: "/inventario/conteo", icon: ClipboardCheck, permiso: "inventario.conteo" },
+      // Consignación con permiso de VER y no el de facturar: saber qué se le debe al proveedor es
+      // lectura, y esconder la pantalla a quien no puede facturar dejaría el número invisible.
+      { label: "Consignación", descripcion: "Lo del proveedor que salió y hay que pagarle", to: "/inventario/consignacion", icon: Handshake, permiso: "inventario.ver" },
+      { label: "Reposición", descripcion: "Qué pedir esta semana", to: "/inventario/reposicion", icon: ShoppingCart },
+      { label: "Rotación", descripcion: "Qué se mueve y qué está parado", to: "/inventario/rotacion", icon: TrendingUp },
+      { label: "Catálogo", descripcion: "Artículos, categorías y mínimos", to: "/inventario/catalogo", icon: BookOpen, permiso: "inventario.catalogo" },
+    ],
+  },
+  {
     // RRHH / Nómina (Fase 3 — Etapa 1). Dato sensible (salarios): gate rrhh.ver.
     id: "rrhh",
     label: "Recursos Humanos",
@@ -168,6 +224,28 @@ export const MODULES: NavModule[] = [
       { label: "Vacaciones e incapacidades", descripcion: "Registrar días disfrutados y boletas de la CCSS", to: "/rrhh/ausencias", icon: CalendarDays },
       { label: "Finiquitos", descripcion: "Cese conforme al CT + provisiones", to: "/rrhh/finiquitos", icon: HandCoins },
       { label: "Parámetros", descripcion: "Cargas, renta y conceptos", to: "/rrhh/parametros", icon: SlidersHorizontal },
+    ],
+  },
+  {
+    // Grupo: la ÚNICA superficie que cruza empresas, y solo lee.
+    //
+    // Va después de los módulos operativos y antes de Configuración porque no es donde se trabaja:
+    // se entra a mirar el número del grupo, no a registrar nada. El permiso `grupo.ver` se concede
+    // por empresa, así que quien no lo tenga no ve ni el módulo en el riel.
+    id: "grupo",
+    label: "Grupo",
+    icon: Building2,
+    to: "/grupo",
+    disponible: true,
+    permiso: "grupo.ver",
+    pages: [
+      {
+        label: "Consolidado",
+        descripcion: "Las empresas que podés ver, sumadas",
+        to: "/grupo",
+        icon: Building2,
+        end: true,
+      },
     ],
   },
   {
@@ -201,7 +279,6 @@ export const MODULES: NavModule[] = [
   { id: "compras", label: "Compras", icon: ShoppingCart, to: "#", disponible: false, pages: [] },
   { id: "ventas", label: "Ventas", icon: ShoppingBag, to: "#", disponible: false, pages: [] },
   { id: "facturacion", label: "Facturación", icon: Receipt, to: "#", disponible: false, pages: [] },
-  { id: "inventarios", label: "Inventarios", icon: Boxes, to: "#", disponible: false, pages: [] },
   { id: "activos", label: "Activos", icon: Building, to: "#", disponible: false, pages: [] },
   { id: "bi", label: "Reportes BI", icon: BarChart3, to: "#", disponible: false, pages: [] },
   { id: "ejecutivo", label: "Dashboard Ejecutivo", icon: Gauge, to: "#", disponible: false, pages: [] },
@@ -232,10 +309,22 @@ export function moduloActivo(pathname: string): NavModule {
   return dueño ?? byId("bancos");
 }
 
-/** Permiso requerido para ver una ruta (según su módulo/página). undefined = sin gate. */
+/**
+ * Permiso requerido para ver una ruta (según su módulo/página). undefined = sin gate.
+ *
+ * Gana la coincidencia MÁS LARGA, no la primera del registro. Con la primera, una página cuya ruta
+ * es prefijo de otra le prestaba su permiso a la más específica: `/inventario/entradas` se gateaba
+ * con el `inventario.ver` de `/inventario`, así que cualquiera que pudiera ver existencias abría
+ * también la pantalla de entradas —y ahí se topaba con los 403 del servidor, que es donde el
+ * problema aparecía sin que nadie lo relacionara con el orden de una lista—.
+ */
 export function permisoDeRuta(pathname: string): string | undefined {
   const m = moduloActivo(pathname);
-  const page = m.pages.find((p) => (p.end ? pathname === p.to : pathname.startsWith(p.to)));
+  let page: NavPage | undefined;
+  for (const p of m.pages) {
+    if (p.end ? pathname !== p.to : !pathname.startsWith(p.to)) continue;
+    if (!page || p.to.length > page.to.length) page = p;
+  }
   return page ? permisoDePagina(m, page) : m.permiso;
 }
 

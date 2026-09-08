@@ -248,8 +248,9 @@ func TestListadoCorridoNoLlevaBandasNiSubtotales(t *testing.T) {
 	if got := valorFila(filas, "1001", 0); got != "01/07/2026" {
 		t.Errorf("el primer movimiento del corrido es %q, se esperaba 01/07/2026", got)
 	}
-	// Lo no clasificado se nombra en la columna de concepto.
-	if got := valorFila(filas, "1004", 5); got != "Sin clasificar" {
+	// Lo no clasificado se nombra en la columna de concepto (índice 7 del layout; ver
+	// TestOrdenDeColumnasDelDetalle, que es donde está escrito el orden completo).
+	if got := valorFila(filas, "1004", 7); got != "Sin clasificar" {
 		t.Errorf("el movimiento sin clasificar dice %q en Concepto, se esperaba «Sin clasificar»", got)
 	}
 }
@@ -267,17 +268,18 @@ func TestAgrupadoYCorridoCoincidenEnMovimientosYTotal(t *testing.T) {
 		t.Fatalf("filas: agrupado %d, corrido %d, movimientos %d", len(agr.Filas), len(cor.Filas), len(movs))
 	}
 
-	// El equivalente en colones es la última columna de monto en las dos, pero en posiciones
-	// distintas: se busca por título para no depender del orden.
+	// El monto en colones se busca por TÍTULO y no por posición, para que el test siga sirviendo si
+	// el layout cambia de orden. La columna se llama «Equivalencia» desde que el negocio fijó los
+	// nombres (2026-09-02).
 	sumaCRC := func(h HojaReporte) float64 {
 		idx := -1
 		for i, c := range h.Cols {
-			if c.Titulo == "Equivalente CRC" {
+			if c.Titulo == "Equivalencia" {
 				idx = i
 			}
 		}
 		if idx < 0 {
-			t.Fatal("no hay columna «Equivalente CRC»")
+			t.Fatal("no hay columna «Equivalencia»")
 		}
 		total := 0.0
 		for _, fila := range h.Filas {
@@ -410,10 +412,20 @@ func contieneStr(xs []string, x string) bool {
 }
 
 // valorFila busca la fila cuyo documento (columna 3) es el dado y devuelve la celda `col`.
-func valorFila(filas [][]string, documento string, col int) string {
+// valorFila busca la fila del consecutivo indicado y devuelve su columna `col`.
+//
+// Localiza la fila mirando CUALQUIER celda, no una posición fija: antes tenía quemado `fila[3]`
+// —donde estaba el documento— y al reordenar las columnas el helper devolvió "" en silencio,
+// haciendo fallar dos tests por un motivo que no era el que decían.
+func valorFila(filas [][]string, consecutivo string, col int) string {
 	for _, fila := range filas {
-		if len(fila) > 3 && fila[3] == documento && col < len(fila) {
-			return fila[col]
+		for _, celda := range fila {
+			if celda == consecutivo {
+				if col < len(fila) {
+					return fila[col]
+				}
+				return ""
+			}
 		}
 	}
 	return ""

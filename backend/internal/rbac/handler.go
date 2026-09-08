@@ -131,7 +131,12 @@ func (h *Handler) CrearRol(c *gin.Context) {
 }
 
 func (h *Handler) error(c *gin.Context, err error) {
+	var rolAjeno *RolDeOtraEmpresaError
 	switch {
+	// Va ANTES del caso genérico: un rol a medida de otra empresa no es un «no encontrado» sino una
+	// regla del modelo, y el mensaje tiene que decir qué hacer.
+	case errors.As(err, &rolAjeno):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, rolAjeno.Error())
 	case errors.Is(err, ErrRolNoEncontrado):
 		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, "rol no encontrado")
 	case errors.Is(err, ErrRolDuplicado):
@@ -144,6 +149,10 @@ func (h *Handler) error(c *gin.Context, err error) {
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, "ya existe un usuario con ese correo")
 	case errors.Is(err, ErrUsuarioNoEncontrado):
 		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, "usuario no encontrado en esta empresa")
+	case errors.Is(err, ErrEmpresaOrigenSinAcceso):
+		// 403 y no 404: la empresa existe, lo que falta es el acceso de quien pregunta.
+		httpx.Abort(c, http.StatusForbidden, httpx.CodeSinPermiso,
+			"no tenés acceso a la empresa de origen, así que no se pueden leer sus roles")
 	default:
 		httpx.Abort(c, http.StatusInternalServerError, httpx.CodeErrorInterno, "error interno")
 	}

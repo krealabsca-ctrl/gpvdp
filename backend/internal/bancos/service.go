@@ -170,6 +170,31 @@ type Repository interface {
 	CrearClasificacion(ctx context.Context, empresaID, conceptoID, nombre, cuentaContable string) (ClasificacionItem, error)
 	RenombrarConcepto(ctx context.Context, empresaID, conceptoID, nombre string) error
 	CambiarVisibilidadCxP(ctx context.Context, empresaID, conceptoID string, visible bool) error
+	// Las guardas de alcance de la puerta de Contabilidad al catálogo (`cxp.catalogo`): ese permiso
+	// solo alcanza para los rubros marcados visibles para CxP.
+	ConceptoEsVisibleCxP(ctx context.Context, empresaID, conceptoID string) (bool, error)
+	ClasificacionEsVisibleCxP(ctx context.Context, empresaID, clasificacionID string) (bool, error)
+
+	// Consulta por SEGMENTO (mig 0077): el equipo de una partida ve solo sus créditos.
+	// `AlcanceDeUsuario` devuelve vacío cuando el rol no tiene partidas, y eso significa
+	// «ninguna»: quien lo llame tiene que cerrar, nunca abrir.
+	AlcanceDeUsuario(ctx context.Context, empresaID, usuarioID string) ([]string, error)
+	PartidasDelAlcance(ctx context.Context, empresaID string, ids []string) ([]PartidaDelSegmento, error)
+	CuentasDelAlcance(ctx context.Context, empresaID string, ids []string) ([]CuentaDelSegmento, error)
+	UltimaFechaCargada(ctx context.Context, empresaID string) (string, error)
+	RolesDeConsulta(ctx context.Context, empresaID string) ([]RolDeConsulta, error)
+	AsignacionesConsulta(ctx context.Context, empresaID string) ([]AsignacionConsulta, error)
+	GuardarConsultaDePartida(ctx context.Context, empresaID, clasificacionID string, rolIDs []string) error
+	MovimientoEnAlcance(ctx context.Context, empresaID, movID string, alcance []string) (bool, error)
+	CrearReporteSegmentacion(ctx context.Context, empresaID, movID, usuarioID, motivo string) (string, error)
+	// Buscar y avisar de un movimiento que NO aparece (mig 0078). `BuscarPorFechaYMonto` devuelve
+	// los del alcance completos y solo CUENTA los de afuera: la existencia es todo lo que divulga.
+	BuscarPorFechaYMonto(ctx context.Context, empresaID, fecha string, monto decimal.Decimal, alcance []string) ([]MovimientoRow, int, error)
+	EngancharFaltante(ctx context.Context, empresaID, fecha string, monto decimal.Decimal) (string, error)
+	CrearReporteFaltante(ctx context.Context, empresaID, usuarioID, fecha string, monto decimal.Decimal, referencia, motivo, movimientoID string) (string, error)
+	ListarReportesSegmentacion(ctx context.Context, empresaID string, soloPendientes bool) ([]ReporteSegmentacion, error)
+	ResolverReporteSegmentacion(ctx context.Context, empresaID, reporteID, usuarioID, resolucion, respuesta string) error
+	ReportesDeMovimientos(ctx context.Context, empresaID string, movIDs []string) (map[string]string, error)
 	// CambiarNaturaleza declara si el concepto es INGRESO, GASTO o NEUTRO y devuelve el valor viejo.
 	CambiarNaturaleza(ctx context.Context, empresaID, conceptoID, naturaleza string) (anterior string, err error)
 	EliminarConcepto(ctx context.Context, empresaID, conceptoID string) error
@@ -207,6 +232,26 @@ type Repository interface {
 	AplicarClasificacionesEnBloque(ctx context.Context, empresaID string, asigs []AsignacionClasif) (int, error)
 	MovimientosPlantillaClasif(ctx context.Context, empresaID, desde, hasta string, soloSinClasificar bool, limite int) ([]MovimientosParaPlantilla, error)
 	SeriePorPartida(ctx context.Context, empresaID, desde, hasta string) ([]TendenciaPartida, error)
+	// Dimensiones del gasto (departamento y sede) y presupuesto por departamento.
+	ListarSedes(ctx context.Context, empresaID string, incluirInactivas bool) ([]Sede, error)
+	CrearSede(ctx context.Context, empresaID, nombre, codigo string) (Sede, error)
+	ActualizarSede(ctx context.Context, empresaID, sedeID, nombre, codigo string) error
+	CambiarActivoSede(ctx context.Context, empresaID, sedeID string, activo bool) error
+	DepartamentosActivos(ctx context.Context, empresaID string) ([]Departamento, error)
+	CrearDepartamento(ctx context.Context, empresaID, nombre, codigo string) (Departamento, error)
+	ActualizarDepartamento(ctx context.Context, empresaID, deptoID, nombre, codigo string) error
+	CambiarActivoDepartamento(ctx context.Context, empresaID, deptoID string, activo bool) error
+	UsoDeDepartamento(ctx context.Context, empresaID, deptoID string) (UsoDepartamento, error)
+	EliminarDepartamento(ctx context.Context, empresaID, deptoID string) error
+	UsoDeSede(ctx context.Context, empresaID, sedeID string) (UsoDepartamento, error)
+	EliminarSede(ctx context.Context, empresaID, sedeID string) error
+	AsignarDimensionesClasificacion(ctx context.Context, empresaID, clasifID, deptoID, sedeID string) (int, error)
+	AsignarDimensionesMovimiento(ctx context.Context, empresaID, movID, deptoID, sedeID string) error
+	GastoPorDimension(ctx context.Context, empresaID, desde, hasta, agruparPor string) ([]GastoDimension, error)
+	PartidasDeDimension(ctx context.Context, empresaID, desde, hasta, agruparPor, dimID string) ([]GastoPartidaDimension, error)
+	PresupuestoDelRango(ctx context.Context, empresaID, desde, hasta string) ([]PresupuestoLinea, error)
+	GuardarPresupuesto(ctx context.Context, empresaID, deptoID, clasifID, periodo, monto, nota, usuarioID string) error
+	BorrarPresupuesto(ctx context.Context, empresaID, deptoID, clasifID, periodo string) error
 	CalendarioDiario(ctx context.Context, empresaID, periodo string) ([]DiaCalendario, error)
 	ResumenPorCuenta(ctx context.Context, empresaID, periodo string) ([]CuentaResumen, error)
 

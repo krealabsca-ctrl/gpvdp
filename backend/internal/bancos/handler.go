@@ -64,9 +64,8 @@ func (h *Handler) Subir(c *gin.Context) {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "archivo requerido")
 		return
 	}
-	// Tope de tamaño: el estado de cuenta se lee entero en memoria. Sin este freno un archivo
-	// enorme (por error o a propósito) infla la memoria del backend. Caddy ya corta a 24 MB en
-	// el borde; este es el mismo límite como defensa en profundidad si se llega al backend directo.
+	// Tope de tamaño: el estado de cuenta se lee entero en memoria. Caddy ya corta a 24 MB en el
+	// borde; este es el mismo límite como defensa en profundidad si se llega al backend directo.
 	if fh.Size > maxEstadoCuenta {
 		httpx.Abort(c, http.StatusRequestEntityTooLarge, httpx.CodeValidacion, "el archivo excede 24 MB")
 		return
@@ -153,6 +152,27 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "fecha inválida (se espera YYYY-MM-DD)")
 	case errors.Is(err, ErrExportacionVacia):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, "no hay datos para exportar con ese filtro")
+	// Dimensiones y presupuesto.
+	case errors.Is(err, ErrSedeNoEncontrada), errors.Is(err, ErrPresupuestoNoEncontrado),
+		errors.Is(err, ErrDepartamentoNoEncontrado):
+		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, sinPrefijoPaquete(err))
+	// Consulta por segmento (mig 0077). `ErrFueraDeAlcance` es 404 y no 403 a propósito: para ese
+	// rol el movimiento no existe, y un 403 confirmaría que existe.
+	case errors.Is(err, ErrFueraDeAlcance), errors.Is(err, ErrReporteNoEncontrado),
+		errors.Is(err, ErrRolDeConsultaNoEncontrado):
+		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrMotivoRequerido), errors.Is(err, ErrResolucionInvalida),
+		errors.Is(err, ErrRespuestaRequerida), errors.Is(err, ErrMontoInvalido):
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrReporteYaAbierto), errors.Is(err, ErrFaltanteYaAvisado):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoPaquete(err))
+	// «Tu rol no tiene partidas» solo llega acá desde la búsqueda de faltantes: la pantalla lo
+	// resuelve con su propio estado vacío, así que acá es 403 y no un 500.
+	case errors.Is(err, ErrSinAlcance):
+		httpx.Abort(c, http.StatusForbidden, httpx.CodeSinPermiso, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrDimensionInvalida), errors.Is(err, ErrPresupuestoNegativo),
+		errors.Is(err, ErrNombreRequerido):
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, sinPrefijoPaquete(err))
 	// Rechazos del archivo de clasificación en bloque. El mensaje ya viene redactado con qué hacer
 	// («partilo por cuenta o por año», «se esperan al menos las columnas Fecha y Clasificación») y sin
 	// este caso salía como 500 «error interno»: el usuario no podía distinguir un archivo rechazado de

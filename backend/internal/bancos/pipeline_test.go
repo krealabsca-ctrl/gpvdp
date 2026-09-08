@@ -22,6 +22,26 @@ type fakeRepo struct {
 	totales                map[string]TotalesEbitda
 	conceptosSinNaturaleza int
 	naturalezaActual       string
+	// visibleCxP: si el rubro está dentro del alcance de `cxp.catalogo` (la puerta de Contabilidad).
+	visibleCxP bool
+	// Dimensiones del gasto (departamento y sede) y presupuesto
+	sedes         []Sede
+	departamentos []Departamento
+	gastoDim      []GastoDimension
+	partidasDim   []GastoPartidaDimension
+	presupuesto   []PresupuestoLinea
+	movsDeClasif  int
+	dimClasif     [3]string
+	dimMov        [3]string
+	agrupoPor     string
+	pidioDimID    string
+	presuGuardado [3]string
+	// Subpresupuesto por partida y administración del catálogo de departamentos
+	presuClasifID  string
+	usoDepto       UsoDepartamento
+	deptoActivo    bool
+	deptoEliminado bool
+	sedeEliminada  bool
 	// Clasificación en bloque desde Excel
 	cuentasLista  []CuentaListItem
 	movsCalzados  []MovimientoCalzado
@@ -33,6 +53,33 @@ type fakeRepo struct {
 	// Resumen de la selección activa (hoja de trabajo)
 	resumenFiltro []ResumenFiltroRow
 	inserted      []MovimientoParaInsertar
+	// Consulta por segmento (mig 0077). `filtroMovs` guarda el filtro con el que se llamó a
+	// ListarMovimientos: es la única forma de comprobar que el alcance se FORZÓ y que el cliente
+	// no pudo ensancharlo.
+	filtroMovs       FiltrosMovimientos
+	listaMovs        ListaMovimientos
+	alcance          []string
+	partidasAlcance  []PartidaDelSegmento
+	cuentasAlcance   []CuentaDelSegmento
+	cargadoHasta     string
+	rolesConsulta    []RolDeConsulta
+	asignConsulta    []AsignacionConsulta
+	consultaGuardada struct {
+		clasificacionID string
+		rolIDs          []string
+		llamado         bool
+	}
+	movEnAlcance bool
+	// Búsqueda de un movimiento que no aparece: lo del alcance viene completo, lo de afuera solo
+	// se cuenta (es todo lo que se divulga).
+	busquedaMios     []MovimientoRow
+	busquedaFuera    int
+	enganche         string
+	faltanteCreado   [6]string // usuario, fecha, monto, referencia, motivo, movimiento enganchado
+	reportesAbiertos map[string]string
+	reporteCreado    [3]string // movimiento, usuario, motivo
+	reportes         []ReporteSegmentacion
+	reporteResuelto  [4]string // reporte, usuario, resolución, respuesta
 	// Tesorería (saldos diarios y checklist de carga)
 	saldosDia       []SaldoDelDia
 	serieSaldos     []PuntoSaldo

@@ -209,6 +209,10 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
 	case errors.Is(err, ErrTransicionInvalida), errors.Is(err, ErrYaAprobado):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
+	// Bloqueado para pago es una regla de negocio, no un conflicto de estado: el pedido está bien
+	// formado y el estado es correcto, lo que no corresponde es pagarlo por banco.
+	case errors.Is(err, ErrDocumentoBloqueadoParaPago):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
 	case errors.Is(err, ErrArchivoVacio), errors.Is(err, ErrFormatoImportacion),
 		errors.Is(err, ErrAccionInvalida), errors.Is(err, ErrFechaPagoRequerida), errors.Is(err, ErrSinDocumentos),
 		errors.Is(err, ErrPeriodoInvalido):

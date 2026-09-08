@@ -37,7 +37,10 @@ func (r *pgRepository) DocumentosParaPago(ctx context.Context, empresaID, fecha 
 		       COALESCE(d.huella, ''), COALESCE(d.consecutivo, ''), d.id::text
 		FROM documento_cxp d
 		JOIN proveedor p ON p.id = d.proveedor_id
+		-- Defensa en profundidad: aunque Programar ya lo impide, el archivo que va al banco no incluye
+		-- lo bloqueado. Es la última puerta antes de que salga plata.
 		WHERE d.empresa_id = $1::uuid AND d.estado = 'PROGRAMADO'
+		  AND NOT d.bloqueado_para_pago
 		  AND (NULLIF($2, '')::date IS NULL OR d.fecha_pago_programada <= NULLIF($2, '')::date)
 		ORDER BY p.nombre`
 	rows, err := r.pool.Query(ctx, q, empresaID, fecha)
@@ -69,7 +72,10 @@ func (r *pgRepository) DocumentosParaPagoPorIDs(ctx context.Context, empresaID s
 		       COALESCE(d.huella, ''), COALESCE(d.consecutivo, ''), d.id::text
 		FROM documento_cxp d
 		JOIN proveedor p ON p.id = d.proveedor_id
-		WHERE d.empresa_id = $1::uuid AND d.estado = 'PROGRAMADO' AND d.id = ANY($2::uuid[])
+		-- Defensa en profundidad: aunque Programar ya lo impide, el archivo que va al banco no incluye
+		-- lo bloqueado. Es la última puerta antes de que salga plata.
+		WHERE d.empresa_id = $1::uuid AND d.estado = 'PROGRAMADO'
+		  AND NOT d.bloqueado_para_pago AND d.id = ANY($2::uuid[])
 		ORDER BY p.nombre`
 	rows, err := r.pool.Query(ctx, q, empresaID, ids)
 	if err != nil {

@@ -304,41 +304,56 @@ export function AnalisisPage() {
           {/* Filtros: qué grupo se está mirando, cuáles partidas y con qué umbral. */}
           <Card>
             <CardContent className="flex flex-col gap-4 pt-6">
-              <div className="flex flex-wrap items-end justify-between gap-4">
-                <div className="flex flex-wrap items-end gap-1">
-                  {GRUPOS.map((g) => {
-                    const cuantas =
-                      g.id === "TODAS"
-                        ? (data.partidas ?? []).length
-                        : (data.partidas ?? []).filter((p) => grupoDe(p) === g.id).length;
-                    return (
-                      <button
-                        key={g.id}
-                        type="button"
-                        onClick={() => {
-                          setGrupo(g.id);
-                          setClasifs([]);
-                        }}
-                        className={cn(
-                          "rounded-md border px-3 py-2 text-sm font-medium transition-colors",
-                          grupo === g.id
-                            ? "border-accent bg-accent text-white"
-                            : "border-border bg-surface text-content-muted hover:text-content",
-                        )}
-                      >
-                        {g.label} ({cuantas})
-                      </button>
-                    );
-                  })}
+              {/* Alineado por ARRIBA: con `items-end`, el texto de ayuda del umbral empujaba su
+                  campo y los botones quedaban escalonados. La unidad vive en el label y el «%» se
+                  dibuja dentro del campo. */}
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-sm font-medium text-content">Ver</span>
+                  <div className="flex h-10 flex-wrap items-stretch gap-1">
+                    {GRUPOS.map((g) => {
+                      const cuantas =
+                        g.id === "TODAS"
+                          ? (data.partidas ?? []).length
+                          : (data.partidas ?? []).filter((p) => grupoDe(p) === g.id).length;
+                      return (
+                        <button
+                          key={g.id}
+                          type="button"
+                          onClick={() => {
+                            setGrupo(g.id);
+                            setClasifs([]);
+                          }}
+                          className={cn(
+                            "rounded-lg border px-3 text-sm font-medium shadow-sm transition-colors",
+                            grupo === g.id
+                              ? "border-accent bg-accent text-accent-fg"
+                              : "border-border bg-surface-raised text-content-muted hover:text-content",
+                          )}
+                        >
+                          {g.label} ({cuantas})
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div className="w-44">
-                  <Input
-                    label="Avisar si se aparta más de"
-                    value={umbral}
-                    onChange={(e) => setUmbral(e.target.value)}
-                    inputMode="decimal"
-                    hint="% sobre su propio promedio"
-                  />
+                {/* Label corto a propósito, por dos razones medidas: si no cabe en una línea se
+                    parte en dos y baja su propio campo (el mismo escalón que causaba el texto de
+                    ayuda), y con cinco botones al lado quedan ~240 px libres, así que un campo más
+                    ancho se iba a una segunda fila. Contra qué se compara ya lo dice la tarjeta. */}
+                <div className="w-48">
+                  <div className="relative">
+                    <Input
+                      label="Umbral de desvío"
+                      value={umbral}
+                      onChange={(e) => setUmbral(e.target.value)}
+                      inputMode="decimal"
+                      className="pr-8"
+                    />
+                    <span className="pointer-events-none absolute bottom-0 right-3 flex h-10 items-center text-sm text-content-muted">
+                      %
+                    </span>
+                  </div>
                 </div>
               </div>
               <BuscadorMultiple

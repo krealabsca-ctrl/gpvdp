@@ -79,6 +79,21 @@ func (f *fakeRepo) ListarDocumentos(_ context.Context, _ string, filtros Filtros
 	f.capListSet = true
 	return ListaDocumentos{}, nil
 }
+
+// DocumentoPorClave busca por la llave anti-duplicado. El fake recorre los documentos sembrados:
+// alcanza para probar la recuperación de un duplicado sin levantar una base.
+func (f *fakeRepo) DocumentoPorClave(_ context.Context, _ string, clave string) (Documento, error) {
+	for _, d := range f.docs {
+		if d.Clave == clave {
+			return d, nil
+		}
+	}
+	if f.doc.Clave == clave {
+		return f.doc, nil
+	}
+	return Documento{}, ErrDocumentoNoEncontrado
+}
+
 func (f *fakeRepo) DocumentoPorID(_ context.Context, _ string, id string) (Documento, error) {
 	if d, ok := f.docs[id]; ok {
 		return d, nil

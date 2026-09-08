@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Badge,
   Button,
@@ -35,6 +35,7 @@ import { cn } from "@/lib/cn";
 import { formatFecha, formatMoneda, toNumber } from "@/lib/format";
 import { mensajeError } from "@/lib/apiError";
 import { useCartera, useCatalogosCxc } from "@/features/cxc/hooks";
+import { CorregirContratoDialog } from "@/features/cxc/components/CorregirContratoDialog";
 import type { ContratoCxc } from "@/api/cxc";
 
 const PAGE_SIZE = 50;
@@ -56,6 +57,10 @@ function etiquetaMora(c: ContratoCxc): string {
 export function CarteraPage() {
   const navigate = useNavigate();
   const catalogos = useCatalogosCxc();
+  // `?en_revision=1` deja entrar directo a los contratos apartados. Es el mismo patrón del
+  // `?abierta=true` del tablero de CxP: cada número de otra pantalla tiene que poder traer sus
+  // filas, si no el aviso «2.451 no pueden generar» es un dato que no lleva a ninguna parte.
+  const [params] = useSearchParams();
 
   const [qInput, setQInput] = useState("");
   const [q, setQ] = useState("");
@@ -64,7 +69,9 @@ export function CarteraPage() {
   const [formaPagoId, setFormaPagoId] = useState("");
   const [asociacionId, setAsociacionId] = useState("");
   const [conSaldo, setConSaldo] = useState(false);
-  const [enRevision, setEnRevision] = useState(false);
+  const [enRevision, setEnRevision] = useState(params.get("en_revision") === "1");
+  // Contrato que se está corrigiendo (null = diálogo cerrado).
+  const [corrigiendo, setCorrigiendo] = useState<ContratoCxc | null>(null);
   const [orden, setOrden] = useState("");
   const [page, setPage] = useState(1);
 
@@ -203,9 +210,25 @@ export function CarteraPage() {
                     <TD>
                       <span className="font-medium">{c.numero}</span>
                       {c.revision_pendiente && (
-                        <Badge tone="pendiente" className="ml-2">
-                          revisar
-                        </Badge>
+                        <>
+                          <Badge tone="pendiente" className="ml-2">
+                            revisar
+                          </Badge>
+                          {/* El contrato apartado tiene que poder ARREGLARSE desde acá. Antes solo
+                              se podía mirar: quedaba fuera de la cobranza sin ninguna salida que no
+                              fuera corregir el archivo del origen y reimportar. `stopPropagation`
+                              porque la fila entera navega al detalle. */}
+                          <button
+                            type="button"
+                            className="ml-2 text-[11px] text-accent underline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCorrigiendo(c);
+                            }}
+                          >
+                            corregir
+                          </button>
+                        </>
                       )}
                       {c.fecha_primer_cobro && (
                         <span className="block text-[11px] text-content-muted">
@@ -264,6 +287,14 @@ export function CarteraPage() {
             )}
           </div>
         </>
+      )}
+
+      {corrigiendo && (
+        <CorregirContratoDialog
+          contrato={corrigiendo}
+          catalogos={catalogos.data}
+          onCerrar={() => setCorrigiendo(null)}
+        />
       )}
     </div>
   );

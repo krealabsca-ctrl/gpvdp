@@ -3,7 +3,7 @@
 Documento para el equipo de programación que va a recibir, poner en producción y mantener el
 sistema. Todos los números de este manual salieron de medir el sistema real, no de estimaciones.
 
-**Fecha de corte:** 14 de agosto de 2026 · **Migración aplicada:** 0062 · **73 tablas**
+**Fecha de corte:** 3 de setiembre de 2026 · **Migración aplicada:** 0078 · **86 tablas**
 
 ---
 
@@ -13,17 +13,31 @@ ERP financiero **multiempresa** para Grupo Valle de Paz (Valle de Paz, Coopeprof
 diseñado para agregar más). Es el **sistema de registro**: no hay una contabilidad externa detrás,
 lo que está acá es el dato bueno.
 
-Cinco módulos, todos en operación:
+Siete módulos construidos. **Cinco están en operación con datos reales; dos todavía no** — y eso hay
+que saberlo antes de estimar cualquier cosa sobre ellos (ver la columna «Datos»):
 
-| Módulo | Qué resuelve | Endpoints | Tablas |
-|---|---|---|---|
-| **Bancos** | Importar estados de cuenta de 7 bancos de Costa Rica, clasificar movimientos con un motor que aprende, tipo de cambio, conciliación bancaria, cierre de período | 69 | 18 |
-| **CxP** | Cuentas por pagar de punta a punta: recepción, clasificación, validación por riesgo, matriz de firmas, lotes de pago, conciliación, caja chica, anticipos | 69 | 11 |
-| **CxC** | Cartera de contratos funerarios: cargos por período, cobros, planillas de asociaciones, cola de cobro por valor esperado, arreglos de pago, suspensión por mora | 42 | 23 |
-| **RRHH / Nómina** | Planilla quincenal y mensual conforme a la ley de Costa Rica: cargas CCSS, renta, incapacidades, vacaciones, finiquitos, archivo SINPE, provisiones | 43 | 11 |
-| **Configuración** | Usuarios, roles, matriz de permisos por empresa, plantillas de correo | 16 | 10 |
+| Módulo | Qué resuelve | Endpoints | Tablas | Datos |
+|---|---|---|---|---|
+| **Bancos** | Importar estados de cuenta de 7 bancos de Costa Rica, clasificar movimientos con un motor que aprende, tipo de cambio, dimensiones y presupuesto, conciliación bancaria, cierre de período, consulta por segmento | 99 | 20 | 20.099 movimientos |
+| **CxP** | Cuentas por pagar de punta a punta: recepción, clasificación, validación por riesgo, matriz de firmas, lotes de pago, conciliación, caja chica, anticipos | 76 | 11 | 4.542 facturas · 649 proveedores |
+| **RRHH / Nómina** | Planilla quincenal y mensual conforme a la ley de Costa Rica: cargas CCSS, renta, incapacidades, vacaciones, finiquitos, archivo SINPE, provisiones | 43 | 11 | en uso (una empresa) |
+| **CxC** | Cartera de contratos funerarios: cargos por período, cobros, planillas de asociaciones, cola de cobro por valor esperado, arreglos de pago, suspensión por mora | 43 | 23 | en uso (una empresa) |
+| **Inventario** | Cofres, urnas y suministros por sede: entradas, el servicio prestado que descarga el stock, traslados, conteo cíclico con clase ABC, consignación, reposición y rotación | 33 | 10 | **vacío**: construido y probado, sin carga inicial |
+| **Configuración** | Usuarios, roles, matriz de permisos por empresa, alcance de consulta por partida, plantillas de correo | 18 | 11 | en uso |
+| **Grupo** | Vista consolidada de las empresas que el usuario puede ver. **Solo lee, y es la única que cruza empresas** (ver §6.1) | 1 | 0 | lee de Bancos |
 
-**Tamaño:** 40.805 líneas de Go (más 9.329 de pruebas) y 35.360 de TypeScript.
+Las tablas suman 86 (Grupo no tiene ninguna: es una vista). A esas 86 se agrega
+`schema_migrations`, que crea golang-migrate y no es del negocio.
+
+Las 8 rutas restantes (321 en total) son de sesión y salud del servicio: `login`, `refresh`,
+`select-empresa`, `cambiar-password`, `me`, `empresas`, `empresas/actual` y `healthz`.
+
+**Ojo con Inventario:** las 10 tablas existen y el módulo está verificado de punta a punta, pero
+tienen **cero filas**. Nadie cargó todavía el catálogo de artículos ni las existencias iniciales, y
+tampoco hay sedes creadas (`sede` está en 0). Cualquier medición de rendimiento o de volumen sobre
+ese módulo hoy no significa nada.
+
+**Tamaño:** 51.962 líneas de Go (más 12.365 de pruebas) y 45.085 de TypeScript, en 78 migraciones.
 
 ### Lo que este sistema NO hace
 
@@ -62,8 +76,8 @@ Decirlo evita que alguien lo busque:
 
 | Archivo | Para qué sirve |
 |---|---|
-| **`schema.sql`** | El esquema completo: 73 tablas, 231 índices, 189 claves foráneas. Se corre sobre una base vacía y queda toda la estructura. **Probado**: recrea la base real con exactamente las mismas 73 tablas, 789 columnas, 231 índices y 189 FKs. |
-| **`ENDPOINTS.md`** | Las 247 rutas de la API con su método y el permiso que exige cada una. Generado del router, no escrito a mano. |
+| **`schema.sql`** | El esquema completo: 86 tablas, 286 índices, 250 claves foráneas. Se corre sobre una base vacía y queda toda la estructura. **Probado**: recrea la base real con exactamente las mismas 86 tablas, 936 columnas, 286 índices y 250 FKs. |
+| **`ENDPOINTS.md`** | Las 321 rutas de la API con su método y el permiso que exige cada una. Generado del router, no escrito a mano. |
 | **`MANUAL-TECNICO.md`** | Este documento. |
 
 El código fuente está en `backend/` y `frontend/`, un nivel arriba.
@@ -88,7 +102,7 @@ Dos caminos, y conviene entender la diferencia:
 **Camino A — dejar que el backend construya el esquema** (recomendado para ambientes reales):
 
 1. Base vacía y `DATABASE_URL` apuntando a ella.
-2. Arrancar el backend: aplica las 62 migraciones en orden y registra en `schema_migrations`.
+2. Arrancar el backend: aplica las 78 migraciones en orden y registra en `schema_migrations`.
 3. Poner `SEED_ON_START=true` **solo en ese primer arranque** para sembrar empresas, roles,
    permisos y el usuario administrador. **Apagarlo después** (ver §9).
 
@@ -99,12 +113,14 @@ createdb -U postgres gpvdp
 psql -U postgres -d gpvdp -f schema.sql
 ```
 
-Deja la estructura completa pero **sin la tabla `schema_migrations` poblada**, así que el backend
-intentará aplicar las 62 migraciones sobre tablas que ya existen y fallará. Si se usa este camino,
-hay que marcar la versión a mano:
+El `schema.sql` que se entrega ya trae **sellada** la versión al final del archivo (el
+`INSERT INTO schema_migrations` lo agrega `deploy/regenerar-entrega.sh`), así que el backend arranca
+sin volver a aplicar nada. Si se usa un `schema.sql` viejo que **no** lo traiga, el backend intentará
+aplicar las 78 migraciones sobre tablas que ya existen y fallará; en ese caso hay que marcar la
+versión a mano:
 
 ```sql
-INSERT INTO schema_migrations (version, dirty) VALUES (62, false);
+INSERT INTO schema_migrations (version, dirty) VALUES (78, false);
 ```
 
 > Por eso el Camino A es el bueno para producción: deja la base y el registro de migraciones
@@ -130,31 +146,33 @@ INSERT INTO schema_migrations (version, dirty) VALUES (62, false);
 
 ### 5.1 Convenciones de tipos — respeten estas
 
-Medido sobre las 789 columnas reales:
+Medido sobre las 936 columnas reales:
 
 | Para | Tipo | Columnas | Por qué |
 |---|---|---|---|
-| Identificadores | `uuid` con `DEFAULT gen_random_uuid()` | 267 | Sin secuencias: permite generar el id antes de insertar y no filtra volumen de negocio |
-| Texto | **`text`** (sin límite) | 174 | No hay un solo `varchar(n)` en el esquema. En PostgreSQL `text` no es más lento y evita migraciones por «se quedó corto el campo» |
-| Fecha con hora | `timestamptz` | 99 | **Siempre con zona.** Nunca `timestamp` pelado |
-| Banderas | `boolean` | 59 | — |
-| **Dinero** | **`numeric(14,2)`** | 50 | Montos mayores: `numeric(16,2)` (19 col) y `numeric(18,2)` (8 col) |
-| Cantidades | `integer` / `smallint` / `bigint` | 52 | — |
-| Fecha sin hora | `date` | 25 | Fechas de emisión, vencimiento, período |
+| Identificadores | `uuid` con `DEFAULT gen_random_uuid()` | 333 | Sin secuencias: permite generar el id antes de insertar y no filtra volumen de negocio |
+| Texto | **`text`** (sin límite) | 200 | No hay un solo `varchar(n)` en el esquema. En PostgreSQL `text` no es más lento y evita migraciones por «se quedó corto el campo» |
+| Fecha con hora | `timestamptz` | 114 | **Siempre con zona.** Nunca `timestamp` pelado |
+| Banderas | `boolean` | 65 | — |
+| **Dinero** | **`numeric(14,2)`** | 52 | Montos mayores: `numeric(16,2)` (20 col) y `numeric(18,2)` (8 col) |
+| Cantidades | `integer` / `smallint` / `bigint` | 59 | — |
+| Fecha sin hora | `date` | 32 | Fechas de emisión, vencimiento, período |
 | Estructuras | `jsonb` | 8 | Solo donde la forma es genuinamente variable |
 | Tipo de cambio | `numeric(14,4)` | 5 | Cuatro decimales: el TC del BCCR los usa |
-| Porcentajes | `numeric(5,2)`, `numeric(6,3)` | 9 | — |
+| Porcentajes | `numeric(5,2)`, `numeric(6,3)`, `numeric(6,2)` | 13 | — |
 | Archivos | `bytea` | 2 | El .xlsx original de cada importación bancaria |
 
 **Regla que no se negocia: dinero nunca en `float`, `double precision` ni `real`.** Hoy el esquema
 no tiene ni una columna de punto flotante, y en Go el dinero viaja como `decimal.Decimal` y sale al
 JSON como **string**, no como número — para que ningún cliente lo redondee al parsear.
 
-### 5.2 Las 73 tablas, por módulo
+### 5.2 Las 86 tablas, por módulo
 
-Casi todas llevan `empresa_id uuid NOT NULL` (ver §6.1).
+Casi todas llevan `empresa_id uuid NOT NULL` (ver §6.1). Suman 86 de negocio: 11 + 20 + 11 + 23 + 11
++ 10. La lista de abajo trae 87 filas porque incluye además `schema_migrations`, que no es del
+negocio: la crea golang-migrate y se documenta acá porque hay un caso en que se toca (§4).
 
-#### Núcleo, seguridad y auditoría (10)
+#### Núcleo, seguridad y auditoría (11 + `schema_migrations`)
 
 | Tabla | Col. | Qué guarda |
 |---|---|---|
@@ -162,23 +180,25 @@ Casi todas llevan `empresa_id uuid NOT NULL` (ver §6.1).
 | `usuario` | 8 | Personas. `password_hash` bcrypt, `debe_cambiar_password` fuerza el cambio al primer ingreso |
 | `usuario_empresa_rol` | 5 | Qué rol tiene cada persona **en cada empresa** |
 | `rol` | 6 | Roles. **Son globales** (`empresa_id IS NULL`) salvo los creados a medida |
-| `permiso` | 7 | Catálogo de 55 permisos. `critico` marca los sensibles |
+| `permiso` | 7 | Catálogo de 74 permisos. `critico` marca los sensibles |
 | `rol_permiso` | 4 | La matriz permiso × rol × **empresa**. Editable en caliente |
+| `rol_clasificacion_consulta` | 4 | El ALCANCE de la consulta por segmento: qué partidas ve cada rol. Capa distinta del permiso — ver §6.1 |
+| `movimiento_reporte_segmentacion` | 13 | Los avisos de los equipos de consulta: «esto está mal segmentado» y «esto no aparece». Estado derivado de `resuelto_en` |
 | `sesion` | 6 | Refresh tokens vigentes |
 | `auditoria_evento` | 9 | Append-only: quién, qué, cuándo. **Ver la limitación en §11** |
 | `plantilla_correo` | 7 | Textos de los correos, configurables por empresa |
 | `schema_migrations` | 2 | La lleva golang-migrate. **No tocar a mano** salvo el caso de §4 |
 
-#### Bancos (18)
+#### Bancos (20)
 
 | Tabla | Col. | Qué guarda |
 |---|---|---|
-| `banco` | 5 | Bancos (13 registrados) |
-| `cuenta_bancaria` | 8 | Cuentas con IBAN y moneda (20 registradas) |
+| `banco` | 5 | Bancos (14 registrados) |
+| `cuenta_bancaria` | 8 | Cuentas con IBAN y moneda (23 registradas) |
 | `concepto` | 8 | Primer nivel del catálogo de gasto/ingreso. `naturaleza` define si suma al EBITDA (§11) |
-| `clasificacion` | 8 | Segundo nivel, cuelga del concepto (284 registradas) |
+| `clasificacion` | 8 | Segundo nivel, cuelga del concepto (302 registradas) |
 | `subclasificacion` | 6 | Tercer nivel, opcional |
-| `movimiento_bancario` | 26 | El corazón: 14.181 filas. `natural_key` + `indice_ocurrencia` es el anti-duplicado |
+| `movimiento_bancario` | 26 | El corazón: 20.099 filas. `natural_key` + `indice_ocurrencia` es el anti-duplicado |
 | `importacion` | 10 | Cada archivo cargado, **con el .xlsx original en `bytea`** para reproducir fallas |
 | `regla_clasificacion` | 10 | El motor que aprende: patrón → clasificación |
 | `palabra_clave` | 4 | Palabras de cada regla |
@@ -191,13 +211,15 @@ Casi todas llevan `empresa_id uuid NOT NULL` (ver §6.1).
 | `saldo_cuenta_diario` | 11 | Saldo por cuenta y día, con cuadre derivado |
 | `acta_conciliacion` | 12 | Acta mensual por cuenta; firmarla habilita el cierre |
 | `partida_conciliacion` | 14 | Partidas en tránsito del acta |
+| `sede` | 8 | Sedes: dimensión **ortogonal** a la partida (§11). La comparten CxC e Inventario. **Hoy en 0 filas** |
+| `presupuesto_departamento` | 10 | Presupuesto por departamento × mes. La misma tabla guarda el total del depto y su desglose por partida, distinguidos por `clasificacion_id` (de ahí los dos índices únicos **parciales**: en Postgres `NULL ≠ NULL` dejaría cargar dos «totales») |
 
 #### Cuentas por Pagar (11)
 
 | Tabla | Col. | Qué guarda |
 |---|---|---|
 | `proveedor` | 20 | 649 proveedores, con IBAN, retención y gasto predeterminado |
-| `documento_cxp` | **41** | La factura y todo su ciclo: 4.542 filas. La tabla más ancha del sistema |
+| `documento_cxp` | **43** | La factura y todo su ciclo: 4.542 filas. La tabla más ancha del sistema. `bloqueado_para_pago` + `bloqueo_motivo` son el candado contra el doble pago (provisiones de consignación y viáticos: §11) |
 | `documento_cxp_aprobacion` | 6 | Cada firma: la matriz por monto puede pedir varias |
 | `anticipo_aplicacion` | 10 | Anticipos neteados contra la factura final |
 | `departamento` | 9 | Áreas / centros de costo |
@@ -255,6 +277,24 @@ Casi todas llevan `empresa_id uuid NOT NULL` (ver §6.1).
 | `finiquito` | 28 | Liquidación de cese conforme al Código de Trabajo |
 | `nomina_archivo_pago` | 8 | Archivos SINPE generados |
 
+#### Inventario (10)
+
+**Las 10 están en cero filas.** El módulo está construido y verificado, pero nadie cargó el catálogo
+ni las existencias iniciales (ver §1).
+
+| Tabla | Col. | Qué guarda |
+|---|---|---|
+| `inv_categoria` | 7 | Árbol de categorías (cofres, urnas, suministros) |
+| `inv_articulo` | 14 | El artículo. `modo_control` decide **cómo se cuenta**: `UNIDAD` (cada objeto es una ficha) o `CANTIDAD` (solo se cuenta) |
+| `inv_unidad` | 15 | Una fila por objeto físico de los artículos por `UNIDAD`. Lleva `cxp_consignacion_id`: la provisión en CxP de lo que se usó del proveedor |
+| `inv_nivel` | 6 | Mínimo y máximo por artículo **y sede**. Sin nivel no hay semáforo: es `SIN_NIVEL`, no «en rango» |
+| `inv_movimiento` | 17 | El libro de todo lo que entró, salió o se movió. La **existencia se deriva de acá**, nunca es un contador |
+| `inv_servicio` | 10 | El funeral y qué consumió. **Es el hecho que descarga el stock** |
+| `inv_traslado` | 12 | Entre sedes, con lo que va en camino (`EN_TRANSITO`) |
+| `inv_conteo` | 12 | Hoja de conteo cíclico; cerrarla **genera** ajustes y bajas |
+| `inv_conteo_linea` | 10 | Lo contado contra lo esperado, y la diferencia explicada |
+| `inv_consecutivo` | 3 | Numeración por empresa de servicios, traslados y conteos |
+
 ---
 
 ## 6. Las reglas que no se pueden romper
@@ -274,6 +314,40 @@ func (r *pgRepository) Listar(ctx context.Context, empresaID string, ...) {
     // WHERE d.empresa_id = $1::uuid
 }
 ```
+
+**La única excepción del sistema: `internal/grupo`** (la vista consolidada, `GET /v1/grupo/resumen`).
+Suma varias empresas a propósito, y por eso vive en un paquete aparte: la excepción tiene que verse,
+para que nadie agregue una consulta multiempresa dentro de bancos o de CxP creyendo que está
+permitido. Tres reglas que la mantienen segura, y que hay que respetar si algún día se amplía:
+
+1. **Solo lee.** No tiene una sola escritura. Si escribiera algo, dejaría de ser una vista.
+2. **No otorga acceso.** Incluye únicamente las empresas donde el usuario ya podía ver el dato: se
+   cruzan sus membresías (`usuario_empresa_rol`) con el permiso de lectura del módulo **en cada
+   empresa**. Es una re-presentación de lo que ya podía mirar de a una, no una llave nueva.
+3. **El alcance no se pide.** No existe ningún parámetro de empresas: lo resuelve el servidor desde
+   el token. Ninguna consulta del paquete recibe una empresa que no haya pasado por ese filtro, y
+   todas reciben la LISTA ya resuelta (no hay una que lea «todas las empresas»).
+
+Y confiesa lo que dejó afuera (`empresas_del_sistema`, `excluidas`, `aviso`, `completo`): un total que
+omite una empresa en silencio se lee como el número del grupo.
+
+**Dentro de una empresa hay un segundo recorte, y son dos capas distintas** (mig 0077 y 0078). El permiso
+dice **qué pantalla** abre un rol; el alcance dice **cuáles filas** ve ahí:
+
+- El permiso vive en `rol_permiso`, como todos (`bancos.ver_mi_segmento`).
+- El alcance vive en `rol_clasificacion_consulta`: qué partidas consulta ese rol. Lo aplica el
+  servicio, que sobreescribe el filtro con el alcance del rol antes de llegar al repositorio.
+
+La regla que sostiene todo esto: **un alcance vacío cierra, nunca abre.** Es el error clásico del
+recorte por lista —se arma el filtro con `if len(ids) > 0`, la lista viene vacía, la condición no se
+agrega y el `WHERE` queda abierto—, y no falla ruidosamente: entrega datos. Por eso hay dos guardas,
+el corte del servicio (`ErrSinAlcance`) y una condición imposible en `condicionesMovimientos`, y el
+test `TestMiSegmentoSinAlcanceNoDevuelveNada` siembra filas en el repositorio falso justo para
+comprobar que no salen.
+
+Consecuencia útil: el alcance **se deriva de la segmentación**, no se administra aparte. Reclasificar
+un movimiento le cambia el dueño solo, y uno sin clasificar no está en ningún alcance —así que no lo
+ve nadie—.
 
 ### 6.2 Dinero nunca en punto flotante
 
@@ -338,11 +412,12 @@ Paquetes en `backend/internal/`:
 
 | Paquete | Contenido |
 |---|---|
-| `server` | Router, middleware, CORS. **`router.go` es el índice de todo el sistema**: 247 rutas con su permiso |
+| `server` | Router, middleware, CORS. **`router.go` es el índice de todo el sistema**: 321 rutas con su permiso |
 | `auth` | Login, JWT, refresh, cambio de contraseña |
 | `tenant` | Middleware de empresa y verificación de permisos |
 | `rbac` | Catálogo de permisos, matriz por empresa, usuarios |
-| `bancos`, `cxp`, `cxc`, `nomina` | Los cuatro dominios |
+| `bancos`, `cxp`, `cxc`, `nomina`, `inventario` | Los cinco dominios |
+| `grupo` | La vista consolidada. Aparte de los dominios **porque es la única que cruza empresas** (§6.1): la excepción tiene que verse |
 | `plantillas` | Plantillas de correo |
 | `shared` | Auditoría y utilidades comunes |
 | `config`, `database`, `logging`, `httpx` | Infraestructura |
@@ -383,7 +458,7 @@ oscuro y el de cada empresa funcionan sin tocar cada componente.
 
 ## 8. Permisos (RBAC)
 
-**55 permisos** en `backend/internal/rbac/catalogo.go`, que es la fuente de verdad. La matriz
+**74 permisos** en `backend/internal/rbac/catalogo.go`, que es la fuente de verdad. La matriz
 permiso × rol × empresa se edita desde la interfaz y surte efecto casi en vivo.
 
 Roles base: `ADMIN` (bypass total por diseño, para que nadie se auto-bloquee),
@@ -608,10 +683,10 @@ Se entregan dichas, no escondidas:
 
 Una aclaración honesta sobre el alcance de este manual.
 
-Documentar función por función 40.805 líneas de Go daría un texto enorme que quedaría desactualizado
+Documentar función por función 51.962 líneas de Go daría un texto enorme que quedaría desactualizado
 en la primera semana, y que nadie leería. Lo que sí sirve, y es lo que se entrega:
 
-1. **La superficie completa de la API** — `ENDPOINTS.md`, con las 247 rutas y el permiso de cada una,
+1. **La superficie completa de la API** — `ENDPOINTS.md`, con las 321 rutas y el permiso de cada una,
    **generado del router** para que no pueda mentir.
 2. **El esquema completo** — `schema.sql`, extraído de la base real y probado.
 3. **La arquitectura** (§7): sabiendo que todo es handler → service → repository, encontrar cualquier

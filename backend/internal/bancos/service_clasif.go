@@ -37,6 +37,15 @@ type FiltrosMovimientos struct {
 	// Orden: "" (fecha desc) | fecha_asc | monto_desc | monto_asc.
 	Orden          string
 	Page, PageSize int
+	// Alcance es el RECORTE por segmento: las clasificaciones que el rol del usuario puede
+	// consultar (mig 0077). No se parece a `ClasificacionIDs` aunque filtre lo mismo:
+	//
+	//   · ClasificacionIDs lo pide el cliente y puede venir vacío = «todas».
+	//   · Alcance lo pone el SERVIDOR desde el rol, y vacío significa «ninguna», nunca «todas».
+	//
+	// Por eso viven separados y se suman con AND: dentro de su alcance el usuario puede afinar,
+	// pero no puede ensancharlo pidiendo otra clasificación. Ver `condicionesMovimientos`.
+	Alcance []string
 }
 
 // ordenSQL traduce el orden pedido a un ORDER BY seguro (whitelist, sin inyección).
@@ -86,6 +95,10 @@ type MovimientoRow struct {
 	Estado          string  `json:"estado_clasificacion"`
 	Confianza       *string `json:"confianza"`
 	EsTraslado      bool    `json:"es_traslado"`
+	// ReporteAbierto: el motivo del aviso «está mal segmentado» que ya está sin resolver para este
+	// movimiento (vacío = ninguno). Lo llena solo la consulta por segmento (mig 0077); la hoja de
+	// trabajo no lo pide y no paga el costo de buscarlo.
+	ReporteAbierto string `json:"reporte_abierto,omitempty"`
 }
 
 // ListaMovimientos es la respuesta paginada con totales.
@@ -262,4 +275,15 @@ func aplicarReglas(movs []MovParaClasificar, reglas []Regla) []MovClasifUpdate {
 		}
 	}
 	return out
+}
+
+// ConceptoEsVisibleCxP / ClasificacionEsVisibleCxP son las guardas de alcance de la puerta de
+// Contabilidad al catálogo (`cxp.catalogo`). Pasan derecho al repositorio: no hay regla que aplicar,
+// solo la pregunta.
+func (s *Service) ConceptoEsVisibleCxP(ctx context.Context, empresaID, conceptoID string) (bool, error) {
+	return s.repo.ConceptoEsVisibleCxP(ctx, empresaID, conceptoID)
+}
+
+func (s *Service) ClasificacionEsVisibleCxP(ctx context.Context, empresaID, clasificacionID string) (bool, error) {
+	return s.repo.ClasificacionEsVisibleCxP(ctx, empresaID, clasificacionID)
 }

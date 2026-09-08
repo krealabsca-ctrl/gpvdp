@@ -13,6 +13,17 @@ export const queryKeys = {
   me: () => ["me"] as const,
   empresas: () => ["empresas"] as const,
 
+  /**
+   * Vista consolidada del grupo. Cruza empresas, así que el dato NO depende de la empresa activa
+   * —depende del usuario y del período—. Igual lleva empresaId, y por dos razones: el permiso
+   * `grupo.ver` se concede por empresa (cambiar de empresa puede quitar el acceso), y la regla del
+   * proyecto es que ninguna clave de datos viva fuera del namespace de la empresa activa.
+   */
+  grupo: {
+    resumen: (empresaId: string, periodo: string) => ["grupo", empresaId, "resumen", periodo] as const,
+    raiz: (empresaId: string) => ["grupo", empresaId] as const,
+  },
+
   // Nivel empresa — módulo Bancos (Fase 1). Todas namespaced por empresaId.
   bancos: {
     /** Raíz para invalidación amplia (invalida todo el módulo de la empresa). */
@@ -28,6 +39,18 @@ export const queryKeys = {
     clasificacionesRaiz: (empresaId: string) =>
       ["bancos", "clasificaciones", empresaId] as const,
     reglas: (empresaId: string) => ["bancos", "reglas", empresaId] as const,
+
+    // Consulta por segmento (mig 0077). El alcance cuelga del prefijo del catálogo a propósito:
+    // marcar quién consulta una partida es editar el catálogo, y así una invalidación del catálogo
+    // refresca las dos cosas sin tener que acordarse.
+    alcanceConsulta: (empresaId: string) => ["bancos", "catalogo-consulta", empresaId] as const,
+    miSegmento: (empresaId: string, filtros?: unknown) =>
+      ["bancos", "mi-segmento", empresaId, filtros ?? null] as const,
+    miSegmentoRaiz: (empresaId: string) => ["bancos", "mi-segmento", empresaId] as const,
+    reportesSegmentacion: (empresaId: string, soloPendientes: boolean) =>
+      ["bancos", "reportes-segmentacion", empresaId, soloPendientes] as const,
+    reportesSegmentacionRaiz: (empresaId: string) =>
+      ["bancos", "reportes-segmentacion", empresaId] as const,
     bancosCatalogo: (empresaId: string, incluirInactivos = false) =>
       ["bancos", "catalogo-bancos", empresaId, incluirInactivos] as const,
 
@@ -87,6 +110,19 @@ export const queryKeys = {
       ["bancos", "dashboard", empresaId, "serie", hasta] as const,
     calendario: (empresaId: string, periodo: string) =>
       ["bancos", "dashboard", empresaId, "calendario", periodo] as const,
+    /** Control presupuestario: comparte prefijo con dashboard para invalidarse junto. */
+    control: (empresaId: string, desde: string, hasta: string, agruparPor: string, umbral: string) =>
+      ["bancos", "dashboard", empresaId, "control", desde, hasta, agruparPor, umbral] as const,
+    partidasDimension: (empresaId: string, desde: string, hasta: string, agruparPor: string, id: string) =>
+      ["bancos", "dashboard", empresaId, "control-partidas", desde, hasta, agruparPor, id] as const,
+    presupuesto: (empresaId: string, desde: string, hasta: string) =>
+      ["bancos", "presupuesto", empresaId, desde, hasta] as const,
+    presupuestoRaiz: (empresaId: string) => ["bancos", "presupuesto", empresaId] as const,
+    sedes: (empresaId: string, incluirInactivas: boolean) =>
+      ["bancos", "catalogo", empresaId, "sedes", incluirInactivas] as const,
+    sedesRaiz: (empresaId: string) => ["bancos", "catalogo", empresaId, "sedes"] as const,
+    departamentosBancos: (empresaId: string) =>
+      ["bancos", "catalogo", empresaId, "departamentos"] as const,
     /** Análisis de partidas en el tiempo: cambia con el rango. */
     analisisPartidas: (empresaId: string, desde: string, hasta: string) =>
       ["bancos", "dashboard", empresaId, "partidas", desde, hasta] as const,
@@ -226,5 +262,57 @@ export const queryKeys = {
     vacaciones: (empresaId: string, empleadoId?: string) =>
       ["rrhh", "vacaciones", empresaId, empleadoId ?? "todas"] as const,
     vacacionesRaiz: (empresaId: string) => ["rrhh", "vacaciones", empresaId] as const,
+  },
+
+  /**
+   * Inventario. La empresa va SIEMPRE en tercera posición, después del módulo y el recurso, para
+   * que la clave raíz de cada recurso invalide por prefijo.
+   *
+   * `existenciasRaiz` es el prefijo que hay que invalidar tras CUALQUIER movimiento: una entrada,
+   * un servicio, un traslado o un ajuste cambian lo que hay, y dejar la pantalla con el número
+   * viejo hace pensar que la operación no se guardó.
+   */
+  inventario: {
+    categorias: (empresaId: string, incluirInactivas: boolean) =>
+      ["inventario", "categorias", empresaId, incluirInactivas] as const,
+    categoriasRaiz: (empresaId: string) => ["inventario", "categorias", empresaId] as const,
+    articulos: (empresaId: string, filtro: string) =>
+      ["inventario", "articulos", empresaId, filtro] as const,
+    articulosRaiz: (empresaId: string) => ["inventario", "articulos", empresaId] as const,
+    niveles: (empresaId: string, articuloId: string) =>
+      ["inventario", "niveles", empresaId, articuloId] as const,
+    nivelesRaiz: (empresaId: string) => ["inventario", "niveles", empresaId] as const,
+    existencias: (empresaId: string, filtro: string) =>
+      ["inventario", "existencias", empresaId, filtro] as const,
+    existenciasRaiz: (empresaId: string) => ["inventario", "existencias", empresaId] as const,
+    unidades: (empresaId: string, filtro: string) =>
+      ["inventario", "unidades", empresaId, filtro] as const,
+    unidadesRaiz: (empresaId: string) => ["inventario", "unidades", empresaId] as const,
+    movimientos: (empresaId: string, filtro: string) =>
+      ["inventario", "movimientos", empresaId, filtro] as const,
+    movimientosRaiz: (empresaId: string) => ["inventario", "movimientos", empresaId] as const,
+    servicios: (empresaId: string, desde: string, hasta: string) =>
+      ["inventario", "servicios", empresaId, desde, hasta] as const,
+    serviciosRaiz: (empresaId: string) => ["inventario", "servicios", empresaId] as const,
+    traslados: (empresaId: string, estado: string) =>
+      ["inventario", "traslados", empresaId, estado] as const,
+    trasladosRaiz: (empresaId: string) => ["inventario", "traslados", empresaId] as const,
+    reposicion: (empresaId: string, sedeId: string, semanas: number) =>
+      ["inventario", "reposicion", empresaId, sedeId, semanas] as const,
+    reposicionRaiz: (empresaId: string) => ["inventario", "reposicion", empresaId] as const,
+    rotacion: (empresaId: string, desde: string, hasta: string) =>
+      ["inventario", "rotacion", empresaId, desde, hasta] as const,
+    rotacionRaiz: (empresaId: string) => ["inventario", "rotacion", empresaId] as const,
+    conteos: (empresaId: string, estado: string, sedeId: string) =>
+      ["inventario", "conteos", empresaId, estado, sedeId] as const,
+    conteosRaiz: (empresaId: string) => ["inventario", "conteos", empresaId] as const,
+    conteo: (empresaId: string, id: string) => ["inventario", "conteo", empresaId, id] as const,
+    conteoRaiz: (empresaId: string) => ["inventario", "conteo", empresaId] as const,
+    planConteo: (empresaId: string) => ["inventario", "plan-conteo", empresaId] as const,
+    consignacion: (empresaId: string, filtro: unknown) =>
+      ["inventario", "consignacion", empresaId, filtro] as const,
+    consignacionRaiz: (empresaId: string) => ["inventario", "consignacion", empresaId] as const,
+    candidatasConciliacion: (empresaId: string, unidadId: string) =>
+      ["inventario", "consignacion-candidatas", empresaId, unidadId] as const,
   },
 } as const;

@@ -24,6 +24,7 @@ type Repository interface {
 	CrearDocumento(ctx context.Context, empresaID string, in DocumentoInput, totalCRC decimal.Decimal, tc *decimal.Decimal, usuarioID string) (Documento, error)
 	ListarDocumentos(ctx context.Context, empresaID string, f FiltrosDocumentos) (ListaDocumentos, error)
 	DocumentoPorID(ctx context.Context, empresaID, id string) (Documento, error)
+	DocumentoPorClave(ctx context.Context, empresaID, clave string) (Documento, error)
 	CambiarEstado(ctx context.Context, empresaID, id, de, a string) (int64, error)
 	CambiarEstadoMulti(ctx context.Context, empresaID, id string, de []string, a string) (int64, error)
 	Programar(ctx context.Context, empresaID, id, fecha, huella string) (int64, error)

@@ -6,8 +6,12 @@ import "context"
 // Los tests de dedup no ejercitan estos caminos; devuelven valores neutros.
 
 func (f *fakeRepo) ListarReglas(context.Context, string) ([]Regla, error) { return f.reglasCat, nil }
-func (f *fakeRepo) ListarMovimientos(context.Context, string, FiltrosMovimientos) (ListaMovimientos, error) {
-	return ListaMovimientos{}, nil
+
+// ListarMovimientos guarda el filtro recibido: los tests de la consulta por segmento comprueban
+// que el alcance viene forzado por el servicio y no por quien llama.
+func (f *fakeRepo) ListarMovimientos(_ context.Context, _ string, filtros FiltrosMovimientos) (ListaMovimientos, error) {
+	f.filtroMovs = filtros
+	return f.listaMovs, nil
 }
 func (f *fakeRepo) ResumenFiltro(context.Context, string, FiltrosMovimientos, string) ([]ResumenFiltroRow, error) {
 	return f.resumenFiltro, nil

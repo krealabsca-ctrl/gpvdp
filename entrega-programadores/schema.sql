@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict XeXZotFf7DC7oWQGqvydDNY2euUWx8DsUWDlUgitEzeh9oepTCqsuUidpEnriFq
+\restrict 8fnMvGLb2A1DO8ctmFPsNafSTEug2EunQDjSUg7jqXQfucDg5qABealXe1PQmyV
 
 -- Dumped from database version 16.14 (Debian 16.14-1.pgdg13+1)
 -- Dumped by pg_dump version 16.14 (Debian 16.14-1.pgdg13+1)
@@ -283,7 +283,9 @@ CREATE TABLE public.clasificacion (
     cuenta_contable_futura text,
     activo boolean DEFAULT true NOT NULL,
     creado_en timestamp with time zone DEFAULT now() NOT NULL,
-    es_contabilidad boolean DEFAULT false NOT NULL
+    es_contabilidad boolean DEFAULT false NOT NULL,
+    departamento_id uuid,
+    sede_id uuid
 );
 
 
@@ -292,6 +294,20 @@ CREATE TABLE public.clasificacion (
 --
 
 COMMENT ON COLUMN public.clasificacion.es_contabilidad IS 'Esta clasificación es de Contabilidad: sus facturas no requieren validación de área.';
+
+
+--
+-- Name: COLUMN clasificacion.departamento_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.clasificacion.departamento_id IS 'Departamento POR DEFECTO de esta partida. Se resuelve al leer, no se copia al movimiento: ponerlo acá corrige toda la historia de la partida sin reprocesar nada.';
+
+
+--
+-- Name: COLUMN clasificacion.sede_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.clasificacion.sede_id IS 'Sede por defecto de esta partida. Mismo criterio que departamento_id.';
 
 
 --
@@ -920,6 +936,8 @@ CREATE TABLE public.documento_cxp (
     contabilidad_marcado_en timestamp with time zone,
     requiere_validacion boolean,
     validacion_motivo text,
+    bloqueado_para_pago boolean DEFAULT false NOT NULL,
+    bloqueo_motivo text,
     CONSTRAINT documento_cxp_estado_check CHECK ((estado = ANY (ARRAY['RECIBIDO'::text, 'REVISADO'::text, 'VALIDADO_DEPTO'::text, 'APROBADO'::text, 'PROGRAMADO'::text, 'PAGADO'::text, 'CONCILIADO'::text, 'DENEGADO'::text, 'ANULADO'::text, 'LIQUIDADA'::text, 'REBOTADA'::text]))),
     CONSTRAINT documento_cxp_moneda_check CHECK ((moneda = ANY (ARRAY['CRC'::text, 'USD'::text]))),
     CONSTRAINT documento_cxp_prioridad_check CHECK ((prioridad = ANY (ARRAY[''::text, 'A'::text, 'AA'::text]))),
@@ -946,6 +964,20 @@ COMMENT ON COLUMN public.documento_cxp.requiere_validacion IS 'Si el área tiene
 --
 
 COMMENT ON COLUMN public.documento_cxp.validacion_motivo IS 'Por qué requiere validación: MONTO, PROVEEDOR_NUEVO o DESVIO. Vacío cuando no la requiere.';
+
+
+--
+-- Name: COLUMN documento_cxp.bloqueado_para_pago; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.documento_cxp.bloqueado_para_pago IS 'true = no puede programarse ni entrar al archivo de pagos, aunque su estado lo permitiría. Lo usan las provisiones generadas por el sistema (consignación de inventario), que se reemplazan por la factura real del proveedor en vez de pagarse.';
+
+
+--
+-- Name: COLUMN documento_cxp.bloqueo_motivo; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.documento_cxp.bloqueo_motivo IS 'Por qué está bloqueado, en palabras, para que quien lo encuentre en la bandeja sepa qué hacer.';
 
 
 --
@@ -1112,6 +1144,284 @@ CREATE TABLE public.incapacidad (
 
 
 --
+-- Name: inv_articulo; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.inv_articulo (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    empresa_id uuid NOT NULL,
+    categoria_id uuid NOT NULL,
+    codigo text NOT NULL,
+    nombre text NOT NULL,
+    modo_control text NOT NULL,
+    unidad_medida text DEFAULT 'unidad'::text NOT NULL,
+    proveedor_id uuid,
+    clasificacion_id uuid,
+    activo boolean DEFAULT true NOT NULL,
+    nota text,
+    creado_en timestamp with time zone DEFAULT now() NOT NULL,
+    actualizado_en timestamp with time zone DEFAULT now() NOT NULL,
+    creado_por uuid,
+    CONSTRAINT inv_articulo_modo_control_check CHECK ((modo_control = ANY (ARRAY['UNIDAD'::text, 'CANTIDAD'::text])))
+);
+
+
+--
+-- Name: COLUMN inv_articulo.modo_control; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.inv_articulo.modo_control IS 'UNIDAD: cada objeto físico es una fila en inv_unidad (cofres). CANTIDAD: solo se cuenta (urnas, suministros).';
+
+
+--
+-- Name: inv_categoria; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.inv_categoria (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    empresa_id uuid NOT NULL,
+    padre_id uuid,
+    nombre text NOT NULL,
+    activo boolean DEFAULT true NOT NULL,
+    orden integer DEFAULT 0 NOT NULL,
+    creado_en timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: inv_consecutivo; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.inv_consecutivo (
+    empresa_id uuid NOT NULL,
+    ambito text NOT NULL,
+    siguiente integer DEFAULT 1 NOT NULL
+);
+
+
+--
+-- Name: inv_conteo; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.inv_conteo (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    empresa_id uuid NOT NULL,
+    numero text NOT NULL,
+    sede_id uuid NOT NULL,
+    categoria_id uuid,
+    estado text DEFAULT 'ABIERTO'::text NOT NULL,
+    abierto_en date NOT NULL,
+    cerrado_en date,
+    abierto_por uuid,
+    cerrado_por uuid,
+    nota text,
+    creado_en timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT inv_conteo_cierre_coherente CHECK (((estado = 'CERRADO'::text) = (cerrado_en IS NOT NULL))),
+    CONSTRAINT inv_conteo_estado_check CHECK ((estado = ANY (ARRAY['ABIERTO'::text, 'CERRADO'::text, 'ANULADO'::text])))
+);
+
+
+--
+-- Name: COLUMN inv_conteo.categoria_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.inv_conteo.categoria_id IS 'Categoría contada. NULL = se contó toda la sede.';
+
+
+--
+-- Name: inv_conteo_linea; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.inv_conteo_linea (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    empresa_id uuid NOT NULL,
+    conteo_id uuid NOT NULL,
+    articulo_id uuid NOT NULL,
+    unidad_id uuid,
+    cantidad_sistema integer NOT NULL,
+    cantidad_contada integer,
+    motivo text,
+    contado_en timestamp with time zone,
+    contado_por uuid,
+    CONSTRAINT inv_conteo_linea_cantidades_validas CHECK (((cantidad_sistema >= 0) AND ((cantidad_contada IS NULL) OR (cantidad_contada >= 0))))
+);
+
+
+--
+-- Name: COLUMN inv_conteo_linea.cantidad_sistema; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.inv_conteo_linea.cantidad_sistema IS 'Lo que el sistema decía al ABRIR la hoja. Congelado a propósito: si se recalculara al cerrar, un movimiento hecho durante el conteo cambiaría la diferencia sin explicación.';
+
+
+--
+-- Name: COLUMN inv_conteo_linea.cantidad_contada; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.inv_conteo_linea.cantidad_contada IS 'Lo contado en bodega. NULL = sin contar todavía; 0 = se contó y no había ninguno. Son cosas distintas.';
+
+
+--
+-- Name: inv_movimiento; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.inv_movimiento (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    empresa_id uuid NOT NULL,
+    articulo_id uuid NOT NULL,
+    unidad_id uuid,
+    tipo text NOT NULL,
+    cantidad integer NOT NULL,
+    sede_id uuid,
+    sede_contra_id uuid,
+    costo_unitario_crc numeric(14,2) DEFAULT 0 NOT NULL,
+    fecha date NOT NULL,
+    servicio_id uuid,
+    proveedor_id uuid,
+    documento_cxp_id uuid,
+    traslado_id uuid,
+    motivo text,
+    creado_en timestamp with time zone DEFAULT now() NOT NULL,
+    creado_por uuid,
+    CONSTRAINT inv_movimiento_cantidad_check CHECK ((cantidad > 0)),
+    CONSTRAINT inv_movimiento_costo_unitario_crc_check CHECK ((costo_unitario_crc >= (0)::numeric)),
+    CONSTRAINT inv_movimiento_tipo_check CHECK ((tipo = ANY (ARRAY['ENTRADA'::text, 'SALIDA'::text, 'TRASLADO_SALIDA'::text, 'TRASLADO_ENTRADA'::text, 'AJUSTE_MAS'::text, 'AJUSTE_MENOS'::text, 'BAJA'::text, 'DEVOLUCION'::text])))
+);
+
+
+--
+-- Name: COLUMN inv_movimiento.cantidad; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.inv_movimiento.cantidad IS 'Siempre positiva. El sentido (suma o resta) lo determina el tipo del movimiento.';
+
+
+--
+-- Name: COLUMN inv_movimiento.proveedor_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.inv_movimiento.proveedor_id IS 'En una ENTRADA, de quién llegó la mercadería. En una SALIDA se llena solo cuando la unidad era consignada, y ahí es el dato operativo que dice a quién hay que pagarle por lo que se usó.';
+
+
+--
+-- Name: COLUMN inv_movimiento.traslado_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.inv_movimiento.traslado_id IS 'Une la salida y la entrada de un mismo traslado. Mientras solo exista la salida, lo trasladado está en tránsito.';
+
+
+--
+-- Name: inv_nivel; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.inv_nivel (
+    empresa_id uuid NOT NULL,
+    articulo_id uuid NOT NULL,
+    sede_id uuid NOT NULL,
+    minimo integer DEFAULT 0 NOT NULL,
+    maximo integer DEFAULT 0 NOT NULL,
+    actualizado_en timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT inv_nivel_maximo_check CHECK ((maximo >= 0)),
+    CONSTRAINT inv_nivel_maximo_coherente CHECK (((maximo = 0) OR (maximo >= minimo))),
+    CONSTRAINT inv_nivel_minimo_check CHECK ((minimo >= 0))
+);
+
+
+--
+-- Name: inv_servicio; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.inv_servicio (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    empresa_id uuid NOT NULL,
+    numero text NOT NULL,
+    sede_id uuid,
+    fecha date NOT NULL,
+    a_nombre_de text DEFAULT ''::text NOT NULL,
+    contrato_id uuid,
+    nota text,
+    creado_en timestamp with time zone DEFAULT now() NOT NULL,
+    creado_por uuid
+);
+
+
+--
+-- Name: inv_traslado; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.inv_traslado (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    empresa_id uuid NOT NULL,
+    numero text NOT NULL,
+    sede_origen_id uuid NOT NULL,
+    sede_destino_id uuid NOT NULL,
+    estado text DEFAULT 'EN_TRANSITO'::text NOT NULL,
+    enviado_en date NOT NULL,
+    recibido_en date,
+    enviado_por uuid,
+    recibido_por uuid,
+    nota text,
+    creado_en timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT inv_traslado_estado_check CHECK ((estado = ANY (ARRAY['EN_TRANSITO'::text, 'RECIBIDO'::text, 'CANCELADO'::text]))),
+    CONSTRAINT inv_traslado_recibido_coherente CHECK (((estado = 'RECIBIDO'::text) = (recibido_en IS NOT NULL))),
+    CONSTRAINT inv_traslado_sedes_distintas CHECK ((sede_origen_id <> sede_destino_id))
+);
+
+
+--
+-- Name: inv_unidad; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.inv_unidad (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    empresa_id uuid NOT NULL,
+    articulo_id uuid NOT NULL,
+    numero text NOT NULL,
+    sede_id uuid,
+    sede_destino_id uuid,
+    estado text DEFAULT 'DISPONIBLE'::text NOT NULL,
+    costo_crc numeric(14,2) DEFAULT 0 NOT NULL,
+    es_consignada boolean DEFAULT false NOT NULL,
+    proveedor_id uuid,
+    documento_cxp_id uuid,
+    ingresada_en date NOT NULL,
+    creado_en timestamp with time zone DEFAULT now() NOT NULL,
+    actualizado_en timestamp with time zone DEFAULT now() NOT NULL,
+    cxp_consignacion_id uuid,
+    CONSTRAINT inv_unidad_costo_crc_check CHECK ((costo_crc >= (0)::numeric)),
+    CONSTRAINT inv_unidad_estado_check CHECK ((estado = ANY (ARRAY['DISPONIBLE'::text, 'RESERVADA'::text, 'EN_TRANSITO'::text, 'EXHIBICION'::text, 'USADA'::text, 'DANADA'::text, 'DEVUELTA'::text, 'NO_APARECIO'::text])))
+);
+
+
+--
+-- Name: COLUMN inv_unidad.sede_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.inv_unidad.sede_id IS 'Dónde está la unidad. NULL solo mientras el estado es EN_TRANSITO: salió del origen y todavía nadie la recibió en el destino.';
+
+
+--
+-- Name: COLUMN inv_unidad.estado; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.inv_unidad.estado IS 'DISPONIBLE se puede vender · RESERVADA apartada para un servicio · EN_TRANSITO va entre sedes · EXHIBICION en sala · USADA salió en un servicio · DANADA se dañó · DEVUELTA volvió al proveedor · NO_APARECIO el conteo no la encontró (el motivo está en el movimiento de baja).';
+
+
+--
+-- Name: COLUMN inv_unidad.es_consignada; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.inv_unidad.es_consignada IS 'La unidad está en la bodega pero el capital es del proveedor: se le paga cuando se usa. Solo aplica a artículos de modo UNIDAD, porque los de cantidad no crean fichas y no habría dónde guardar de quién es cada objeto. Si es true, proveedor_id es obligatorio.';
+
+
+--
+-- Name: COLUMN inv_unidad.cxp_consignacion_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.inv_unidad.cxp_consignacion_id IS 'Cuenta por pagar generada al usar esta unidad consignada. NULL = todavía no se le facturó al proveedor. El estado «pendiente de pago» se DERIVA de esta columna, no se guarda aparte.';
+
+
+--
 -- Name: lote_pago; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1158,8 +1468,48 @@ CREATE TABLE public.movimiento_bancario (
     creado_en timestamp with time zone DEFAULT now() NOT NULL,
     actualizado_en timestamp with time zone DEFAULT now() NOT NULL,
     documento_cxp_id uuid,
+    departamento_id uuid,
+    sede_id uuid,
     CONSTRAINT movimiento_bancario_estado_clasificacion_check CHECK ((estado_clasificacion = ANY (ARRAY['NO_IDENTIFICADO'::text, 'AUTO'::text, 'REVISADO'::text]))),
     CONSTRAINT movimiento_bancario_moneda_original_check CHECK ((moneda_original = ANY (ARRAY['CRC'::text, 'USD'::text])))
+);
+
+
+--
+-- Name: COLUMN movimiento_bancario.departamento_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.movimiento_bancario.departamento_id IS 'EXCEPCIÓN: departamento de este movimiento en particular, cuando no es el de su partida. NULL = se usa el de la factura de CxP enlazada o el de la partida (ver sqlDepartamentoEfectivo).';
+
+
+--
+-- Name: COLUMN movimiento_bancario.sede_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.movimiento_bancario.sede_id IS 'Excepción de sede para este movimiento. Mismo criterio que departamento_id.';
+
+
+--
+-- Name: movimiento_reporte_segmentacion; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.movimiento_reporte_segmentacion (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    empresa_id uuid NOT NULL,
+    movimiento_id uuid,
+    usuario_id uuid NOT NULL,
+    motivo text NOT NULL,
+    creado_en timestamp with time zone DEFAULT now() NOT NULL,
+    resuelto_en timestamp with time zone,
+    resuelto_por uuid,
+    resolucion text,
+    respuesta text,
+    fecha_esperada date,
+    monto_esperado numeric(16,2),
+    referencia text,
+    CONSTRAINT movimiento_reporte_segmentacion_resolucion_check CHECK ((resolucion = ANY (ARRAY['RECLASIFICADO'::text, 'SIN_CAMBIO'::text]))),
+    CONSTRAINT reporte_resolucion_completa CHECK ((((resuelto_en IS NULL) AND (resuelto_por IS NULL) AND (resolucion IS NULL)) OR ((resuelto_en IS NOT NULL) AND (resuelto_por IS NOT NULL) AND (resolucion IS NOT NULL)))),
+    CONSTRAINT reporte_tiene_de_que_habla CHECK (((movimiento_id IS NOT NULL) OR ((fecha_esperada IS NOT NULL) AND (monto_esperado IS NOT NULL) AND (monto_esperado > (0)::numeric))))
 );
 
 
@@ -1345,6 +1695,47 @@ CREATE TABLE public.plantilla_correo (
 
 
 --
+-- Name: presupuesto_departamento; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.presupuesto_departamento (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    empresa_id uuid NOT NULL,
+    departamento_id uuid NOT NULL,
+    periodo text NOT NULL,
+    monto_crc numeric(16,2) NOT NULL,
+    nota text,
+    creado_en timestamp with time zone DEFAULT now() NOT NULL,
+    actualizado_en timestamp with time zone DEFAULT now() NOT NULL,
+    creado_por uuid,
+    clasificacion_id uuid,
+    CONSTRAINT presupuesto_departamento_monto_crc_check CHECK ((monto_crc >= (0)::numeric)),
+    CONSTRAINT presupuesto_departamento_periodo_check CHECK ((periodo ~ '^\d{4}-\d{2}$'::text))
+);
+
+
+--
+-- Name: TABLE presupuesto_departamento; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.presupuesto_departamento IS 'Monto autorizado por departamento y mes. Se compara contra el gasto real derivado de los movimientos; el presupuesto NO se descuenta ni se consume, se compara.';
+
+
+--
+-- Name: COLUMN presupuesto_departamento.monto_crc; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.presupuesto_departamento.monto_crc IS 'Monto del mes en colones. CHECK >= 0: un presupuesto negativo no significa nada y sería un error de captura.';
+
+
+--
+-- Name: COLUMN presupuesto_departamento.clasificacion_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.presupuesto_departamento.clasificacion_id IS 'NULL = el presupuesto TOTAL del departamento en ese mes. Con valor = el subpresupuesto de esa partida dentro del departamento.';
+
+
+--
 -- Name: promesa_pago_cxc; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1469,6 +1860,25 @@ CREATE TABLE public.rol (
 
 
 --
+-- Name: COLUMN rol.codigo; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.rol.codigo IS 'Único entre los roles base (empresa_id NULL) y único dentro de cada empresa para los roles a medida. Dos empresas pueden tener un rol con el mismo código, cada una con sus propios permisos en rol_permiso.';
+
+
+--
+-- Name: rol_clasificacion_consulta; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.rol_clasificacion_consulta (
+    empresa_id uuid NOT NULL,
+    rol_id uuid NOT NULL,
+    clasificacion_id uuid NOT NULL,
+    creado_en timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: rol_permiso; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1507,6 +1917,29 @@ CREATE TABLE public.schema_migrations (
     version bigint NOT NULL,
     dirty boolean NOT NULL
 );
+
+
+--
+-- Name: sede; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sede (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    empresa_id uuid NOT NULL,
+    nombre text NOT NULL,
+    codigo text,
+    activo boolean DEFAULT true NOT NULL,
+    orden integer DEFAULT 0 NOT NULL,
+    creado_en timestamp with time zone DEFAULT now() NOT NULL,
+    actualizado_en timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE sede; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.sede IS 'Lugar físico del negocio (sucursal, camposanto, plaza). Dimensión del gasto, independiente del departamento: el departamento dice QUIÉN gastó y la sede DÓNDE.';
 
 
 --
@@ -2234,6 +2667,134 @@ ALTER TABLE ONLY public.incapacidad
 
 
 --
+-- Name: inv_articulo inv_articulo_empresa_id_codigo_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_articulo
+    ADD CONSTRAINT inv_articulo_empresa_id_codigo_key UNIQUE (empresa_id, codigo);
+
+
+--
+-- Name: inv_articulo inv_articulo_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_articulo
+    ADD CONSTRAINT inv_articulo_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: inv_categoria inv_categoria_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_categoria
+    ADD CONSTRAINT inv_categoria_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: inv_consecutivo inv_consecutivo_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_consecutivo
+    ADD CONSTRAINT inv_consecutivo_pkey PRIMARY KEY (empresa_id, ambito);
+
+
+--
+-- Name: inv_conteo inv_conteo_empresa_id_numero_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_conteo
+    ADD CONSTRAINT inv_conteo_empresa_id_numero_key UNIQUE (empresa_id, numero);
+
+
+--
+-- Name: inv_conteo_linea inv_conteo_linea_empresa_id_conteo_id_articulo_id_unidad_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_conteo_linea
+    ADD CONSTRAINT inv_conteo_linea_empresa_id_conteo_id_articulo_id_unidad_id_key UNIQUE (empresa_id, conteo_id, articulo_id, unidad_id);
+
+
+--
+-- Name: inv_conteo_linea inv_conteo_linea_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_conteo_linea
+    ADD CONSTRAINT inv_conteo_linea_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: inv_conteo inv_conteo_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_conteo
+    ADD CONSTRAINT inv_conteo_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: inv_movimiento inv_movimiento_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_movimiento
+    ADD CONSTRAINT inv_movimiento_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: inv_nivel inv_nivel_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_nivel
+    ADD CONSTRAINT inv_nivel_pkey PRIMARY KEY (empresa_id, articulo_id, sede_id);
+
+
+--
+-- Name: inv_servicio inv_servicio_empresa_id_numero_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_servicio
+    ADD CONSTRAINT inv_servicio_empresa_id_numero_key UNIQUE (empresa_id, numero);
+
+
+--
+-- Name: inv_servicio inv_servicio_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_servicio
+    ADD CONSTRAINT inv_servicio_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: inv_traslado inv_traslado_empresa_id_numero_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_traslado
+    ADD CONSTRAINT inv_traslado_empresa_id_numero_key UNIQUE (empresa_id, numero);
+
+
+--
+-- Name: inv_traslado inv_traslado_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_traslado
+    ADD CONSTRAINT inv_traslado_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: inv_unidad inv_unidad_empresa_id_numero_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_unidad
+    ADD CONSTRAINT inv_unidad_empresa_id_numero_key UNIQUE (empresa_id, numero);
+
+
+--
+-- Name: inv_unidad inv_unidad_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_unidad
+    ADD CONSTRAINT inv_unidad_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: lote_pago lote_pago_empresa_id_numero_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2263,6 +2824,14 @@ ALTER TABLE ONLY public.movimiento_bancario
 
 ALTER TABLE ONLY public.movimiento_bancario
     ADD CONSTRAINT movimiento_bancario_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: movimiento_reporte_segmentacion movimiento_reporte_segmentacion_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.movimiento_reporte_segmentacion
+    ADD CONSTRAINT movimiento_reporte_segmentacion_pkey PRIMARY KEY (id);
 
 
 --
@@ -2394,6 +2963,14 @@ ALTER TABLE ONLY public.plantilla_correo
 
 
 --
+-- Name: presupuesto_departamento presupuesto_departamento_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.presupuesto_departamento
+    ADD CONSTRAINT presupuesto_departamento_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: promesa_pago_cxc promesa_pago_cxc_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2450,11 +3027,11 @@ ALTER TABLE ONLY public.regla_clasificacion
 
 
 --
--- Name: rol rol_codigo_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: rol_clasificacion_consulta rol_clasificacion_consulta_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.rol
-    ADD CONSTRAINT rol_codigo_key UNIQUE (codigo);
+ALTER TABLE ONLY public.rol_clasificacion_consulta
+    ADD CONSTRAINT rol_clasificacion_consulta_pkey PRIMARY KEY (empresa_id, rol_id, clasificacion_id);
 
 
 --
@@ -2495,6 +3072,22 @@ ALTER TABLE ONLY public.saldo_cuenta_diario
 
 ALTER TABLE ONLY public.schema_migrations
     ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (version);
+
+
+--
+-- Name: sede sede_empresa_id_nombre_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sede
+    ADD CONSTRAINT sede_empresa_id_nombre_key UNIQUE (empresa_id, nombre);
+
+
+--
+-- Name: sede sede_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sede
+    ADD CONSTRAINT sede_pkey PRIMARY KEY (id);
 
 
 --
@@ -2997,6 +3590,13 @@ CREATE INDEX idx_departamento_empresa ON public.departamento USING btree (empres
 
 
 --
+-- Name: idx_documento_cxp_bloqueado; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_documento_cxp_bloqueado ON public.documento_cxp USING btree (empresa_id, proveedor_id) WHERE bloqueado_para_pago;
+
+
+--
 -- Name: idx_documento_departamento; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3130,6 +3730,104 @@ CREATE INDEX idx_incapacidad_fecha ON public.incapacidad USING btree (empresa_id
 
 
 --
+-- Name: idx_inv_articulo_categoria; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inv_articulo_categoria ON public.inv_articulo USING btree (empresa_id, categoria_id);
+
+
+--
+-- Name: idx_inv_articulo_empresa; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inv_articulo_empresa ON public.inv_articulo USING btree (empresa_id, activo);
+
+
+--
+-- Name: idx_inv_categoria_empresa; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inv_categoria_empresa ON public.inv_categoria USING btree (empresa_id, activo);
+
+
+--
+-- Name: idx_inv_conteo_linea; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inv_conteo_linea ON public.inv_conteo_linea USING btree (empresa_id, conteo_id);
+
+
+--
+-- Name: idx_inv_conteo_sede; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inv_conteo_sede ON public.inv_conteo USING btree (empresa_id, sede_id, abierto_en DESC);
+
+
+--
+-- Name: idx_inv_mov_articulo; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inv_mov_articulo ON public.inv_movimiento USING btree (empresa_id, articulo_id, fecha);
+
+
+--
+-- Name: idx_inv_mov_sede; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inv_mov_sede ON public.inv_movimiento USING btree (empresa_id, sede_id, fecha);
+
+
+--
+-- Name: idx_inv_mov_servicio; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inv_mov_servicio ON public.inv_movimiento USING btree (empresa_id, servicio_id) WHERE (servicio_id IS NOT NULL);
+
+
+--
+-- Name: idx_inv_mov_traslado; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inv_mov_traslado ON public.inv_movimiento USING btree (empresa_id, traslado_id) WHERE (traslado_id IS NOT NULL);
+
+
+--
+-- Name: idx_inv_servicio_fecha; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inv_servicio_fecha ON public.inv_servicio USING btree (empresa_id, fecha DESC);
+
+
+--
+-- Name: idx_inv_traslado_estado; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inv_traslado_estado ON public.inv_traslado USING btree (empresa_id, estado, enviado_en);
+
+
+--
+-- Name: idx_inv_unidad_articulo; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inv_unidad_articulo ON public.inv_unidad USING btree (empresa_id, articulo_id, estado);
+
+
+--
+-- Name: idx_inv_unidad_consignada; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inv_unidad_consignada ON public.inv_unidad USING btree (empresa_id, estado, proveedor_id) WHERE es_consignada;
+
+
+--
+-- Name: idx_inv_unidad_ubicacion; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inv_unidad_ubicacion ON public.inv_unidad USING btree (empresa_id, sede_id, estado);
+
+
+--
 -- Name: idx_lote_empresa; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3141,6 +3839,13 @@ CREATE INDEX idx_lote_empresa ON public.lote_pago USING btree (empresa_id, cread
 --
 
 CREATE INDEX idx_mov_cuenta ON public.movimiento_bancario USING btree (cuenta_bancaria_id);
+
+
+--
+-- Name: idx_mov_departamento; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_mov_departamento ON public.movimiento_bancario USING btree (empresa_id, departamento_id) WHERE (departamento_id IS NOT NULL);
 
 
 --
@@ -3176,6 +3881,13 @@ CREATE INDEX idx_mov_huella_pendiente ON public.movimiento_bancario USING btree 
 --
 
 CREATE INDEX idx_mov_importacion ON public.movimiento_bancario USING btree (importacion_id);
+
+
+--
+-- Name: idx_mov_sede; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_mov_sede ON public.movimiento_bancario USING btree (empresa_id, sede_id) WHERE (sede_id IS NOT NULL);
 
 
 --
@@ -3235,6 +3947,20 @@ CREATE INDEX idx_planilla_mov_empresa ON public.cxc_planilla_movimiento USING bt
 
 
 --
+-- Name: idx_presupuesto_clasificacion; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_presupuesto_clasificacion ON public.presupuesto_departamento USING btree (empresa_id, clasificacion_id) WHERE (clasificacion_id IS NOT NULL);
+
+
+--
+-- Name: idx_presupuesto_empresa_periodo; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_presupuesto_empresa_periodo ON public.presupuesto_departamento USING btree (empresa_id, periodo);
+
+
+--
 -- Name: idx_promesa_cxc_contrato; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3270,10 +3996,31 @@ CREATE INDEX idx_proyeccion_empresa_periodo ON public.proyeccion_escenario USING
 
 
 --
+-- Name: idx_rcc_clasificacion; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_rcc_clasificacion ON public.rol_clasificacion_consulta USING btree (empresa_id, clasificacion_id);
+
+
+--
+-- Name: idx_rcc_rol; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_rcc_rol ON public.rol_clasificacion_consulta USING btree (empresa_id, rol_id);
+
+
+--
 -- Name: idx_regla_empresa; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_regla_empresa ON public.regla_clasificacion USING btree (empresa_id);
+
+
+--
+-- Name: idx_reporte_seg_empresa; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_reporte_seg_empresa ON public.movimiento_reporte_segmentacion USING btree (empresa_id, creado_en DESC);
 
 
 --
@@ -3295,6 +4042,13 @@ CREATE INDEX idx_saldo_diario_cuenta ON public.saldo_cuenta_diario USING btree (
 --
 
 CREATE INDEX idx_saldo_diario_fecha ON public.saldo_cuenta_diario USING btree (empresa_id, fecha);
+
+
+--
+-- Name: idx_sede_empresa; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_sede_empresa ON public.sede USING btree (empresa_id);
 
 
 --
@@ -3358,6 +4112,83 @@ CREATE UNIQUE INDEX uniq_corrida_viva ON public.corrida_nomina USING btree (empr
 --
 
 CREATE UNIQUE INDEX uniq_finiquito_vivo ON public.finiquito USING btree (empresa_id, empleado_id) WHERE (estado <> 'ANULADO'::text);
+
+
+--
+-- Name: uq_faltante_abierto_por_usuario; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_faltante_abierto_por_usuario ON public.movimiento_reporte_segmentacion USING btree (usuario_id, fecha_esperada, monto_esperado) WHERE ((resuelto_en IS NULL) AND (movimiento_id IS NULL));
+
+
+--
+-- Name: uq_inv_categoria_hija; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_inv_categoria_hija ON public.inv_categoria USING btree (empresa_id, padre_id, nombre) WHERE (padre_id IS NOT NULL);
+
+
+--
+-- Name: uq_inv_categoria_raiz; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_inv_categoria_raiz ON public.inv_categoria USING btree (empresa_id, nombre) WHERE (padre_id IS NULL);
+
+
+--
+-- Name: uq_inv_conteo_abierto_por_sede; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_inv_conteo_abierto_por_sede ON public.inv_conteo USING btree (empresa_id, sede_id) WHERE (estado = 'ABIERTO'::text);
+
+
+--
+-- Name: uq_inv_conteo_linea_articulo; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_inv_conteo_linea_articulo ON public.inv_conteo_linea USING btree (empresa_id, conteo_id, articulo_id) WHERE (unidad_id IS NULL);
+
+
+--
+-- Name: uq_inv_unidad_cxp_consignacion; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_inv_unidad_cxp_consignacion ON public.inv_unidad USING btree (cxp_consignacion_id) WHERE (cxp_consignacion_id IS NOT NULL);
+
+
+--
+-- Name: uq_presupuesto_partida; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_presupuesto_partida ON public.presupuesto_departamento USING btree (empresa_id, departamento_id, periodo, clasificacion_id) WHERE (clasificacion_id IS NOT NULL);
+
+
+--
+-- Name: uq_presupuesto_total; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_presupuesto_total ON public.presupuesto_departamento USING btree (empresa_id, departamento_id, periodo) WHERE (clasificacion_id IS NULL);
+
+
+--
+-- Name: uq_reporte_abierto_por_movimiento; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_reporte_abierto_por_movimiento ON public.movimiento_reporte_segmentacion USING btree (movimiento_id) WHERE (resuelto_en IS NULL);
+
+
+--
+-- Name: uq_rol_codigo_base; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_rol_codigo_base ON public.rol USING btree (codigo) WHERE (empresa_id IS NULL);
+
+
+--
+-- Name: uq_rol_codigo_empresa; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_rol_codigo_empresa ON public.rol USING btree (empresa_id, codigo) WHERE (empresa_id IS NOT NULL);
 
 
 --
@@ -3664,11 +4495,27 @@ ALTER TABLE ONLY public.clasificacion
 
 
 --
+-- Name: clasificacion clasificacion_departamento_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.clasificacion
+    ADD CONSTRAINT clasificacion_departamento_id_fkey FOREIGN KEY (departamento_id) REFERENCES public.departamento(id);
+
+
+--
 -- Name: clasificacion clasificacion_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.clasificacion
     ADD CONSTRAINT clasificacion_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
+
+
+--
+-- Name: clasificacion clasificacion_sede_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.clasificacion
+    ADD CONSTRAINT clasificacion_sede_id_fkey FOREIGN KEY (sede_id) REFERENCES public.sede(id);
 
 
 --
@@ -4392,6 +5239,366 @@ ALTER TABLE ONLY public.incapacidad
 
 
 --
+-- Name: inv_articulo inv_articulo_categoria_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_articulo
+    ADD CONSTRAINT inv_articulo_categoria_id_fkey FOREIGN KEY (categoria_id) REFERENCES public.inv_categoria(id);
+
+
+--
+-- Name: inv_articulo inv_articulo_creado_por_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_articulo
+    ADD CONSTRAINT inv_articulo_creado_por_fkey FOREIGN KEY (creado_por) REFERENCES public.usuario(id);
+
+
+--
+-- Name: inv_articulo inv_articulo_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_articulo
+    ADD CONSTRAINT inv_articulo_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
+
+
+--
+-- Name: inv_articulo inv_articulo_proveedor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_articulo
+    ADD CONSTRAINT inv_articulo_proveedor_id_fkey FOREIGN KEY (proveedor_id) REFERENCES public.proveedor(id);
+
+
+--
+-- Name: inv_categoria inv_categoria_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_categoria
+    ADD CONSTRAINT inv_categoria_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
+
+
+--
+-- Name: inv_categoria inv_categoria_padre_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_categoria
+    ADD CONSTRAINT inv_categoria_padre_id_fkey FOREIGN KEY (padre_id) REFERENCES public.inv_categoria(id);
+
+
+--
+-- Name: inv_consecutivo inv_consecutivo_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_consecutivo
+    ADD CONSTRAINT inv_consecutivo_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
+
+
+--
+-- Name: inv_conteo inv_conteo_abierto_por_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_conteo
+    ADD CONSTRAINT inv_conteo_abierto_por_fkey FOREIGN KEY (abierto_por) REFERENCES public.usuario(id);
+
+
+--
+-- Name: inv_conteo inv_conteo_categoria_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_conteo
+    ADD CONSTRAINT inv_conteo_categoria_id_fkey FOREIGN KEY (categoria_id) REFERENCES public.inv_categoria(id);
+
+
+--
+-- Name: inv_conteo inv_conteo_cerrado_por_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_conteo
+    ADD CONSTRAINT inv_conteo_cerrado_por_fkey FOREIGN KEY (cerrado_por) REFERENCES public.usuario(id);
+
+
+--
+-- Name: inv_conteo inv_conteo_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_conteo
+    ADD CONSTRAINT inv_conteo_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
+
+
+--
+-- Name: inv_conteo_linea inv_conteo_linea_articulo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_conteo_linea
+    ADD CONSTRAINT inv_conteo_linea_articulo_id_fkey FOREIGN KEY (articulo_id) REFERENCES public.inv_articulo(id);
+
+
+--
+-- Name: inv_conteo_linea inv_conteo_linea_contado_por_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_conteo_linea
+    ADD CONSTRAINT inv_conteo_linea_contado_por_fkey FOREIGN KEY (contado_por) REFERENCES public.usuario(id);
+
+
+--
+-- Name: inv_conteo_linea inv_conteo_linea_conteo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_conteo_linea
+    ADD CONSTRAINT inv_conteo_linea_conteo_id_fkey FOREIGN KEY (conteo_id) REFERENCES public.inv_conteo(id) ON DELETE CASCADE;
+
+
+--
+-- Name: inv_conteo_linea inv_conteo_linea_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_conteo_linea
+    ADD CONSTRAINT inv_conteo_linea_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
+
+
+--
+-- Name: inv_conteo_linea inv_conteo_linea_unidad_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_conteo_linea
+    ADD CONSTRAINT inv_conteo_linea_unidad_id_fkey FOREIGN KEY (unidad_id) REFERENCES public.inv_unidad(id);
+
+
+--
+-- Name: inv_conteo inv_conteo_sede_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_conteo
+    ADD CONSTRAINT inv_conteo_sede_id_fkey FOREIGN KEY (sede_id) REFERENCES public.sede(id);
+
+
+--
+-- Name: inv_movimiento inv_movimiento_articulo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_movimiento
+    ADD CONSTRAINT inv_movimiento_articulo_id_fkey FOREIGN KEY (articulo_id) REFERENCES public.inv_articulo(id);
+
+
+--
+-- Name: inv_movimiento inv_movimiento_creado_por_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_movimiento
+    ADD CONSTRAINT inv_movimiento_creado_por_fkey FOREIGN KEY (creado_por) REFERENCES public.usuario(id);
+
+
+--
+-- Name: inv_movimiento inv_movimiento_documento_cxp_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_movimiento
+    ADD CONSTRAINT inv_movimiento_documento_cxp_id_fkey FOREIGN KEY (documento_cxp_id) REFERENCES public.documento_cxp(id);
+
+
+--
+-- Name: inv_movimiento inv_movimiento_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_movimiento
+    ADD CONSTRAINT inv_movimiento_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
+
+
+--
+-- Name: inv_movimiento inv_movimiento_proveedor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_movimiento
+    ADD CONSTRAINT inv_movimiento_proveedor_id_fkey FOREIGN KEY (proveedor_id) REFERENCES public.proveedor(id);
+
+
+--
+-- Name: inv_movimiento inv_movimiento_sede_contra_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_movimiento
+    ADD CONSTRAINT inv_movimiento_sede_contra_id_fkey FOREIGN KEY (sede_contra_id) REFERENCES public.sede(id);
+
+
+--
+-- Name: inv_movimiento inv_movimiento_sede_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_movimiento
+    ADD CONSTRAINT inv_movimiento_sede_id_fkey FOREIGN KEY (sede_id) REFERENCES public.sede(id);
+
+
+--
+-- Name: inv_movimiento inv_movimiento_servicio_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_movimiento
+    ADD CONSTRAINT inv_movimiento_servicio_id_fkey FOREIGN KEY (servicio_id) REFERENCES public.inv_servicio(id);
+
+
+--
+-- Name: inv_movimiento inv_movimiento_unidad_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_movimiento
+    ADD CONSTRAINT inv_movimiento_unidad_id_fkey FOREIGN KEY (unidad_id) REFERENCES public.inv_unidad(id);
+
+
+--
+-- Name: inv_nivel inv_nivel_articulo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_nivel
+    ADD CONSTRAINT inv_nivel_articulo_id_fkey FOREIGN KEY (articulo_id) REFERENCES public.inv_articulo(id) ON DELETE CASCADE;
+
+
+--
+-- Name: inv_nivel inv_nivel_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_nivel
+    ADD CONSTRAINT inv_nivel_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
+
+
+--
+-- Name: inv_nivel inv_nivel_sede_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_nivel
+    ADD CONSTRAINT inv_nivel_sede_id_fkey FOREIGN KEY (sede_id) REFERENCES public.sede(id) ON DELETE CASCADE;
+
+
+--
+-- Name: inv_servicio inv_servicio_contrato_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_servicio
+    ADD CONSTRAINT inv_servicio_contrato_id_fkey FOREIGN KEY (contrato_id) REFERENCES public.contrato_cxc(id);
+
+
+--
+-- Name: inv_servicio inv_servicio_creado_por_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_servicio
+    ADD CONSTRAINT inv_servicio_creado_por_fkey FOREIGN KEY (creado_por) REFERENCES public.usuario(id);
+
+
+--
+-- Name: inv_servicio inv_servicio_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_servicio
+    ADD CONSTRAINT inv_servicio_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
+
+
+--
+-- Name: inv_servicio inv_servicio_sede_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_servicio
+    ADD CONSTRAINT inv_servicio_sede_id_fkey FOREIGN KEY (sede_id) REFERENCES public.sede(id);
+
+
+--
+-- Name: inv_traslado inv_traslado_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_traslado
+    ADD CONSTRAINT inv_traslado_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
+
+
+--
+-- Name: inv_traslado inv_traslado_enviado_por_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_traslado
+    ADD CONSTRAINT inv_traslado_enviado_por_fkey FOREIGN KEY (enviado_por) REFERENCES public.usuario(id);
+
+
+--
+-- Name: inv_traslado inv_traslado_recibido_por_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_traslado
+    ADD CONSTRAINT inv_traslado_recibido_por_fkey FOREIGN KEY (recibido_por) REFERENCES public.usuario(id);
+
+
+--
+-- Name: inv_traslado inv_traslado_sede_destino_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_traslado
+    ADD CONSTRAINT inv_traslado_sede_destino_id_fkey FOREIGN KEY (sede_destino_id) REFERENCES public.sede(id);
+
+
+--
+-- Name: inv_traslado inv_traslado_sede_origen_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_traslado
+    ADD CONSTRAINT inv_traslado_sede_origen_id_fkey FOREIGN KEY (sede_origen_id) REFERENCES public.sede(id);
+
+
+--
+-- Name: inv_unidad inv_unidad_articulo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_unidad
+    ADD CONSTRAINT inv_unidad_articulo_id_fkey FOREIGN KEY (articulo_id) REFERENCES public.inv_articulo(id);
+
+
+--
+-- Name: inv_unidad inv_unidad_cxp_consignacion_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_unidad
+    ADD CONSTRAINT inv_unidad_cxp_consignacion_id_fkey FOREIGN KEY (cxp_consignacion_id) REFERENCES public.documento_cxp(id);
+
+
+--
+-- Name: inv_unidad inv_unidad_documento_cxp_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_unidad
+    ADD CONSTRAINT inv_unidad_documento_cxp_id_fkey FOREIGN KEY (documento_cxp_id) REFERENCES public.documento_cxp(id);
+
+
+--
+-- Name: inv_unidad inv_unidad_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_unidad
+    ADD CONSTRAINT inv_unidad_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
+
+
+--
+-- Name: inv_unidad inv_unidad_proveedor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_unidad
+    ADD CONSTRAINT inv_unidad_proveedor_id_fkey FOREIGN KEY (proveedor_id) REFERENCES public.proveedor(id);
+
+
+--
+-- Name: inv_unidad inv_unidad_sede_destino_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_unidad
+    ADD CONSTRAINT inv_unidad_sede_destino_id_fkey FOREIGN KEY (sede_destino_id) REFERENCES public.sede(id);
+
+
+--
+-- Name: inv_unidad inv_unidad_sede_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inv_unidad
+    ADD CONSTRAINT inv_unidad_sede_id_fkey FOREIGN KEY (sede_id) REFERENCES public.sede(id);
+
+
+--
 -- Name: lote_pago lote_pago_creado_por_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4432,6 +5639,14 @@ ALTER TABLE ONLY public.movimiento_bancario
 
 
 --
+-- Name: movimiento_bancario movimiento_bancario_departamento_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.movimiento_bancario
+    ADD CONSTRAINT movimiento_bancario_departamento_id_fkey FOREIGN KEY (departamento_id) REFERENCES public.departamento(id);
+
+
+--
 -- Name: movimiento_bancario movimiento_bancario_documento_cxp_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4461,6 +5676,46 @@ ALTER TABLE ONLY public.movimiento_bancario
 
 ALTER TABLE ONLY public.movimiento_bancario
     ADD CONSTRAINT movimiento_bancario_par_traslado_id_fkey FOREIGN KEY (par_traslado_id) REFERENCES public.movimiento_bancario(id);
+
+
+--
+-- Name: movimiento_bancario movimiento_bancario_sede_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.movimiento_bancario
+    ADD CONSTRAINT movimiento_bancario_sede_id_fkey FOREIGN KEY (sede_id) REFERENCES public.sede(id);
+
+
+--
+-- Name: movimiento_reporte_segmentacion movimiento_reporte_segmentacion_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.movimiento_reporte_segmentacion
+    ADD CONSTRAINT movimiento_reporte_segmentacion_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
+
+
+--
+-- Name: movimiento_reporte_segmentacion movimiento_reporte_segmentacion_movimiento_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.movimiento_reporte_segmentacion
+    ADD CONSTRAINT movimiento_reporte_segmentacion_movimiento_id_fkey FOREIGN KEY (movimiento_id) REFERENCES public.movimiento_bancario(id);
+
+
+--
+-- Name: movimiento_reporte_segmentacion movimiento_reporte_segmentacion_resuelto_por_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.movimiento_reporte_segmentacion
+    ADD CONSTRAINT movimiento_reporte_segmentacion_resuelto_por_fkey FOREIGN KEY (resuelto_por) REFERENCES public.usuario(id);
+
+
+--
+-- Name: movimiento_reporte_segmentacion movimiento_reporte_segmentacion_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.movimiento_reporte_segmentacion
+    ADD CONSTRAINT movimiento_reporte_segmentacion_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuario(id);
 
 
 --
@@ -4624,6 +5879,38 @@ ALTER TABLE ONLY public.plantilla_correo
 
 
 --
+-- Name: presupuesto_departamento presupuesto_departamento_clasificacion_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.presupuesto_departamento
+    ADD CONSTRAINT presupuesto_departamento_clasificacion_id_fkey FOREIGN KEY (clasificacion_id) REFERENCES public.clasificacion(id);
+
+
+--
+-- Name: presupuesto_departamento presupuesto_departamento_creado_por_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.presupuesto_departamento
+    ADD CONSTRAINT presupuesto_departamento_creado_por_fkey FOREIGN KEY (creado_por) REFERENCES public.usuario(id);
+
+
+--
+-- Name: presupuesto_departamento presupuesto_departamento_departamento_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.presupuesto_departamento
+    ADD CONSTRAINT presupuesto_departamento_departamento_id_fkey FOREIGN KEY (departamento_id) REFERENCES public.departamento(id);
+
+
+--
+-- Name: presupuesto_departamento presupuesto_departamento_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.presupuesto_departamento
+    ADD CONSTRAINT presupuesto_departamento_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
+
+
+--
 -- Name: promesa_pago_cxc promesa_pago_cxc_contrato_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4752,6 +6039,30 @@ ALTER TABLE ONLY public.regla_clasificacion
 
 
 --
+-- Name: rol_clasificacion_consulta rol_clasificacion_consulta_clasificacion_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.rol_clasificacion_consulta
+    ADD CONSTRAINT rol_clasificacion_consulta_clasificacion_id_fkey FOREIGN KEY (clasificacion_id) REFERENCES public.clasificacion(id) ON DELETE CASCADE;
+
+
+--
+-- Name: rol_clasificacion_consulta rol_clasificacion_consulta_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.rol_clasificacion_consulta
+    ADD CONSTRAINT rol_clasificacion_consulta_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
+
+
+--
+-- Name: rol_clasificacion_consulta rol_clasificacion_consulta_rol_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.rol_clasificacion_consulta
+    ADD CONSTRAINT rol_clasificacion_consulta_rol_id_fkey FOREIGN KEY (rol_id) REFERENCES public.rol(id) ON DELETE CASCADE;
+
+
+--
 -- Name: rol rol_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4813,6 +6124,14 @@ ALTER TABLE ONLY public.saldo_cuenta_diario
 
 ALTER TABLE ONLY public.saldo_cuenta_diario
     ADD CONSTRAINT saldo_cuenta_diario_revisado_por_fkey FOREIGN KEY (revisado_por) REFERENCES public.usuario(id);
+
+
+--
+-- Name: sede sede_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sede
+    ADD CONSTRAINT sede_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
 
 
 --
@@ -4899,5 +6218,14 @@ ALTER TABLE ONLY public.vacacion
 -- PostgreSQL database dump complete
 --
 
-\unrestrict XeXZotFf7DC7oWQGqvydDNY2euUWx8DsUWDlUgitEzeh9oepTCqsuUidpEnriFq
+\unrestrict 8fnMvGLb2A1DO8ctmFPsNafSTEug2EunQDjSUg7jqXQfucDg5qABealXe1PQmyV
 
+
+--
+-- Versión de las migraciones aplicadas, agregada por deploy/regenerar-entrega.sh.
+--
+-- Sin esta fila, el backend arranca creyendo que la base está sin migrar e intenta aplicar todo
+-- desde la 0001 sobre tablas que ya existen: la primera falla y la base queda «dirty».
+--
+INSERT INTO public.schema_migrations (version, dirty) VALUES (78, false)
+    ON CONFLICT DO NOTHING;

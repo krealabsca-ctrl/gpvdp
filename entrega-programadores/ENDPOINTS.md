@@ -3,7 +3,7 @@
 **Generado automáticamente** desde `backend/internal/server/router.go`. No se edita a mano:
 se regenera cuando cambian las rutas.
 
-Total: **253 rutas**. Prefijo de todas: `/v1`.
+Total: **321 rutas**. Prefijo de todas: `/v1`.
 
 ## Cómo leer la columna «Permiso»
 
@@ -59,41 +59,68 @@ ni del query string. Es la base del aislamiento entre empresas.
 
 ## Bancos (movimientos, catálogo, conciliación, tesorería)
 
-72 rutas.
+99 rutas.
 
 | Método | Ruta | Permiso |
 |---|---|---|
 | GET | `/v1/bancos/cuentas` | `bancos.ver` |
-| GET | `/v1/bancos/movimientos` | `bancos.ver` |
-| GET | `/v1/bancos/movimientos/resumen` | `bancos.ver` |
-| GET | `/v1/bancos/reglas` | `bancos.ver` |
-| GET | `/v1/bancos/reglas/sugerencia` | `bancos.ver` |
-| GET | `/v1/bancos/clasificacion/resumen` | `bancos.ver` |
-| GET | `/v1/bancos/catalogo/conceptos` | `bancos.ver` |
-| GET | `/v1/bancos/catalogo/clasificaciones` | `bancos.ver` |
+| GET | `/v1/bancos/movimientos` | `bancos.ver_clasificar` o `bancos.ver_dashboard` o `bancos.exportar` o `inventario.entrada` |
+| GET | `/v1/bancos/movimientos/resumen` | `bancos.ver_clasificar` |
+| GET | `/v1/bancos/reglas` | `bancos.ver_clasificar` |
+| GET | `/v1/bancos/reglas/sugerencia` | `bancos.ver_clasificar` |
+| GET | `/v1/bancos/clasificacion/resumen` | `bancos.ver_clasificar` |
+| GET | `/v1/bancos/catalogo/conceptos` | `bancos.ver` o `cxp.ver` |
+| GET | `/v1/bancos/catalogo/clasificaciones` | `bancos.ver` o `cxp.ver` |
 | GET | `/v1/bancos/catalogo/bancos` | `bancos.ver` |
-| GET | `/v1/bancos/tipo-cambio/:anio/:mes` | `bancos.ver` |
-| GET | `/v1/bancos/tipo-cambio/ultimo-sync` | `bancos.ver` |
+| GET | `/v1/bancos/mi-segmento/movimientos` | `bancos.ver_mi_segmento` |
+| POST | `/v1/bancos/mi-segmento/reportes` | `bancos.ver_mi_segmento` |
+| POST | `/v1/bancos/mi-segmento/buscar` | `bancos.ver_mi_segmento` |
+| POST | `/v1/bancos/mi-segmento/faltantes` | `bancos.ver_mi_segmento` |
+| GET | `/v1/bancos/catalogo/consulta` | `bancos.catalogo` |
+| PUT | `/v1/bancos/catalogo/clasificaciones/:id/consulta` | `bancos.catalogo` |
+| GET | `/v1/bancos/reportes-segmentacion` | `bancos.ver_clasificar` o `bancos.catalogo` |
+| POST | `/v1/bancos/reportes-segmentacion/:id/resolver` | `bancos.clasificar` |
+| GET | `/v1/bancos/tipo-cambio/:anio/:mes` | `bancos.ver_tc` |
+| GET | `/v1/bancos/tipo-cambio/ultimo-sync` | `bancos.ver_tc` |
 | GET | `/v1/bancos/parametros` | `bancos.ver` |
-| GET | `/v1/bancos/cuadre` | `bancos.ver` |
-| GET | `/v1/bancos/cuadre/arbol` | `bancos.ver` |
-| GET | `/v1/bancos/dashboard` | `bancos.ver` |
-| GET | `/v1/bancos/analisis/serie-mensual` | `bancos.ver` |
-| GET | `/v1/bancos/analisis/calendario` | `bancos.ver` |
-| GET | `/v1/bancos/analisis/cuentas` | `bancos.ver` |
-| GET | `/v1/bancos/analisis/partidas` | `bancos.ver` |
+| GET | `/v1/bancos/cuadre` | `bancos.ver_dashboard` o `bancos.exportar` |
+| GET | `/v1/bancos/cuadre/arbol` | `bancos.ver_dashboard` |
+| GET | `/v1/bancos/dashboard` | `bancos.ver_dashboard` |
+| GET | `/v1/bancos/analisis/serie-mensual` | `bancos.ver_dashboard` |
+| GET | `/v1/bancos/analisis/calendario` | `bancos.ver_dashboard` |
+| GET | `/v1/bancos/analisis/cuentas` | `bancos.ver_dashboard` |
+| GET | `/v1/bancos/analisis/partidas` | `bancos.ver_analisis` |
+| GET | `/v1/bancos/catalogo/sedes` | `bancos.ver` o `inventario.ver` o `cxc.ver` |
+| GET | `/v1/bancos/catalogo/sedes/:id/uso` | `bancos.ver` |
+| POST | `/v1/bancos/catalogo/sedes` | `bancos.catalogo` |
+| PATCH | `/v1/bancos/catalogo/sedes/:id` | `bancos.catalogo` |
+| POST | `/v1/bancos/catalogo/sedes/:id/activo` | `bancos.catalogo` |
+| DELETE | `/v1/bancos/catalogo/sedes/:id` | `bancos.catalogo` |
+| GET | `/v1/bancos/catalogo/departamentos` | `bancos.ver` |
+| GET | `/v1/bancos/catalogo/departamentos/:id/uso` | `bancos.ver` |
+| POST | `/v1/bancos/catalogo/departamentos` | `bancos.catalogo` |
+| PATCH | `/v1/bancos/catalogo/departamentos/:id` | `bancos.catalogo` |
+| POST | `/v1/bancos/catalogo/departamentos/:id/activo` | `bancos.catalogo` |
+| DELETE | `/v1/bancos/catalogo/departamentos/:id` | `bancos.catalogo` |
+| PATCH | `/v1/bancos/clasificaciones/:id/dimensiones` | `bancos.catalogo` |
+| PATCH | `/v1/bancos/movimientos/:id/dimensiones` | `bancos.clasificar` |
+| GET | `/v1/bancos/control` | `bancos.ver_control` |
+| GET | `/v1/bancos/control/partidas` | `bancos.ver_control` |
+| GET | `/v1/bancos/presupuesto` | `bancos.ver_control` |
+| PUT | `/v1/bancos/presupuesto` | `bancos.ajustes` |
+| DELETE | `/v1/bancos/presupuesto` | `bancos.ajustes` |
 | GET | `/v1/bancos/movimientos/plantilla-clasificacion` | `bancos.exportar` |
 | POST | `/v1/bancos/movimientos/clasificar-excel` | `bancos.clasificar` |
-| GET | `/v1/bancos/proyecciones` | `bancos.ver` |
-| POST | `/v1/bancos/proyecciones` | `bancos.ver` |
-| GET | `/v1/bancos/proyecciones/escenarios` | `bancos.ver` |
-| GET | `/v1/bancos/traslados/propuestas` | `bancos.ver` |
-| GET | `/v1/bancos/tesoreria` | `bancos.ver` |
+| GET | `/v1/bancos/proyecciones` | `bancos.ver_proyecciones` |
+| POST | `/v1/bancos/proyecciones` | `bancos.ver_proyecciones` |
+| GET | `/v1/bancos/proyecciones/escenarios` | `bancos.ver_proyecciones` |
+| GET | `/v1/bancos/traslados/propuestas` | `bancos.ver_clasificar` |
+| GET | `/v1/bancos/tesoreria` | `bancos.ver_saldos` |
 | PUT | `/v1/bancos/saldos` | `bancos.saldos` |
-| GET | `/v1/bancos/carga` | `bancos.ver` |
-| GET | `/v1/bancos/patrones` | `bancos.ver` |
+| GET | `/v1/bancos/carga` | `bancos.ver_saldos` |
+| GET | `/v1/bancos/patrones` | `bancos.ver_clasificar` |
 | POST | `/v1/bancos/conciliacion-cxp` | `cxp.tesoreria` |
-| GET | `/v1/bancos/conciliacion` | `bancos.ver` |
+| GET | `/v1/bancos/conciliacion` | `bancos.ver_conciliacion` |
 | POST | `/v1/bancos/conciliacion/partidas` | `bancos.conciliar` |
 | DELETE | `/v1/bancos/conciliacion/partidas/:id` | `bancos.conciliar` |
 | POST | `/v1/bancos/conciliacion/firmar` | `bancos.conciliar` |
@@ -138,13 +165,17 @@ ni del query string. Es la base del aislamiento entre empresas.
 
 ## Cuentas por Pagar
 
-72 rutas.
+76 rutas.
 
 | Método | Ruta | Permiso |
 |---|---|---|
 | GET | `/v1/cxp/dashboard` | `cxp.dashboard` |
 | GET | `/v1/cxp/bandeja` | `cxp.ver` |
 | GET | `/v1/cxp/catalogo/subclasificaciones` | `cxp.ver` |
+| POST | `/v1/cxp/catalogo/conceptos` | `cxp.catalogo` |
+| PATCH | `/v1/cxp/catalogo/conceptos/:id` | `cxp.catalogo` |
+| POST | `/v1/cxp/catalogo/clasificaciones` | `cxp.catalogo` |
+| PATCH | `/v1/cxp/catalogo/clasificaciones/:id` | `cxp.catalogo` |
 | GET | `/v1/cxp/departamentos` | `cxp.ver` |
 | GET | `/v1/cxp/departamentos/:id/validadores` | `cxp.ver` |
 | GET | `/v1/cxp/usuarios` | `cxp.departamentos` |
@@ -217,13 +248,14 @@ ni del query string. Es la base del aislamiento entre empresas.
 
 ## Cuentas por Cobrar
 
-42 rutas.
+43 rutas.
 
 | Método | Ruta | Permiso |
 |---|---|---|
 | GET | `/v1/cxc/catalogos` | `cxc.ver` |
 | GET | `/v1/cxc/contratos` | `cxc.ver` |
 | GET | `/v1/cxc/contratos/:numero` | `cxc.ver` |
+| PATCH | `/v1/cxc/contratos/:numero` | `cxc.importar` |
 | GET | `/v1/cxc/cargos/plan` | `cxc.ver` |
 | POST | `/v1/cxc/cargos/generar` | `cxc.importar` |
 | POST | `/v1/cxc/importaciones/contratos/previsualizar` | `cxc.importar` |
@@ -314,9 +346,94 @@ ni del query string. Es la base del aislamiento entre empresas.
 | PATCH | `/v1/rrhh/conceptos/:id` | `rrhh.parametros` |
 | POST | `/v1/rrhh/conceptos/:id/desactivar` | `rrhh.parametros` |
 
+## Inventario
+
+33 rutas.
+
+Cofres, urnas y suministros por sede. Ver es UN permiso; mover el inventario son varios, porque
+quien registra un servicio en el mostrador no es quien administra el catálogo ni quien ajusta.
+El POST de servicios es el que DESCARGA las existencias.
+
+El conteo cíclico tiene su propio permiso (`inventario.conteo`) porque cerrar una hoja GENERA
+ajustes y bajas: es tan capaz de mover el inventario como un ajuste manual. Ojo con el orden de
+registro en el router: `/conteos/plan` va ANTES de `/conteos/:id`, o Gin se come «plan» como si
+fuera un id.
+
+**Consignación.** Ver la cola es lectura (`inventario.ver`), pero facturar CREA una cuenta por pagar
+en CxP, así que tiene permiso aparte (`inventario.consignacion`): saber qué se le debe al proveedor
+no es lo mismo que comprometer la plata. El documento nace como tipo `INTERNO` —vía expresa, sin
+validación de área— y con la clave determinística `INVC-<uuid de la unidad>`, que es toda la
+idempotencia: un segundo intento choca contra el UNIQUE `(empresa_id, clave)` de CxP en vez de crear
+una segunda factura por el mismo cofre. El consecutivo legible es `CONSIG-<número de unidad>`.
+`POST /conciliar` reemplaza esa provisión por la factura electrónica real del proveedor: anula la
+provisión (dejando el motivo en `nota_revision`) y reenlaza la unidad. Inventario no llama a CxP
+directo: declara el puerto `FacturadorCxP` y el adaptador vive en `cmd/api/main.go`, igual que
+`bancos.ConciliadorCxP`.
+
+| Método | Ruta | Permiso |
+|---|---|---|
+| GET | `/v1/inventario/categorias` | `inventario.ver` |
+| GET | `/v1/inventario/articulos` | `inventario.ver` |
+| GET | `/v1/inventario/articulos/:id/niveles` | `inventario.ver` |
+| GET | `/v1/inventario/existencias` | `inventario.ver` |
+| GET | `/v1/inventario/unidades` | `inventario.ver` |
+| GET | `/v1/inventario/movimientos` | `inventario.ver` |
+| GET | `/v1/inventario/servicios` | `inventario.ver` |
+| GET | `/v1/inventario/servicios/:id` | `inventario.ver` |
+| GET | `/v1/inventario/unidades/:numero` | `inventario.ver` |
+| GET | `/v1/inventario/traslados` | `inventario.ver` |
+| GET | `/v1/inventario/reposicion` | `inventario.ver` |
+| GET | `/v1/inventario/rotacion` | `inventario.ver` |
+| GET | `/v1/inventario/conteos/plan` | `inventario.ver` |
+| GET | `/v1/inventario/conteos` | `inventario.ver` |
+| GET | `/v1/inventario/conteos/:id` | `inventario.ver` |
+| POST | `/v1/inventario/conteos` | `inventario.conteo` |
+| PUT | `/v1/inventario/conteos/:id/lineas/:linea` | `inventario.conteo` |
+| POST | `/v1/inventario/conteos/:id/cerrar` | `inventario.conteo` |
+| POST | `/v1/inventario/conteos/:id/anular` | `inventario.conteo` |
+| GET | `/v1/inventario/consignacion` | `inventario.ver` |
+| GET | `/v1/inventario/consignacion/:unidadId/candidatas` | `inventario.ver` |
+| POST | `/v1/inventario/consignacion/:unidadId/facturar` | `inventario.consignacion` |
+| POST | `/v1/inventario/consignacion/:unidadId/conciliar` | `inventario.consignacion` |
+| POST | `/v1/inventario/categorias` | `inventario.catalogo` |
+| PATCH | `/v1/inventario/categorias/:id` | `inventario.catalogo` |
+| POST | `/v1/inventario/articulos` | `inventario.catalogo` |
+| PATCH | `/v1/inventario/articulos/:id` | `inventario.catalogo` |
+| PUT | `/v1/inventario/articulos/:id/nivel` | `inventario.catalogo` |
+| POST | `/v1/inventario/entradas` | `inventario.entrada` |
+| POST | `/v1/inventario/servicios` | `inventario.servicio` |
+| POST | `/v1/inventario/traslados` | `inventario.traslado` |
+| POST | `/v1/inventario/traslados/:id/recibir` | `inventario.traslado` |
+| POST | `/v1/inventario/ajustes` | `inventario.ajuste` |
+
+## Grupo (vista consolidada)
+
+1 ruta.
+
+**Es la ÚNICA ruta del sistema que cruza empresas, y solo lee.** Todo el resto del ERP filtra por el
+`empresa_id` del token; esta suma varias empresas, así que vive en su propio paquete
+(`internal/grupo`) para que la excepción se vea y nadie agregue una consulta multiempresa dentro de
+otro módulo por accidente.
+
+No otorga acceso nuevo: incluye únicamente las empresas donde el usuario YA podía ver el dato. El
+servidor cruza sus membresías (`usuario_empresa_rol`) con `bancos.ver` **en cada empresa**, y ADMIN
+tiene bypass igual que en `rbac.Tiene`. El alcance NO se puede pedir: no hay ningún parámetro de
+empresas, y agregar uno (`empresa_id`, `empresas`, `todas=true`) no cambia el resultado.
+
+El permiso de la ruta (`grupo.ver`) se verifica en la EMPRESA ACTIVA del token, como cualquier otra;
+la lectura de cada empresa se verifica aparte, adentro. Un usuario con `grupo.ver` pero sin
+`bancos.ver` en ninguna empresa recibe **403** con el motivo escrito, no un 500 ni un total en cero.
+
+La respuesta confiesa sus límites: `empresas_del_sistema` vs. las incluidas, `excluidas`, `aviso` y
+`completo`. Un total que omite una empresa en silencio se lee como el número del grupo.
+
+| Método | Ruta | Permiso |
+| --- | --- | --- |
+| GET | `/v1/grupo/resumen` | `grupo.ver` |
+
 ## Usuarios, roles y permisos
 
-12 rutas.
+14 rutas.
 
 | Método | Ruta | Permiso |
 |---|---|---|
@@ -326,6 +443,8 @@ ni del query string. Es la base del aislamiento entre empresas.
 | GET | `/v1/rbac/matriz` | `admin.roles` |
 | PUT | `/v1/rbac/roles/:codigo/permisos` | `admin.roles` |
 | POST | `/v1/rbac/roles` | `admin.roles` |
+| GET | `/v1/rbac/roles/traibles` | `admin.roles` |
+| POST | `/v1/rbac/roles/traer` | `admin.roles` |
 | GET | `/v1/rbac/usuarios` | `admin.roles` |
 | POST | `/v1/rbac/usuarios` | `admin.roles` |
 | PATCH | `/v1/rbac/usuarios/:id` | `admin.roles` |

@@ -30,6 +30,11 @@ type Repository interface {
 	// Contratos y cargos
 	ListarContratos(ctx context.Context, empresaID string, f FiltrosContratos) (ListaContratos, error)
 	ContratoPorNumero(ctx context.Context, empresaID, numero string) (Contrato, error)
+	// CorregirContrato arregla los datos que dejaron al contrato fuera de la generación de cargos
+	// y vuelve a DERIVAR la marca de revisión (nadie la desmarca a mano).
+	CorregirContrato(ctx context.Context, empresaID, contratoID string, cambios map[string]any) (Contrato, error)
+	// ModalidadExiste valida contra el catálogo de la empresa, que es editable.
+	ModalidadExiste(ctx context.Context, empresaID, modalidadID string) (bool, error)
 	CargosDeContrato(ctx context.Context, empresaID, contratoID string, soloAbiertos bool) ([]Cargo, error)
 	// ContratosParaGenerar trae lo mínimo para correr el generador sobre toda la cartera.
 	ContratosParaGenerar(ctx context.Context, empresaID string, sedeIDs []string) ([]ContratoGenerable, error)
@@ -126,6 +131,14 @@ type ContratoGenerable struct {
 	Cuota       decimal.Decimal
 	MesesCiclo  int
 	Quincenal   bool
+	// Motivo: por qué este contrato NO puede generar cargos ("" = sí puede).
+	//
+	// Lo resuelve el SQL y viaja en la fila en vez de filtrarse en el WHERE. Es a propósito: antes
+	// la consulta descartaba los contratos malos y el mapa `Excluidos` del plan —que existe justo
+	// para que «un contrato que nunca cobra no pase inadvertido»— llegaba SIEMPRE vacío. Con
+	// 12.231 contratos cargados, 2.452 quedaban afuera y la vista previa decía «9.779 contratos»
+	// sin una palabra sobre el resto.
+	Motivo string
 }
 
 // CargoAInsertar es un cargo listo para escribirse.

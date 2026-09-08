@@ -157,6 +157,27 @@ export function UsuariosPage() {
         }
       />
 
+      {/*
+        Por qué este aviso existe.
+
+        Un usuario creado en una empresa ve el nombre de esa empresa en el encabezado y ningún
+        selector, y en la matriz de permisos no hay —ni puede haber— un permiso «ver las otras
+        empresas»: los permisos se evalúan DENTRO de una empresa ya elegida, así que el acceso a cada
+        empresa es de otra naturaleza (una membresía). Sin decirlo, la única lectura posible es que
+        falta un permiso.
+      */}
+      <div className="rounded-lg border border-border bg-surface-muted px-4 py-3">
+        <p className="text-sm font-medium text-content">Cómo funciona el acceso a varias empresas</p>
+        <p className="mt-0.5 text-sm text-content-muted">
+          Acá se administra el acceso a <strong>{empresaActiva?.nombre ?? "esta empresa"}</strong>. El
+          acceso a cada empresa <strong>no es un permiso</strong>: es una vinculación aparte, por eso no
+          aparece en la matriz de permisos. Para que alguien entre también a otra empresa, cambiá de
+          empresa arriba y dalo de alta ahí con <strong>el mismo correo</strong>: el sistema reconoce
+          que ya existe y solo le agrega el acceso, con el rol que elijas en esa empresa. Recién
+          entonces le aparece el selector de empresas en el encabezado.
+        </p>
+      </div>
+
       {mostrarForm && (
         <Card>
           <CardHeader>
@@ -219,6 +240,7 @@ export function UsuariosPage() {
               <TR>
                 <TH>Usuario</TH>
                 <TH>Rol</TH>
+                <TH>Empresas</TH>
                 <TH>Estado</TH>
                 <TH className="text-right">Acciones</TH>
               </TR>
@@ -234,6 +256,19 @@ export function UsuariosPage() {
                     <Badge tone="accent">{u.rol_nombre}</Badge>
                     {u.debe_cambiar_password && (
                       <span className="ml-2 text-[11px] text-pendiente">· contraseña temporal pendiente</span>
+                    )}
+                  </TD>
+                  {/* A qué empresas entra. Contesta sin salir de la pantalla la pregunta que aparece
+                      sola al ver el selector del encabezado: «¿este usuario ve las otras empresas?». */}
+                  <TD>
+                    {u.otras_empresas === "" ? (
+                      <span className="text-xs text-content-muted">
+                        solo {empresaActiva?.nombre ?? "esta empresa"}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-content">
+                        también en <strong>{u.otras_empresas}</strong>
+                      </span>
                     )}
                   </TD>
                   <TD>

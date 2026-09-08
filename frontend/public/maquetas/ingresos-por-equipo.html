@@ -1,0 +1,591 @@
+<title>Consulta de bancos por segmento</title>
+<style>
+  :root{
+    --surface:#F7F8F5; --raised:#FFFFFF; --muted:#EDF0EA; --border:#DCE2D9;
+    --ink:#1E2A24; --ink-2:#55645C; --ink-3:#8A958D;
+    --accent:#0F6E4E; --accent-hover:#0B583E; --accent-soft:#e3f0ea; --accent-fg:#fff;
+    --gold:#B0894A; --gold-soft:#F7EEDF;
+    --pos:#15803D; --neg:#B3542E; --warn:#A16207; --warn-soft:#FBF3E2;
+    --chrome:#F1F4EF;
+    --shadow-sm:0 1px 2px rgb(30 42 36/.06);
+    --shadow:0 1px 2px rgb(30 42 36/.06),0 4px 14px rgb(30 42 36/.05);
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --surface:#141714; --raised:#1E2320; --muted:#242A26; --border:#313832;
+    --ink:#E8EDE9; --ink-2:#A9B4AC; --ink-3:#77817A;
+    --accent:#35A578; --accent-hover:#4FBB8F; --accent-soft:#22302a; --accent-fg:#032019;
+    --gold:#C9A468; --gold-soft:#2E2A20;
+    --pos:#4ADE80; --neg:#E08a63; --warn:#E0B44A; --warn-soft:#2E2A1C;
+    --chrome:#191E1B;
+    --shadow-sm:0 1px 2px rgb(0 0 0/.3); --shadow:0 1px 2px rgb(0 0 0/.35),0 4px 14px rgb(0 0 0/.25);
+  }}
+  :root[data-theme="dark"]{
+    --surface:#141714; --raised:#1E2320; --muted:#242A26; --border:#313832;
+    --ink:#E8EDE9; --ink-2:#A9B4AC; --ink-3:#77817A;
+    --accent:#35A578; --accent-hover:#4FBB8F; --accent-soft:#22302a; --accent-fg:#032019;
+    --gold:#C9A468; --gold-soft:#2E2A20;
+    --pos:#4ADE80; --neg:#E08a63; --warn:#E0B44A; --warn-soft:#2E2A1C;
+    --chrome:#191E1B;
+    --shadow-sm:0 1px 2px rgb(0 0 0/.3); --shadow:0 1px 2px rgb(0 0 0/.35),0 4px 14px rgb(0 0 0/.25);
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{background:var(--surface);color:var(--ink);font:14.5px/1.62 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif}
+  .tnum{font-variant-numeric:tabular-nums lining-nums}
+  h1,h2,h3,h4{text-wrap:balance;margin:0}
+  code{font-family:ui-monospace,"Cascadia Code",Consolas,monospace;font-size:.92em;background:var(--muted);border-radius:5px;padding:1px 5px}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .top{display:flex;align-items:center;gap:12px;padding:11px 18px;background:var(--raised);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:20;flex-wrap:wrap}
+  .logo{width:32px;height:32px;border-radius:9px;background:var(--accent);display:grid;place-items:center;color:var(--accent-fg);font-weight:800;flex:none}
+  .top h1{font-size:15px;font-weight:700}
+  .top h1 small{color:var(--ink-3);font-weight:500}
+  .tag{font-size:10px;font-weight:800;letter-spacing:.08em;padding:4px 9px;border-radius:999px;background:var(--gold);color:#fff}
+  .top .medido{margin-left:auto;font-size:11.5px;color:var(--ink-3)}
+
+  .wrap{max-width:1040px;margin:0 auto;padding:24px 18px 80px;display:flex;flex-direction:column;gap:34px}
+  .lede{color:var(--ink-2);max-width:72ch;margin:10px 0 0}
+  .sec{display:flex;flex-direction:column;gap:12px}
+  .sec>h2{font-size:11.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  .sec>h2 b{background:var(--accent-soft);color:var(--accent);border-radius:999px;padding:3px 9px;font-size:10px;letter-spacing:.05em}
+  .card{background:var(--raised);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-sm);padding:18px}
+  .card h3{font-size:16px;letter-spacing:-.01em}
+  .card h3+p{margin:6px 0 0}
+  .grid{display:grid;gap:12px}
+  @media(min-width:860px){.g2{grid-template-columns:1fr 1fr}}
+  .muted{color:var(--ink-2);font-size:13.5px}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;background:var(--muted);color:var(--ink-2);white-space:nowrap}
+  .pill.ok{background:var(--accent-soft);color:var(--accent)}
+  .pill.warn{background:var(--warn-soft);color:var(--warn)}
+  .pill.neg{background:color-mix(in oklab,var(--neg) 14%,transparent);color:var(--neg)}
+  .pill.gold{background:var(--gold-soft);color:var(--gold)}
+
+  .scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:13.2px;min-width:560px}
+  th{text-align:left;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);font-weight:800;padding:0 9px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+  td{padding:9px;border-bottom:1px solid color-mix(in oklab,var(--border) 55%,transparent);vertical-align:middle}
+  tbody tr:last-child td{border-bottom:0}
+  .num{text-align:right;font-variant-numeric:tabular-nums lining-nums;white-space:nowrap}
+  tfoot td{border-top:1px solid var(--border);border-bottom:0;font-weight:700;padding-top:10px}
+
+  .note{background:var(--gold-soft);border:1px solid color-mix(in oklab,var(--gold) 34%,transparent);border-radius:11px;padding:13px 15px;font-size:13.4px;color:var(--ink-2)}
+  .note b{color:var(--ink)}
+  .note.good{background:var(--accent-soft);border-color:color-mix(in oklab,var(--accent) 30%,transparent)}
+  .note.bad{background:color-mix(in oklab,var(--neg) 8%,transparent);border-color:color-mix(in oklab,var(--neg) 32%,transparent)}
+  ul{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px}
+  li>b{color:var(--ink)}
+
+  /* ── Maqueta de pantalla ── */
+  .screen{border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--raised);box-shadow:var(--shadow)}
+  .screen>header{background:var(--chrome);border-bottom:1px solid var(--border);padding:11px 14px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .screen>header h3{font-size:14.5px}
+  .screen>header .who{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink-2)}
+  .avatar{width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-size:11px;font-weight:800;flex:none}
+  .screen>.body{padding:14px}
+  .kpis{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:12px}
+  .kpi{border:1px solid var(--border);border-radius:10px;padding:8px 12px;background:var(--muted);min-width:128px}
+  .kpi span{display:block;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:800}
+  .kpi strong{font-size:17px;font-variant-numeric:tabular-nums lining-nums;letter-spacing:-.01em}
+  .filtros{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
+  .fld{border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:12.5px;background:var(--raised);color:var(--ink-2);display:inline-flex;gap:7px;align-items:center}
+  .fld b{color:var(--ink);font-weight:600}
+  .fld i{font-style:normal;color:var(--ink-3);font-size:10px}
+  .btn{display:inline-block;font-size:12px;font-weight:650;padding:5px 10px;border-radius:8px;border:1px solid var(--border);background:var(--raised);color:var(--ink);white-space:nowrap}
+  .btn.p{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+  .btn.q{background:transparent;border-color:transparent;color:var(--ink-2)}
+  .acts{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;align-items:center}
+  .desc{font-size:12.6px;color:var(--ink-2);word-break:break-word}
+  .desc b{color:var(--ink);font-weight:600}
+  .hecho{font-size:11.5px;color:var(--ink-3)}
+  .caption{font-size:12.5px;color:var(--ink-3);margin:10px 0 0}
+  .chk{display:inline-grid;place-items:center;width:15px;height:15px;border-radius:4px;border:1px solid var(--border);background:var(--raised);font-size:10px;color:var(--accent-fg);vertical-align:-2px;margin-right:5px}
+  .chk.on{background:var(--accent);border-color:var(--accent)}
+
+  .flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12.5px}
+  .flow em{background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-weight:600;font-style:normal}
+  .flow em.b{background:var(--accent-soft);border-color:color-mix(in oklab,var(--accent) 28%,transparent);color:var(--accent)}
+  .flow em.g{background:var(--gold-soft);border-color:color-mix(in oklab,var(--gold) 30%,transparent);color:var(--gold)}
+  .flow i{color:var(--ink-3);font-style:normal}
+  .foot{color:var(--ink-3);font-size:12.5px;border-top:1px solid var(--border);padding-top:14px}
+</style>
+
+<div class="top">
+  <div class="logo">V</div>
+  <h1>Finance Group VDP <small>· Bancos · consulta por segmento</small></h1>
+  <span class="tag">PROPUESTA</span>
+  <span class="medido">Medido en la base real · 4 set 2026</span>
+</div>
+
+<div class="wrap">
+  <div>
+    <h1 style="font-size:26px;letter-spacing:-.02em">Cada equipo consulta su partida.<br>Nada más, y nada por Excel.</h1>
+    <p class="lede">
+      El proceso ya es el correcto: <b>vos segmentás en Bancos</b> —concepto y clasificación— y esa
+      segmentación es la que decide quién puede mirar qué. Falta una sola pantalla: la
+      <b>consulta acotada</b> del equipo, con un botón para avisar cuando algo quedó mal segmentado.
+      No es un flujo de aprobación: nadie confirma nada, nadie traba un cierre. Todos los números de
+      esta página salieron de la base en operación.
+    </p>
+  </div>
+
+  <!-- ─────────────────────────────  EL PROCESO  ─────────────────────────── -->
+  <section class="sec">
+    <h2>El proceso <b>tal como ya funciona</b></h2>
+
+    <div class="card">
+      <div class="flow">
+        <em>entra el dinero</em><i>→</i>
+        <em class="g">vos segmentás: concepto › clasificación</em><i>→</i>
+        <em class="b">el equipo consulta su partida</em><i>→</i>
+        <em>si está mal segmentado, avisa</em><i>→</i>
+        <em class="g">se corrige en Clasificar</em>
+      </div>
+      <p class="caption">Lo dorado es tuyo y ya existe. Lo verde es lo único que falta construir.</p>
+    </div>
+
+    <div class="note good">
+      <b>La idea que hace que esto sea barato:</b> el alcance <b>no se administra aparte</b>, se
+      deriva de la segmentación que ya hacés. Si reclasificás un movimiento, cambia de dueño solo
+      —sin tocar ningún permiso—. Y un movimiento <b>sin clasificar no aparece en ningún alcance</b>,
+      así que nadie lo ve: es exactamente la presión que mantiene Bancos bien segmentado.
+    </div>
+  </section>
+
+  <!-- ─────────────────────────  QUÉ VERÍA CADA EQUIPO  ──────────────────── -->
+  <section class="sec">
+    <h2>Qué vería cada equipo hoy <b>datos reales</b></h2>
+
+    <div class="card">
+      <h3>Los equipos que nombraste ya existen en el sistema: son clasificaciones</h3>
+      <p class="muted">Valle de Paz · créditos del 1 de julio al 3 de setiembre de 2026.</p>
+      <div class="scroll" style="margin-top:12px">
+        <table>
+          <thead>
+            <tr>
+              <th>Partida que consulta (clasificación)</th>
+              <th class="num">Créditos</th>
+              <th class="num">Monto</th>
+              <th>Ritmo</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>Asociaciones / Cooperativas</b></td>
+              <td class="num">569</td>
+              <td class="num">₡242&nbsp;028&nbsp;220,95</td>
+              <td class="desc">~9 por día</td>
+            </tr>
+            <tr>
+              <td><b>Depósito de Clientes</b></td>
+              <td class="num">7&nbsp;395</td>
+              <td class="num">₡83&nbsp;259&nbsp;802,72</td>
+              <td class="desc">hasta 538 en un día</td>
+            </tr>
+            <tr>
+              <td><b>Datáfonos</b></td>
+              <td class="num">1&nbsp;209</td>
+              <td class="num">₡71&nbsp;178&nbsp;042,56</td>
+              <td class="desc">~20 por día</td>
+            </tr>
+            <tr>
+              <td><b>Servicios de Emergencias</b></td>
+              <td class="num">99</td>
+              <td class="num">₡27&nbsp;665&nbsp;510,00</td>
+              <td class="desc">~2 por día</td>
+            </tr>
+            <tr>
+              <td><b>Caja de Ingresos</b></td>
+              <td class="num">210</td>
+              <td class="num">₡36&nbsp;744&nbsp;912,54</td>
+              <td class="desc">~3 por día</td>
+            </tr>
+            <tr style="background:color-mix(in oklab,var(--neg) 7%,transparent)">
+              <td><b>Sin clasificar</b> <span class="pill neg">no lo ve nadie</span></td>
+              <td class="num">5&nbsp;007</td>
+              <td class="num">₡268&nbsp;100&nbsp;507,65</td>
+              <td class="desc">todo julio</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="caption">
+        Son <b>seis partidas de ingreso con movimiento real</b>: marcar quién ve cada una es un rato
+        de trabajo, no un proyecto. Los 5&nbsp;007 de julio son el único prerequisito: hasta que se
+        clasifiquen, ese dinero no le aparece a ningún equipo.
+      </p>
+    </div>
+  </section>
+
+  <!-- ────────────────────────────  PANTALLA 1  ──────────────────────────── -->
+  <section class="sec">
+    <h2>La pantalla del equipo <b>lo único que falta</b></h2>
+
+    <div class="screen">
+      <header>
+        <span class="pill ok">Asociaciones / Cooperativas</span>
+        <h3>Mi partida en bancos</h3>
+        <span class="who"><span class="avatar">MC</span> María C. · Cobros Asociaciones</span>
+      </header>
+      <div class="body">
+        <div class="filtros">
+          <span class="fld"><b>Setiembre 2026</b> <i>▾</i></span>
+          <span class="fld">Cuenta: <b>todas las mías</b> <i>▾</i></span>
+          <span class="fld">Buscar en el detalle <i>⌕</i></span>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><span>Movimientos</span><strong>53</strong></div>
+          <div class="kpi"><span>Total entrado</span><strong>₡41&nbsp;806&nbsp;934,12</strong></div>
+          <div class="kpi"><span>Último día cargado</span><strong>03/09</strong></div>
+        </div>
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th><th>Cuenta</th><th>Detalle del banco</th>
+                <th class="num">Entró</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="tnum">02/09</td>
+                <td class="desc">BN · Valle de Paz Colones</td>
+                <td class="desc">REINTEGRODERECAUDOVALLEDEPAZAGOSTO2026/<b>COOPENAE</b></td>
+                <td class="num">₡35&nbsp;997&nbsp;477,82</td>
+                <td><div class="acts"><span class="btn q">Está mal segmentado</span></div></td>
+              </tr>
+              <tr>
+                <td class="tnum">02/09</td>
+                <td class="desc">BN · Privado de Cartago</td>
+                <td class="desc">DEP CA7 PLANILLAS/<b>COOP SERV MULTIPLES</b></td>
+                <td class="num">₡207&nbsp;684,09</td>
+                <td><div class="acts"><span class="btn q">Está mal segmentado</span></div></td>
+              </tr>
+              <tr>
+                <td class="tnum">02/09</td>
+                <td class="desc">BN · Valle de Paz Colones</td>
+                <td class="desc">PAGO FT AGOSTO ASEINNOVA/<b>ASOC SOLIDARISTA DE</b></td>
+                <td class="num">₡189&nbsp;395,53</td>
+                <td><div class="acts"><span class="btn q">Está mal segmentado</span></div></td>
+              </tr>
+              <tr>
+                <td class="tnum">02/09</td>
+                <td class="desc">BN · Valle de Paz Colones</td>
+                <td class="desc">PAGO MES DE AGOSTO/<b>ASOC.SOLIDARISTA EMP</b></td>
+                <td class="num">₡156&nbsp;323,02</td>
+                <td><div class="acts"><span class="btn q">Está mal segmentado</span></div></td>
+              </tr>
+              <tr>
+                <td class="tnum">02/09</td>
+                <td class="desc">BN · Valle de Paz Colones</td>
+                <td class="desc">ASOCIACION SOLIDARIS PLANESBPPP/102-BAC</td>
+                <td class="num">₡118&nbsp;063,59</td>
+                <td><div class="acts"><span class="btn q">Está mal segmentado</span></div></td>
+              </tr>
+              <tr style="background:var(--warn-soft)">
+                <td class="tnum">02/09</td>
+                <td class="desc">BAC · Religiosa</td>
+                <td class="desc">TEF DE:<b>ASOCIACION SOLIDARISTA</b></td>
+                <td class="num">₡61&nbsp;506,00</td>
+                <td><div class="acts"><span class="pill warn">Reportado</span><span class="hecho">«esto es de Emergencias» · hoy 8:12</span></div></td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr><td colspan="3">6 de 53 · sigue abajo</td><td class="num">₡36&nbsp;730&nbsp;450,05</td><td></td></tr>
+            </tfoot>
+          </table>
+        </div>
+        <p class="caption">
+          Solo créditos, solo su partida. El encabezado mide <b>lo filtrado</b> —igual que la
+          pantalla de Clasificar—, así el equipo contesta «¿entró la planilla de setiembre?» sin
+          pedirle nada a nadie.
+        </p>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>Sin descarga, a propósito.</b> La pantalla es la consulta: nada sale del sistema, así que no
+      hay archivo viejo circulando ni columnas de más en el camino. Si el equipo necesita el detalle,
+      lo mira acá, que además está al día hasta la última importación.
+    </div>
+  </section>
+
+  <!-- ────────────────────────────  PANTALLA 2  ──────────────────────────── -->
+  <section class="sec">
+    <h2>Cómo se da el acceso <b>desde el catálogo, no desde el rol</b></h2>
+
+    <div class="note good">
+      <b>Es una sola tabla —rol × partida— y dos puertas para editarla. La puerta decide si el
+      trabajo es corto o interminable.</b> Abrir un rol y cazar entre <b>170 clasificaciones</b> es
+      interminable. Abrir la partida <i>que ya estás segmentando</i> y elegir entre <b>3 o 4
+      roles</b> es un clic más en algo que ya estabas haciendo. Misma tabla, mismo resultado, una
+      décima parte del trabajo.
+    </div>
+
+    <div class="screen">
+      <header>
+        <h3>Catálogo · una columna nueva: quién la consulta</h3>
+        <span class="pill gold">Bancos › Catálogo</span>
+        <span class="who">La puerta corta</span>
+      </header>
+      <div class="body">
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr><th>Partida</th><th class="num">Movimiento</th><th>Quién la consulta</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr style="background:var(--muted)">
+                <td><b>Ingresos</b> <span class="hecho">· concepto</span></td>
+                <td class="num">10&nbsp;861</td>
+                <td class="desc"><span class="hecho">se define por clasificación ▾</span></td>
+                <td><div class="acts"><span class="btn q">Aplicar a las 20</span></div></td>
+              </tr>
+              <tr>
+                <td style="padding-left:26px">Asociaciones / Cooperativas</td>
+                <td class="num">569</td>
+                <td><span class="pill ok">Cobros Asociaciones ✕</span></td>
+                <td><div class="acts"><span class="btn q">+ rol</span></div></td>
+              </tr>
+              <tr>
+                <td style="padding-left:26px">Depósito de Clientes</td>
+                <td class="num">7&nbsp;395</td>
+                <td><span class="pill ok">Servicio / Sala ✕</span></td>
+                <td><div class="acts"><span class="btn q">+ rol</span></div></td>
+              </tr>
+              <tr>
+                <td style="padding-left:26px">Datáfonos</td>
+                <td class="num">1&nbsp;209</td>
+                <td><span class="pill ok">Servicio / Sala ✕</span></td>
+                <td><div class="acts"><span class="btn q">+ rol</span></div></td>
+              </tr>
+              <tr>
+                <td style="padding-left:26px">Servicios de Emergencias</td>
+                <td class="num">99</td>
+                <td><span class="pill ok">Emergencias ✕</span></td>
+                <td><div class="acts"><span class="btn q">+ rol</span></div></td>
+              </tr>
+              <tr style="background:var(--accent-soft)">
+                <td style="padding-left:26px">Caja de Ingresos</td>
+                <td class="num">210</td>
+                <td>
+                  <span class="fld" style="padding:3px 8px">Escribí un rol… <i>⌕</i></span>
+                  <span class="hecho" style="display:block;margin-top:4px">Cobros Asociaciones · Servicio / Sala · Emergencias</span>
+                </td>
+                <td></td>
+              </tr>
+              <tr>
+                <td style="padding-left:26px;color:var(--ink-3)">Cargo BP</td>
+                <td class="num">358</td>
+                <td><span class="pill">sin nadie</span></td>
+                <td><div class="acts"><span class="btn q">+ rol</span></div></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="caption">
+          Se elige <b>escribiendo</b>, igual que el filtro de clasificaciones —una parrilla de
+          casillas con 170 filas ya sabemos que es inusable—. Y la columna solo ofrece
+          <b>roles de consulta</b>: los 6 roles financieros no aparecen porque no consultan por
+          segmento, ven lo que su permiso les da.
+        </p>
+      </div>
+    </div>
+
+    <div class="screen">
+      <header>
+        <h3>El espejo, para auditar</h3>
+        <span class="pill gold">Configuración › Seguridad</span>
+        <span class="who">Solo lectura</span>
+      </header>
+      <div class="body">
+        <div class="kpis">
+          <div class="kpi"><span>Partidas con créditos</span><strong>25</strong></div>
+          <div class="kpi"><span>Ya asignadas</span><strong style="color:var(--pos)">4</strong></div>
+          <div class="kpi"><span>Sin nadie</span><strong style="color:var(--warn)">21</strong></div>
+        </div>
+        <div class="scroll">
+          <table style="min-width:520px">
+            <thead><tr><th>Rol de consulta</th><th>Partidas que consulta</th><th class="num">Usuarios</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><b>Cobros Asociaciones</b></td>
+                <td><span class="pill ok">Asociaciones / Cooperativas</span></td>
+                <td class="num">2</td>
+              </tr>
+              <tr>
+                <td><b>Servicio / Sala</b></td>
+                <td><span class="pill ok">Depósito de Clientes</span> <span class="pill ok">Datáfonos</span></td>
+                <td class="num">4</td>
+              </tr>
+              <tr>
+                <td><b>Emergencias</b></td>
+                <td><span class="pill ok">Servicios de Emergencias</span></td>
+                <td class="num">3</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="caption">
+          Contesta de un vistazo la pregunta que hace un revisor —«¿qué ve este equipo?»— sin
+          recorrer el catálogo. Se lee acá y se <b>edita</b> en el catálogo: un solo lugar donde
+          cambiar las cosas, y por eso nunca hay dos versiones.
+        </p>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>Sin nadie asignado, nadie ve.</b> Las 21 partidas de crédito que quedan sin rol no las
+      consulta ningún equipo, y el contador de arriba lo dice en voz alta. Es lo correcto: que se
+      abra por olvido es un problema de seguridad, que se quede cerrada por olvido es un reclamo —y
+      el reclamo llega, el hueco no.
+    </div>
+  </section>
+
+  <!-- ────────────────────────────  PANTALLA 3  ──────────────────────────── -->
+  <section class="sec">
+    <h2>Dónde cae lo reportado <b>en Clasificar, no en una bandeja nueva</b></h2>
+
+    <div class="screen">
+      <header>
+        <h3>Clasificar</h3>
+        <span class="pill">Por clasificar · 5 007</span>
+        <span class="pill warn">Reportados por los equipos · 3</span>
+        <span class="who"><span class="avatar">TS</span> Tesorería</span>
+      </header>
+      <div class="body">
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr><th>Fecha</th><th>Detalle</th><th class="num">Monto</th><th>Partida actual</th><th>Quién avisó y por qué</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="tnum">02/09</td>
+                <td class="desc">TEF DE:ASOCIACION SOLIDARISTA</td>
+                <td class="num">₡61&nbsp;506,00</td>
+                <td><span class="pill">Asociaciones / Coop.</span></td>
+                <td class="desc"><b>María C.</b> «esto es de Emergencias»</td>
+                <td><div class="acts"><span class="btn p">Reclasificar</span><span class="btn q">Está bien</span></div></td>
+              </tr>
+              <tr>
+                <td class="tnum">28/08</td>
+                <td class="desc">DEP CA7 PLANILLAS/COOP SERV MULTIPLES</td>
+                <td class="num">₡207&nbsp;684,09</td>
+                <td><span class="pill">Depósito de Clientes</span></td>
+                <td class="desc"><b>Jason S.</b> «es planilla de asociación, no depósito de sala»</td>
+                <td><div class="acts"><span class="btn p">Reclasificar</span><span class="btn q">Está bien</span></div></td>
+              </tr>
+              <tr>
+                <td class="tnum">21/08</td>
+                <td class="desc">TRANSFERENCIA A FAVOR DE</td>
+                <td class="num">₡1&nbsp;450&nbsp;000,00</td>
+                <td><span class="pill neg">Sin clasificar</span></td>
+                <td class="desc"><b>Ana R.</b> «este es nuestro, no nos aparece»</td>
+                <td><div class="acts"><span class="btn p">Reclasificar</span><span class="btn q">Está bien</span></div></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="caption">
+          El motivo es obligatorio: sin él no se puede corregir. «Está bien» cierra el reporte con la
+          explicación y el equipo la ve en su pantalla, así no se vuelve a reportar el mismo
+          movimiento tres veces.
+        </p>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>Por qué acá y no en una bandeja aparte.</b> Un movimiento reportado es un movimiento a
+      reclasificar, y eso ya se hace en esta pantalla con las herramientas que ya están —el motor,
+      las reglas, el masivo—. Una bandeja nueva sería un segundo lugar donde clasificar, y a la
+      semana uno de los dos queda sin mirar.
+    </div>
+  </section>
+
+  <!-- ────────────────────────────  EL ALCANCE  ─────────────────────────── -->
+  <section class="sec">
+    <h2>El alcance, exacto <b>lo que ve y lo que no</b></h2>
+
+    <div class="grid g2">
+      <div class="card">
+        <h3 style="color:var(--pos)">Sí ve</h3>
+        <ul class="muted" style="margin-top:10px">
+          <li>Los <b>créditos</b> de las partidas que le marcaste a su rol</li>
+          <li>Fecha, cuenta, detalle del banco y monto de <b>esos</b> movimientos</li>
+          <li>El total de lo que ve, y hasta qué día está cargado el banco</li>
+          <li>El estado de lo que reportó, con la respuesta</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 style="color:var(--neg)">No ve</h3>
+        <ul class="muted" style="margin-top:10px">
+          <li>Ni un movimiento de otra partida — <b>ni el total</b></li>
+          <li>Débitos: <b>ningún gasto</b>, de ninguna partida</li>
+          <li>Saldos, cuadre, EBITDA, proyecciones, presupuesto</li>
+          <li>Planilla, proveedores, pagos, catálogo, reglas, tipo de cambio</li>
+          <li>Descargas: <b>nada sale del sistema</b></li>
+          <li>El módulo Bancos: en el riel <b>no aparece</b></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 style="font-size:13.5px">Un permiso nuevo, y no es <code>bancos.ver</code></h4>
+      <div class="scroll" style="margin-top:10px">
+        <table style="min-width:460px">
+          <tbody>
+            <tr>
+              <td style="width:42%"><code>bancos.ver_mi_segmento</code></td>
+              <td class="desc">Abre <b>solo</b> esta pantalla, ya recortada a las partidas del rol, solo
+              créditos. Incluye avisar que algo está mal segmentado, porque sin eso la pantalla no
+              sirve para nada.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note good" style="margin-top:12px">
+        Encaja con lo que ya hicimos: la migración que partió «Ver Bancos» en <b>un permiso de
+        lectura por pantalla</b> dejó este hueco preparado. Y son <b>dos capas distintas</b>: el
+        permiso dice <i>qué pantalla</i>, el alcance del rol dice <i>cuáles filas</i> — y el recorte
+        de filas lo aplica el servidor, no un filtro que se pueda quitar.
+      </div>
+    </div>
+  </section>
+
+  <!-- ──────────────────────────  CÓMO SE CONSTRUYE  ─────────────────────── -->
+  <section class="sec">
+    <h2>Cómo se construye <b>chico y sin tocar lo que ya corre</b></h2>
+    <div class="card">
+      <ul class="muted">
+        <li><b>Una tabla para el alcance:</b> rol × clasificación, por empresa. Es todo lo que hace
+          falta para que «Asociaciones la ve Cobros» sea un dato y no un acuerdo verbal. Se
+          <b>edita desde el catálogo</b> y se <b>lee desde Seguridad</b>: dos puertas, un solo dato.</li>
+        <li><b>El selector se reusa,</b> no se inventa: el mismo buscador con el que ya se filtra por
+          clasificación —porque con 170 partidas una parrilla de casillas ya demostró ser inusable—.</li>
+        <li><b>Una tabla para los reportes,</b> solo de altas: movimiento, quién avisó, motivo,
+          resolución. El estado «reportado» se <b>deriva</b> de ahí; nunca una columna en el
+          movimiento que haya que mantener sincronizada.</li>
+        <li><b>Endpoint propio, no el de movimientos.</b> El listado de movimientos que ya existe lo
+          usan cuatro pantallas; agregarle un recorte por alcance es la clase de cambio que un día
+          le muestra a alguien lo que no debía. La consulta del equipo pide por su propia puerta, que
+          nace recortada.</li>
+        <li><b>Cero cambios en la segmentación.</b> No se agregan columnas al movimiento, no se toca
+          el motor, no se toca el cierre. El alcance se lee de la clasificación que ya tiene.</li>
+      </ul>
+      <div class="note" style="margin-top:14px">
+        <b>Lo único que necesito de vos para arrancar:</b> los nombres de los roles y, en la pantalla
+        de alcance, qué partidas ve cada uno. Seis partidas, tres o cuatro roles.
+      </div>
+    </div>
+  </section>
+
+  <p class="foot">
+    <b>Estado:</b> propuesta — nada de estas pantallas está construido. Lo que <b>sí</b> está
+    construido y se reusa: la segmentación por concepto y clasificación, el motor de reglas, la
+    pantalla de Clasificar, los roles por empresa con permisos seleccionables, el permiso de lectura
+    por pantalla y el gating del riel de módulos.<br>
+    Decidido con vos: el alcance se asigna <b>al rol</b> y se edita <b>desde el catálogo</b> · el
+    equipo ve <b>solo créditos</b> · <b>sin descarga</b>.<br>
+    Datos medidos en la base en operación el 4 de setiembre de 2026 · Valle de Paz, julio a
+    setiembre 2026.
+  </p>
+</div>

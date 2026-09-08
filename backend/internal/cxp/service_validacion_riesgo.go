@@ -43,12 +43,16 @@ type EfectoValidacion struct {
 	PorMotivo      []EfectoMotivo `json:"por_motivo"`
 }
 
-// Claves de los parámetros de validación (las define la migración 0061/0062).
+// Claves de los parámetros de validación (las definen las migraciones 0061/0062 y 0076).
+//
+// La lista es blanca a propósito: son los umbrales que deciden cuánto gasto se paga sin revisión
+// humana, así que solo se editan estos y por la pantalla de Validación por riesgo.
 var clavesValidacion = map[string]bool{
-	"VALIDACION_UMBRAL_MONTO":        true,
-	"VALIDACION_PROVEEDOR_NUEVO_MAX": true,
-	"VALIDACION_DESVIO_PCT":          true,
-	"VALIDACION_DESVIO_PISO_MONTO":   true,
+	"VALIDACION_UMBRAL_MONTO":               true,
+	"VALIDACION_PROVEEDOR_NUEVO_MAX":        true,
+	"VALIDACION_PROVEEDOR_NUEVO_PISO_MONTO": true,
+	"VALIDACION_DESVIO_PCT":                 true,
+	"VALIDACION_DESVIO_PISO_MONTO":          true,
 }
 
 // ParametrosValidacion devuelve los umbrales vigentes.
