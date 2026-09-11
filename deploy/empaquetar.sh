@@ -54,6 +54,9 @@ INCLUIR=(
 	deploy             # instalador, actualizador, respaldo, Caddyfile, compose de producción
 	docs               # formatos de banco y especificaciones
 	entrega-programadores # manual técnico, esquema, diccionario, endpoints
+	# El conector de Gmail vive acá y NO fuera del repositorio: de él depende que no se pierda una
+	# factura, y estuvo sin versionar, sin pruebas y sin que ningún despliegue lo verificara.
+	integraciones      # conector de recepción de facturas (Apps Script) y su instructivo
 	infra              # configuración auxiliar
 	docker-compose.yml # ambiente de desarrollo
 	Makefile

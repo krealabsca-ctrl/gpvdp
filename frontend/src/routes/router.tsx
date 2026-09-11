@@ -35,6 +35,8 @@ import { CajaChicaPage } from "@/features/cxp/pages/CajaChicaPage";
 import { NuevoDocumentoPage } from "@/features/cxp/pages/NuevoDocumentoPage";
 import { DocumentoDetailPage } from "@/features/cxp/pages/DocumentoDetailPage";
 import { ImportarPage } from "@/features/cxp/pages/ImportarPage";
+import { RecepcionPage } from "@/features/cxp/pages/RecepcionPage";
+import { FuentesRecepcionPage } from "@/features/cxp/pages/FuentesRecepcionPage";
 import { DashboardCxpPage } from "@/features/cxp/pages/DashboardCxpPage";
 // Módulo CxC (fase 1) — cartera sobre partidas abiertas.
 import { CarteraPage } from "@/features/cxc/pages/CarteraPage";
@@ -119,6 +121,8 @@ export const router = createBrowserRouter([
           { path: "cxp/bandeja", element: <BandejaPage /> },
           { path: "cxp/dashboard", element: <DashboardCxpPage /> },
           { path: "cxp/importar", element: <ImportarPage /> },
+          { path: "cxp/recepcion", element: <RecepcionPage /> },
+          { path: "cxp/fuentes", element: <FuentesRecepcionPage /> },
           { path: "cxp/proveedores", element: <ProveedoresPage /> },
           { path: "cxp/anticipos", element: <AnticiposPage /> },
           { path: "cxp/cajas", element: <CajaChicaPage /> },

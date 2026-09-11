@@ -90,6 +90,7 @@ ni del query string. Es la base del aislamiento entre empresas.
 | GET | `/v1/bancos/analisis/calendario` | `bancos.ver_dashboard` |
 | GET | `/v1/bancos/analisis/cuentas` | `bancos.ver_dashboard` |
 | GET | `/v1/bancos/analisis/partidas` | `bancos.ver_analisis` |
+| GET | `/v1/bancos/analisis/partidas/diario` | `bancos.ver_analisis` |
 | GET | `/v1/bancos/catalogo/sedes` | `bancos.ver` o `inventario.ver` o `cxc.ver` |
 | GET | `/v1/bancos/catalogo/sedes/:id/uso` | `bancos.ver` |
 | POST | `/v1/bancos/catalogo/sedes` | `bancos.catalogo` |
@@ -165,7 +166,7 @@ ni del query string. Es la base del aislamiento entre empresas.
 
 ## Cuentas por Pagar
 
-76 rutas.
+85 rutas.
 
 | Método | Ruta | Permiso |
 |---|---|---|
@@ -245,6 +246,28 @@ ni del query string. Es la base del aislamiento entre empresas.
 | POST | `/v1/cxp/documentos` | `cxp.importar` |
 | POST | `/v1/cxp/importaciones` | `cxp.importar` |
 | POST | `/v1/cxp/importaciones/confirmar` | `cxp.importar` |
+| GET | `/v1/cxp/recepciones` | `cxp.recepcion` |
+| POST | `/v1/cxp/recepciones/:id/reintentar` | `cxp.recepcion` |
+| GET | `/v1/cxp/recepciones/:id/archivo` | `cxp.recepcion` |
+| GET | `/v1/cxp/fuentes` | `cxp.fuentes` |
+| POST | `/v1/cxp/fuentes` | `cxp.fuentes` |
+| POST | `/v1/cxp/fuentes/:id/rotar` | `cxp.fuentes` |
+| PATCH | `/v1/cxp/fuentes/:id` | `cxp.fuentes` |
+
+### Puerta de máquina — recepción de facturas por buzón de correo
+
+Estas dos rutas **no** usan el JWT de usuario ni la matriz RBAC: se autentican con el **token de la
+fuente de recepción** (`Authorization: Bearer <token>`) y el `empresa_id` sale de la FILA del token,
+nunca del cuerpo. Su autorizador es el middleware `cxp.Handler.RequireTokenRecepcion`, y por eso
+cuelgan del grupo `v1` y no de `scoped`.
+
+No se pueden custodiar con `P("...")`: `RequirePermiso` lee un código de rol del token y estas
+llamadas no tienen usuario, así que con rol vacío responderían 403 siempre y con empresa vacía 500.
+
+| Método | Ruta | Autenticación |
+|---|---|---|
+| POST | `/v1/cxp/recepcion` | token de fuente |
+| POST | `/v1/cxp/recepcion/latido` | token de fuente |
 
 ## Cuentas por Cobrar
 

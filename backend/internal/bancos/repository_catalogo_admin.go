@@ -71,6 +71,26 @@ func (r *pgRepository) CambiarVisibilidadCxP(ctx context.Context, empresaID, con
 	return nil
 }
 
+// CambiarVisibilidadCxPClasificacion oculta o muestra una clasificación para CxP (mig 0080).
+//
+// Filtra por `empresa_id` además del id: sin eso, un id de otra empresa cambiaría la visibilidad de
+// su rubro. Cero filas = no existe acá, y se responde «no encontrada» en vez de un silencio.
+func (r *pgRepository) CambiarVisibilidadCxPClasificacion(ctx context.Context, empresaID, clasificacionID string, visible bool) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE clasificacion SET visible_cxp = $3 WHERE empresa_id = $1::uuid AND id = $2::uuid`,
+		empresaID, clasificacionID, visible)
+	if err != nil {
+		if idInvalido(err) {
+			return ErrClasificacionNoEncontrada
+		}
+		return fmt.Errorf("bancos: cambiar visibilidad cxp de la clasificación: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrClasificacionNoEncontrada
+	}
+	return nil
+}
+
 func (r *pgRepository) EliminarConcepto(ctx context.Context, empresaID, conceptoID string) error {
 	// Tenant-safe: primero se verifica que el concepto pertenezca a la empresa.
 	var pertenece bool

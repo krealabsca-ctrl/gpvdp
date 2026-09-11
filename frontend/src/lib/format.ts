@@ -97,6 +97,43 @@ export function montoLegible(texto: string | null | undefined): string {
   return t === "" ? "" : centimosALegible(montoACentimos(t));
 }
 
+/**
+ * Parsea un TIMESTAMP del backend a Date; null si no se entiende.
+ *
+ * ── POR QUÉ NO ALCANZA CON `new Date(iso)` ─────────────────────────────────
+ *
+ * El backend formatea los timestamps con `to_char(..., 'YYYY-MM-DD"T"HH24:MI:SSOF')` (17 endpoints
+ * hoy), y el patrón `OF` de Postgres emite el desfase SIN minutos cuando son cero: «+00», «-06».
+ * Eso NO es ISO 8601 válido y `new Date()` devuelve **NaN**:
+ *
+ *     new Date("2026-09-10T18:50:23+00")     -> NaN
+ *     new Date("2026-09-10T18:50:23+00:00")  -> ok
+ *
+ * El síntoma es traicionero porque no es un error: la pantalla muestra «nunca» o el texto crudo,
+ * como si el dato no existiera. Acá se completan los minutos del desfase antes de parsear.
+ */
+export function aFechaHora(iso: string | null | undefined): Date | null {
+  const s = String(iso ?? "").trim();
+  if (!s) return null;
+  // «+00» / «-06» al final -> «+00:00» / «-06:00». Con minutos ya presentes o con «Z», no toca nada.
+  const normalizado = s.replace(/([+-]\d{2})$/, "$1:00");
+  const d = new Date(normalizado);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Formatea un timestamp del backend a fecha y hora local (es-CR). "" si no se entiende. */
+export function formatFechaHora(iso: string | null | undefined): string {
+  const d = aFechaHora(iso);
+  if (!d) return "";
+  return d.toLocaleString("es-CR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 /** Formatea una fecha ISO (YYYY-MM-DD) a formato local corto, sin zona horaria. */
 export function formatFecha(iso: string | null | undefined): string {
   if (!iso) return "—";

@@ -39,3 +39,10 @@ func (f *fakeRepo) ReasignarConceptoClasificacion(context.Context, string, strin
 	return nil
 }
 func (f *fakeRepo) EliminarClasificacion(context.Context, string, string) error { return nil }
+
+// Visibilidad por clasificación (mig 0080): `visibleClasifGuardada` deja comprobar que el servicio
+// mandó el valor que le pidieron, incluido el `false` que oculta el rubro.
+func (f *fakeRepo) CambiarVisibilidadCxPClasificacion(_ context.Context, _, clasificacionID string, visible bool) error {
+	f.visibleClasifGuardada = [2]string{clasificacionID, map[bool]string{true: "true", false: "false"}[visible]}
+	return nil
+}

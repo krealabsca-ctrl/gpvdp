@@ -207,7 +207,12 @@ func (r *pgRepository) PartidasDeDimension(ctx context.Context, empresaID, desde
 			       COALESCE(SUM(CASE WHEN m.debito > 0 THEN m.monto_crc ELSE -m.monto_crc END), 0) AS gasto,
 			       ` + sqlOrigenDimension + ` AS origen,
 			       m.empresa_id                         AS empresa_id,
-			       ` + sqlDepartamentoEfectivoID + `    AS departamento_id
+			       ` + sqlDepartamentoEfectivoID + `    AS departamento_id,
+			       -- El default que tiene escrito la PARTIDA, que no es lo mismo que el
+			       -- departamento efectivo de la fila: este es el que se corrige, y hacen falta
+			       -- los dos porque el UPDATE los escribe juntos.
+			       cl.departamento_id                   AS partida_departamento_id,
+			       cl.sede_id                           AS partida_sede_id
 			FROM movimiento_bancario m
 			` + joinClasifParaDimensiones + `
 			LEFT JOIN concepto co ON co.id = m.concepto_id
@@ -217,14 +222,16 @@ func (r *pgRepository) PartidasDeDimension(ctx context.Context, empresaID, desde
 			  AND co.naturaleza = 'GASTO'
 			  AND to_char(m.fecha, 'YYYY-MM') BETWEEN $2 AND $3
 			  AND ` + condicion + `
-			GROUP BY 1, 2, 3, 6, 7, 8
+			GROUP BY 1, 2, 3, 6, 7, 8, 9, 10
 		)
 		SELECT g.clasificacion_id, g.concepto, g.clasificacion, g.movs, g.gasto::text, g.origen,
 		       COALESCE((SELECT SUM(pp.monto_crc) FROM presupuesto_departamento pp
 		                 WHERE pp.empresa_id = g.empresa_id
 		                   AND pp.departamento_id = g.departamento_id
 		                   AND pp.clasificacion_id::text = g.clasificacion_id
-		                   AND pp.periodo BETWEEN $2 AND $3), 0)::text
+		                   AND pp.periodo BETWEEN $2 AND $3), 0)::text,
+		       COALESCE(g.partida_departamento_id::text, ''),
+		       COALESCE(g.partida_sede_id::text, '')
 		FROM gasto g
 		ORDER BY g.gasto DESC`
 
@@ -241,7 +248,7 @@ func (r *pgRepository) PartidasDeDimension(ctx context.Context, empresaID, desde
 	for rows.Next() {
 		var g GastoPartidaDimension
 		if err := rows.Scan(&g.ClasificacionID, &g.Concepto, &g.Clasificacion, &g.Movs, &g.Gasto,
-			&g.Origen, &g.Subpresupuesto); err != nil {
+			&g.Origen, &g.Subpresupuesto, &g.PartidaDepartamentoID, &g.PartidaSedeID); err != nil {
 			return nil, fmt.Errorf("bancos: scan partida de dimensión: %w", err)
 		}
 		out = append(out, g)

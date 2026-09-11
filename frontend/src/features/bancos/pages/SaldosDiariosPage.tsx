@@ -34,7 +34,15 @@ import {
   type BadgeTone,
 } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { etiquetaPeriodo, formatMoneda, hoyCR, periodoActual, toNumber } from "@/lib/format";
+import {
+  etiquetaPeriodo,
+  formatMoneda,
+  hoyCR,
+  montoLegible,
+  montoParaApi,
+  periodoActual,
+  toNumber,
+} from "@/lib/format";
 import { mensajeError } from "@/lib/apiError";
 import { useTienePermiso } from "@/features/auth/permisos";
 import {
@@ -81,9 +89,17 @@ const ETIQUETA_CARGA: Record<EstadoCarga, string> = {
   SIN_CARGA: "Sin carga",
 };
 
-/** Un saldo se escribe con punto decimal; se limpian espacios, comas y símbolos. */
+/**
+ * Normaliza el saldo tecleado al decimal plano que espera la API.
+ *
+ * Usa `montoParaApi` (lib/format), el mismo parser que el resto de la aplicación. La versión
+ * anterior era propia de esta pantalla y estaba MAL: borraba las comas y dejaba los puntos, así que
+ * copiar el número TAL COMO LA APP LO MUESTRA («152 345 000,50») mandaba 15.234.500.050 —cien veces
+ * de más— y «1.234,56» mandaba 1,23. El parser compartido acierta porque toma el último separador
+ * como decimal solo si le siguen 1 o 2 dígitos.
+ */
 function normalizarMonto(texto: string): string {
-  return texto.replace(/[^\d.,-]/g, "").replace(/,/g, "");
+  return montoParaApi(texto);
 }
 
 export function SaldosDiariosPage() {
@@ -113,7 +129,10 @@ export function SaldosDiariosPage() {
     const inicial: Record<string, string> = {};
     const notasIniciales: Record<string, string> = {};
     for (const s of t.saldos) {
-      inicial[s.cuenta_id] = s.saldo;
+      // Legible desde el arranque: el saldo guardado llega como decimal plano
+      // («152345000.00») y mostrarlo así es justo lo que hacía la pantalla ilegible.
+      // `normalizarMonto` lo devuelve a plano al guardar, así que la comparación no se altera.
+      inicial[s.cuenta_id] = montoLegible(s.saldo);
       notasIniciales[s.cuenta_id] = s.nota;
     }
     setBorrador(inicial);
@@ -390,6 +409,23 @@ function TablaCaptura({
           {saldos.map((s) => {
             const moneda = s.moneda === "USD" ? "USD" : "CRC";
             const bloqueado = !editable || s.congelado;
+
+            // ── El juicio de la fila se calcula SOBRE LO TECLEADO, no sobre lo guardado ──
+            //
+            // Antes la fila mostraba el veredicto del servidor, que solo conoce lo ya guardado: se
+            // escribía un saldo y la fila seguía diciendo «Sin capturar», con la diferencia en «—».
+            // Eso es lo que hacía la pantalla confusa: el número estaba a la vista y la fila lo
+            // negaba. Ahora el cuadre y la diferencia se ven ANTES de guardar.
+            const tecleado = borrador[s.cuenta_id] ?? "";
+            const hayTecleado = tecleado.trim() !== "";
+            const plano = hayTecleado ? normalizarMonto(tecleado) : "";
+            const sinGuardar = hayTecleado && plano !== s.saldo;
+            const hayEsperado = (s.saldo_esperado ?? "") !== "";
+            // Mismo signo que el servidor: banco − esperado (positivo = el banco tiene más).
+            const difViva =
+              hayEsperado && hayTecleado ? toNumber(plano) - toNumber(s.saldo_esperado) : null;
+            const cuadraViva = difViva !== null && Math.abs(difViva) < 0.005;
+
             return (
               <TR key={s.cuenta_id}>
                 <TD>
@@ -412,22 +448,48 @@ function TablaCaptura({
                   )}
                 </TD>
                 <TD className="text-right tabular-nums text-xs">
-                  <span className="text-positivo">+{formatMoneda(s.entradas_dia, moneda)}</span>
-                  <span className="block text-negativo">−{formatMoneda(s.salidas_dia, moneda)}</span>
+                  {/* Dos líneas de ceros no informan y ensucian la fila: cuando no hubo
+                      movimientos, se dice eso. */}
+                  {toNumber(s.entradas_dia) === 0 && toNumber(s.salidas_dia) === 0 ? (
+                    <span className="text-content-muted">sin movimientos</span>
+                  ) : (
+                    <>
+                      <span className="text-positivo">+{formatMoneda(s.entradas_dia, moneda)}</span>
+                      <span className="block text-negativo">−{formatMoneda(s.salidas_dia, moneda)}</span>
+                    </>
+                  )}
                 </TD>
                 <TD className="text-right tabular-nums">
-                  {s.saldo_esperado ? formatMoneda(s.saldo_esperado, moneda) : <span className="text-content-muted">—</span>}
+                  {hayEsperado ? (
+                    formatMoneda(s.saldo_esperado, moneda)
+                  ) : (
+                    // Un «—» sin explicación se lee como que el sistema falló. No hay esperado
+                    // porque no hay saldo de ayer con el que compararlo.
+                    <span className="text-xs text-content-muted">sin saldo anterior</span>
+                  )}
                 </TD>
                 <TD className="text-right">
-                  <Input
-                    inputMode="decimal"
-                    value={borrador[s.cuenta_id] ?? ""}
-                    onChange={(e) => onSaldo(s.cuenta_id, e.target.value)}
-                    disabled={bloqueado}
-                    placeholder="0.00"
-                    className="w-36 text-right tabular-nums"
-                    aria-label={`Saldo de ${s.alias}`}
-                  />
+                  <div className="flex items-center justify-end gap-1">
+                    {/* La moneda al lado del campo: sin marca, ₡152.345.000 y USD 152.345.000 se
+                        escriben igual y no hay forma de notar el error. Se usa la misma marca que
+                        formatMoneda («₡» y «USD» en es-CR), no un símbolo distinto. */}
+                    <span className="text-xs font-medium text-content-muted">
+                      {moneda === "USD" ? "USD" : "₡"}
+                    </span>
+                    <Input
+                      inputMode="decimal"
+                      value={tecleado}
+                      onChange={(e) => onSaldo(s.cuenta_id, e.target.value)}
+                      // Al salir del campo se reescribe con separador de miles, igual que el resto
+                      // de la app. Se hace en `blur` y no en cada tecla para no pelear con quien
+                      // está escribiendo.
+                      onBlur={() => hayTecleado && onSaldo(s.cuenta_id, montoLegible(tecleado))}
+                      disabled={bloqueado}
+                      placeholder="0,00"
+                      className="w-36 text-right tabular-nums"
+                      aria-label={`Saldo de ${s.alias} en ${moneda}`}
+                    />
+                  </div>
                   {s.congelado && (
                     <span className="mt-1 block text-xs text-content-muted">
                       Congelado {s.revisado_en.slice(0, 10)}
@@ -437,13 +499,29 @@ function TablaCaptura({
                 <TD
                   className={cn(
                     "text-right tabular-nums",
-                    s.cuadre === "DIFIERE" && "font-semibold text-negativo",
+                    difViva !== null && !cuadraViva && "font-semibold text-negativo",
+                    difViva !== null && cuadraViva && "text-positivo",
                   )}
                 >
-                  {s.diferencia ? formatMoneda(s.diferencia, moneda) : <span className="text-content-muted">—</span>}
+                  {difViva !== null ? (
+                    <>
+                      {difViva > 0 ? "+" : ""}
+                      {formatMoneda(difViva.toFixed(2), moneda)}
+                    </>
+                  ) : (
+                    <span className="text-content-muted">—</span>
+                  )}
                 </TD>
                 <TD>
-                  <Badge tone={TONO_CUADRE[s.cuadre]}>{ETIQUETA_CUADRE[s.cuadre]}</Badge>
+                  {/* El estado de la fila, en este orden de prioridad: lo que falta guardar manda
+                      sobre el veredicto del servidor, porque es lo que la persona tiene enfrente. */}
+                  {sinGuardar ? (
+                    <Badge tone={cuadraViva ? "positivo" : difViva !== null ? "negativo" : "accent"}>
+                      {cuadraViva ? "Cuadra · sin guardar" : difViva !== null ? "Difiere · sin guardar" : "Sin guardar"}
+                    </Badge>
+                  ) : (
+                    <Badge tone={TONO_CUADRE[s.cuadre]}>{ETIQUETA_CUADRE[s.cuadre]}</Badge>
+                  )}
                 </TD>
                 <TD>
                   <Input

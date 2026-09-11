@@ -1,15 +1,20 @@
 /**
  * CxP — Importador de facturación (/cxp/importar).
  *
- * Flujo: subir el .xlsx de facturación electrónica -> Previsualizar (marca cada
- * fila NUEVA/DUPLICADA por clave, y si su proveedor por cédula ya existe) ->
- * Confirmar -> crea los documentos nuevos y da de alta los proveedores faltantes.
+ * Acepta DOS formatos, y el backend elige el parser por la FORMA del archivo:
+ *
+ *   · el .xlsx que sale del script de facturación (el camino de siempre);
+ *   · el XML del comprobante electrónico de Hacienda —uno, varios concatenados,
+ *     o un .zip de XML—, que es el dato original y trae lo que el Excel pierde:
+ *     el tipo de cambio, la condición de venta declarada y el RECEPTOR (a quién
+ *     se le facturó).
+ *
+ * Flujo: subir -> Previsualizar (marca cada fila NUEVA/DUPLICADA por clave, y si
+ * su proveedor por cédula ya existe) -> Confirmar -> crea los documentos nuevos y
+ * da de alta los proveedores faltantes.
  *
  * El backend re-parsea el archivo en ambos pasos y deduplica por clave (50 díg.),
  * así que reenviar el mismo archivo en "Confirmar" es seguro (no duplica).
- *
- * Facturas en USD: no se importan (el Excel no trae tipo de cambio). Se cuentan
- * aparte y quedan para carga manual con su TC.
  */
 
 import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
@@ -49,10 +54,14 @@ export function ImportarPage() {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  /** Extensiones aceptadas. El backend decide por la forma del archivo; esto solo evita el viaje. */
+  const EXTENSIONES = [".xlsx", ".xml", ".zip"];
+
   function seleccionarArchivo(f: File | undefined | null) {
     if (!f) return;
-    if (!f.name.toLowerCase().endsWith(".xlsx")) {
-      toast.error("El archivo debe ser un Excel .xlsx");
+    const nombre = f.name.toLowerCase();
+    if (!EXTENSIONES.some((e) => nombre.endsWith(e))) {
+      toast.error("El archivo debe ser el Excel de facturación (.xlsx), un XML de comprobante, o un .zip de XML");
       return;
     }
     setArchivo(f);
@@ -72,7 +81,7 @@ export function ImportarPage() {
 
   function subir() {
     if (!archivo) {
-      toast.error("Seleccioná el archivo .xlsx de facturación.");
+      toast.error("Seleccioná el Excel de facturación, o los XML de los comprobantes.");
       return;
     }
     previsualizar.mutate(archivo, {
@@ -113,7 +122,7 @@ export function ImportarPage() {
     <div className="mx-auto flex max-w-5xl flex-col gap-6">
       <PageHeader
         title="Importar facturación"
-        description="Subí el Excel de facturación electrónica. El sistema detecta duplicados por clave y da de alta los proveedores que falten."
+        description="Subí el Excel de facturación, o directamente los XML de los comprobantes electrónicos (uno, varios, o un .zip). El sistema detecta duplicados por clave y da de alta los proveedores que falten."
       />
 
       <Card>
@@ -133,7 +142,7 @@ export function ImportarPage() {
               dragOver ? "border-accent bg-accent/5" : "border-border",
             )}
           >
-            <p className="text-sm text-content-muted">Arrastrá el archivo .xlsx aquí, o</p>
+            <p className="text-sm text-content-muted">Arrastrá el .xlsx, los .xml o un .zip aquí, o</p>
             <Button
               type="button"
               variant="secondary"
@@ -145,10 +154,10 @@ export function ImportarPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              accept=".xlsx,.xml,.zip,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/xml,application/xml,application/zip"
               onChange={onFileChange}
               className="sr-only"
-              aria-label="Archivo Excel de facturación"
+              aria-label="Archivo de facturación: Excel, XML o zip de XML"
             />
             {archivo && (
               <p className="mt-1 text-sm font-medium text-content">
@@ -209,6 +218,8 @@ export function ImportarPage() {
 function PreviewBlock({ preview }: { preview: PreviewImportacion }) {
   const { resumen, filas } = preview;
   const usd = useMemo(() => filas.filter((f) => f.moneda === "USD").length, [filas]);
+  /** El backend solo informa las versiones del esquema cuando lo que se subió fueron XML. */
+  const esXml = (resumen.versiones?.length ?? 0) > 0 || filas.some((f) => !!f.tipo_documento);
 
   const stats = [
     { label: "Leídas", value: resumen.leidas, tone: "neutral" as const },
@@ -232,10 +243,111 @@ function PreviewBlock({ preview }: { preview: PreviewImportacion }) {
           ))}
         </div>
 
+        {/* De dónde salieron las filas. Un archivo del que se leen menos facturas de las que tiene
+            era indistinguible de un archivo chico: las filas sin clave se descartaban en silencio.
+            Ahora el faltante se puede explicar sin abrir el Excel. */}
+        {esXml ? (
+          <p className="text-xs text-content-muted">
+            Leído de <b className="text-content">{resumen.hoja}</b>:{" "}
+            <b className="text-content">{resumen.filas_hoja}</b> comprobante(s) en total, de los que
+            se tomaron <b className="text-content">{resumen.leidas}</b> como factura por pagar.
+            {resumen.sin_clave > 0 && (
+              <>
+                {" "}
+                Se descartaron <b className="text-content">{resumen.sin_clave}</b> por no traer una
+                clave de Hacienda válida (50 dígitos).
+              </>
+            )}
+          </p>
+        ) : (
+          <p className="text-xs text-content-muted">
+            Leído de la hoja <b className="text-content">«{resumen.hoja}»</b>
+            {resumen.hojas.length > 1 && <> (el archivo trae {resumen.hojas.length} hojas)</>}: la
+            hoja tiene <b className="text-content">{resumen.filas_hoja}</b> fila(s) de datos y se
+            leyeron <b className="text-content">{resumen.leidas}</b>.
+            {resumen.sin_clave > 0 && (
+              <>
+                {" "}
+                Se descartaron <b className="text-content">{resumen.sin_clave}</b> por no traer clave
+                — si esperabas más facturas, ahí está la diferencia.
+              </>
+            )}
+          </p>
+        )}
+
+        {/* ── Lo que solo aparece cuando se subieron XML ─────────────────────── */}
+
+        {resumen.versiones && resumen.versiones.length > 0 && (
+          <p className="text-xs text-content-muted">
+            Esquema de Hacienda leído: <b className="text-content">{resumen.versiones.join(" · ")}</b>
+            {resumen.repetidas_en_archivo
+              ? ` · ${resumen.repetidas_en_archivo} comprobante(s) venían repetidos en la misma entrega`
+              : ""}
+            {resumen.xml_ilegibles ? ` · ${resumen.xml_ilegibles} archivo(s) no se pudieron leer` : ""}
+          </p>
+        )}
+
+        {/* Solo la factura electrónica genera deuda. Lo demás se informa para que nada parezca
+            perdido: la nota de crédito RESTA y entraría sumando, y el recibo de pago documenta que
+            YA se pagó. */}
+        {resumen.descartados && Object.keys(resumen.descartados).length > 0 && (
+          <div className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-content-muted">
+            <p>
+              Se leyeron comprobantes que <b className="text-content">no generan cuenta por pagar</b>{" "}
+              y quedaron fuera:
+            </p>
+            <ul className="mt-1 list-disc pl-5">
+              {Object.entries(resumen.descartados).map(([tipo, n]) => (
+                <li key={tipo}>
+                  <b className="text-content">{n}</b> {tipo}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {(resumen.descuadres ?? 0) > 0 && (
+          <p className="rounded-md border border-pendiente/40 bg-pendiente/5 px-3 py-2 text-sm text-content">
+            En <b>{resumen.descuadres}</b> comprobante(s) la aritmética no cuadra (el subtotal más el
+            impuesto no da el total). Se importan con el{" "}
+            <b>total del comprobante</b>, que es lo que se le debe al proveedor, pero conviene
+            mirarlos: el detalle está en la columna de la derecha de cada fila.
+          </p>
+        )}
+
+        {(resumen.sin_receptor ?? 0) > 0 && (
+          <p className="rounded-md border border-pendiente/40 bg-pendiente/5 px-3 py-2 text-sm text-content">
+            <b>{resumen.sin_receptor}</b> comprobante(s) no dicen a quién se les facturó (no traen
+            receptor), así que no se puede verificar que sean de esta empresa. Revisalos antes de
+            confirmar.
+          </p>
+        )}
+
+        {resumen.sin_fecha > 0 && (
+          <p className="rounded-md border border-negativo/30 bg-negativo/5 px-3 py-2 text-sm text-content">
+            {resumen.sin_fecha} fila(s) traen la fecha de emisión ilegible y no se van a importar. Se
+            aceptan <span className="font-mono">dd/mm/aaaa</span> y{" "}
+            <span className="font-mono">aaaa-mm-dd</span>.
+          </p>
+        )}
+
+        {/* La fecha se toma de la clave numérica, que la trae en un formato sin ambigüedad. Cuando
+            la columna del Excel dice otra cosa, se avisa: el archivo viene mal y eso se arregla en
+            el script que lo genera, no acá. */}
+        {resumen.fecha_corregida > 0 && (
+          <p className="rounded-md border border-pendiente/40 bg-pendiente/5 px-3 py-2 text-sm text-content">
+            En <b>{resumen.fecha_corregida}</b> fila(s) la fecha de la columna no coincide con la que
+            trae la clave numérica de la factura. Se usó la de la clave, que es la de Hacienda y no
+            admite dos lecturas. Conviene revisar el archivo de origen.
+          </p>
+        )}
+
         {usd > 0 && (
-          <p className="rounded-md border border-pendiente/30 bg-pendiente/5 px-3 py-2 text-sm text-content">
-            {usd} factura(s) en USD no se importan automáticamente (el Excel no trae tipo de cambio).
-            Cargalas manualmente con su TC desde “Nuevo documento”.
+          <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-content-muted">
+            {usd} factura(s) en USD: se importan con el{" "}
+            <b className="text-content">tipo de cambio de la factura</b>
+            {esXml ? " que declara el comprobante" : " (columna «Tipo Cambio» del archivo)"}. Si
+            alguna no lo trae, se rechaza y lo dice.
           </p>
         )}
 
@@ -248,12 +360,14 @@ function PreviewBlock({ preview }: { preview: PreviewImportacion }) {
                 <TH>Proveedor</TH>
                 <TH>Cédula</TH>
                 <TH>Emisión</TH>
+                {esXml && <TH>Receptor</TH>}
                 <TH className="text-right">Total</TH>
+                {esXml && <TH>Aritmética</TH>}
               </TR>
             </THead>
             <TBody>
               {filas.map((f, i) => (
-                <FilaPreview key={`${f.clave}-${i}`} fila={f} />
+                <FilaPreview key={`${f.clave}-${i}`} fila={f} esXml={esXml} />
               ))}
             </TBody>
           </Table>
@@ -263,7 +377,7 @@ function PreviewBlock({ preview }: { preview: PreviewImportacion }) {
   );
 }
 
-function FilaPreview({ fila }: { fila: FilaImportada }) {
+function FilaPreview({ fila, esXml }: { fila: FilaImportada; esXml: boolean }) {
   const dup = fila.estado === "DUPLICADO";
   return (
     <TR className={cn(dup && "opacity-60")}>
@@ -281,6 +395,11 @@ function FilaPreview({ fila }: { fila: FilaImportada }) {
       </TD>
       <TD className="font-mono text-xs tabular-nums">{fila.cedula || "—"}</TD>
       <TD className="tabular-nums">{formatFecha(fila.fecha_emision)}</TD>
+      {esXml && (
+        <TD className="font-mono text-xs tabular-nums">
+          {fila.receptor || <span className="text-negativo">sin receptor</span>}
+        </TD>
+      )}
       <TD className="text-right tabular-nums">
         {formatMoneda(fila.total, (fila.moneda as Moneda) || "CRC")}
         {fila.moneda === "USD" && (
@@ -289,6 +408,20 @@ function FilaPreview({ fila }: { fila: FilaImportada }) {
           </Badge>
         )}
       </TD>
+      {/* La aritmética del comprobante. Existe porque un elemento del XML que no calza devuelve
+          CERO sin error: sin esta columna, una factura con IVA 0 por un cambio de esquema pasaría
+          desapercibida. Vacío = cuadra. */}
+      {esXml && (
+        <TD className="text-xs">
+          {fila.descuadre ? (
+            <span className="text-pendiente" title={fila.descuadre}>
+              no cuadra
+            </span>
+          ) : (
+            <span className="text-content-muted">✓</span>
+          )}
+        </TD>
+      )}
     </TR>
   );
 }

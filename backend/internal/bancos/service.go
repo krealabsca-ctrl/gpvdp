@@ -170,6 +170,9 @@ type Repository interface {
 	CrearClasificacion(ctx context.Context, empresaID, conceptoID, nombre, cuentaContable string) (ClasificacionItem, error)
 	RenombrarConcepto(ctx context.Context, empresaID, conceptoID, nombre string) error
 	CambiarVisibilidadCxP(ctx context.Context, empresaID, conceptoID string, visible bool) error
+	// El corte fino de la visibilidad: una clasificación dentro de un concepto que sí es de CxP
+	// (mig 0080).
+	CambiarVisibilidadCxPClasificacion(ctx context.Context, empresaID, clasificacionID string, visible bool) error
 	// Las guardas de alcance de la puerta de Contabilidad al catálogo (`cxp.catalogo`): ese permiso
 	// solo alcanza para los rubros marcados visibles para CxP.
 	ConceptoEsVisibleCxP(ctx context.Context, empresaID, conceptoID string) (bool, error)
@@ -232,6 +235,8 @@ type Repository interface {
 	AplicarClasificacionesEnBloque(ctx context.Context, empresaID string, asigs []AsignacionClasif) (int, error)
 	MovimientosPlantillaClasif(ctx context.Context, empresaID, desde, hasta string, soloSinClasificar bool, limite int) ([]MovimientosParaPlantilla, error)
 	SeriePorPartida(ctx context.Context, empresaID, desde, hasta string) ([]TendenciaPartida, error)
+	// SerieDiariaPorPartida: el día a día de unas partidas concretas dentro del rango de meses.
+	SerieDiariaPorPartida(ctx context.Context, empresaID, desde, hasta string, clasificaciones []string) ([]SerieDiariaPartida, error)
 	// Dimensiones del gasto (departamento y sede) y presupuesto por departamento.
 	ListarSedes(ctx context.Context, empresaID string, incluirInactivas bool) ([]Sede, error)
 	CrearSede(ctx context.Context, empresaID, nombre, codigo string) (Sede, error)

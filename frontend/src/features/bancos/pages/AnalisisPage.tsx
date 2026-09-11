@@ -55,9 +55,10 @@ import {
 } from "@/lib/format";
 import { mensajeError } from "@/lib/apiError";
 import { usePeriodoActivo } from "@/app/PeriodoProvider";
-import { useAnalisisPartidas } from "@/features/bancos/hooks";
+import { useAnalisisPartidas, useAnalisisPartidasDiario } from "@/features/bancos/hooks";
 import { PeriodoSelector } from "@/features/bancos/components/PeriodoSelector";
 import { Sparkline } from "@/features/bancos/components/Sparkline";
+import { DiarioPartidasChart } from "@/features/bancos/components/DiarioPartidasChart";
 import type { AnalisisPartidas, TendenciaPartida } from "@/api/bancos";
 
 /** Cuántos meses hacia atrás mira el análisis. El tope de 24 es el del endpoint. */
@@ -382,6 +383,8 @@ export function AnalisisPage() {
             </CardContent>
           </Card>
 
+          <DiaADia desde={desde} hasta={hasta} clasifs={clasifs} />
+
           <div className="grid gap-4 sm:grid-cols-3">
             <Card>
               <CardContent className="pt-6">
@@ -657,5 +660,115 @@ export function AnalisisPage() {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * Día a día de las partidas seleccionadas: CUÁNDO se movió la plata.
+ *
+ * Es una vista aparte y no una granularidad de la tabla mensual, y la razón es de fondo: el
+ * análisis mensual JUZGA —compara cada partida contra su propio promedio y marca lo que se salió
+ * de cauce—, y ese juicio no se traduce al día. El gasto diario es a saltos, así que «este día se
+ * desvió 400 % del promedio diario» marcaría casi todos los días de pago. Acá no hay promedio ni
+ * desvío: hay una serie.
+ *
+ * Sin partidas elegidas no se pide nada. El día a día de las 168 partidas no es una respuesta.
+ */
+function DiaADia({ desde, hasta, clasifs }: { desde: string; hasta: string; clasifs: string[] }) {
+  const q = useAnalisisPartidasDiario(desde, hasta, clasifs);
+
+  if (clasifs.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Día a día</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-content-muted">
+            Elegí una o más partidas arriba para ver en qué días se movió la plata. Sirve para
+            distinguir un gasto que fue <b className="text-content">de golpe</b> de uno{" "}
+            <b className="text-content">repartido</b> en el mes, que en la tabla mensual se ven
+            igual.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const data = q.data;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Día a día</CardTitle>
+        {data && (
+          <p className="mt-0.5 text-xs text-content-muted">
+            {data.dias_con_movimiento} día(s) con movimiento entre {etiquetaPeriodo(desde)} y{" "}
+            {etiquetaPeriodo(hasta)}. Los días sin movimiento no se dibujan: una barra en cero no
+            es un dato.
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {q.isLoading && <LoadingState label="Buscando los movimientos día por día…" />}
+        {q.isError && <ErrorState message={mensajeError(q.error)} onRetry={() => void q.refetch()} />}
+        {data && (
+          <>
+            <DiarioPartidasChart partidas={data.partidas} />
+            {data.partidas.length > 0 && (
+              <TableContainer className="mt-4">
+                <Table>
+                  <THead>
+                    <TR>
+                      <TH>Partida</TH>
+                      <TH className="text-right">Total del rango</TH>
+                      <TH className="text-right">Movs</TH>
+                      <TH className="text-right">Días con movimiento</TH>
+                      <TH>El día más grande</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {data.partidas.map((p) => {
+                      // El día más grande es lo que contesta «¿fue de golpe?»: si concentra la
+                      // mayor parte del total, la respuesta es sí y se ve sin leer la gráfica.
+                      const mayor = p.dias.reduce(
+                        (a, d) => (toNumber(d.monto) > toNumber(a.monto) ? d : a),
+                        p.dias[0] ?? { fecha: "", monto: "0", movs: 0 },
+                      );
+                      const total = toNumber(p.total);
+                      const pct = total !== 0 ? (toNumber(mayor.monto) / total) * 100 : 0;
+                      return (
+                        <TR key={p.clasificacion_id}>
+                          <TD>
+                            <span className="font-medium text-content">{p.clasificacion}</span>
+                            <span className="block text-xs text-content-muted">{p.concepto}</span>
+                          </TD>
+                          <TD className="text-right font-medium tabular-nums">
+                            {formatMoneda(p.total)}
+                          </TD>
+                          <TD className="text-right tabular-nums">{p.movs}</TD>
+                          <TD className="text-right tabular-nums">{p.dias.length}</TD>
+                          <TD className="text-xs">
+                            {p.dias.length === 0 ? (
+                              <span className="text-content-muted">sin movimiento</span>
+                            ) : (
+                              <>
+                                <span className="text-content">{mayor.fecha}</span>{" "}
+                                <span className="text-content-muted">
+                                  {formatMoneda(mayor.monto)} ({Math.round(pct)} % del total)
+                                </span>
+                              </>
+                            )}
+                          </TD>
+                        </TR>
+                      );
+                    })}
+                  </TBody>
+                </Table>
+              </TableContainer>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }

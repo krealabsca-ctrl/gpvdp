@@ -148,6 +148,17 @@ type ClasificacionItem struct {
 	ConceptoID string `json:"concepto_id"`
 	Concepto   string `json:"concepto"`
 	Nombre     string `json:"nombre"`
+	// VisibleCxP: si Contabilidad la ve en el selector de gasto (mig 0080).
+	//
+	// El corte fino dentro de un concepto que sí es de CxP. Antes la visibilidad vivía solo en el
+	// concepto y la clasificación la heredaba: con 4 conceptos visibles quedaban 124
+	// clasificaciones expuestas, y entre ellas gasto confidencial.
+	VisibleCxP bool `json:"visible_cxp"`
+	// VisibleConcepto: si el CONCEPTO padre es visible para CxP. Va en la respuesta para que la
+	// pantalla pueda explicar por qué una clasificación tildada igual no aparece en CxP —el
+	// concepto la está tapando— en vez de dejar al usuario peleando con un interruptor que no
+	// tiene efecto.
+	VisibleConcepto bool `json:"visible_concepto"`
 }
 
 // NuevaRegla es la carga para crear una regla (incluye creación "por bloque").

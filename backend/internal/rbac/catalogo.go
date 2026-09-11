@@ -61,12 +61,18 @@ var Catalogo = []PermisoDef{
 	{"cxp.dashboard", "Cuentas por pagar", "Ver dashboard de CxP", "KPIs y tablero del proceso de cuentas por pagar", false},
 	{"cxp.cartera_abierta", "Cuentas por pagar", "Ver la cartera abierta completa", "TODO lo que la empresa debe, sin importar la fase ni el departamento (dato sensible: es la deuda total)", true},
 	{"cxp.clasificar", "Cuentas por pagar", "Clasificar / priorizar facturas", "Segmentar gasto, tipo y prioridad", false},
-	{"cxp.revisar", "Cuentas por pagar", "Revisar facturas", "Marcar como revisadas", false},
+	{"cxp.revisar", "Cuentas por pagar", "Revisar facturas", "Marcar como revisadas. Incluye liquidar viáticos (sin pago)", false},
+	// Sacar una factura del flujo NO es revisarla, y antes estaba recortado por código de rol —lo
+	// que dejaba fuera a todo rol a medida (mig 0079). `critico`: se deja de deber una factura.
+	{"cxp.anular", "Cuentas por pagar", "Denegar y anular facturas", "Sacar la factura del flujo de pago, con motivo", true},
+	// El resultado del banco sobre un lote ya enviado: rebotó o se reintenta.
+	{"cxp.resultado_pago", "Cuentas por pagar", "Registrar el resultado del banco", "Marcar un pago como rebotado o reintentarlo", true},
 	{"cxp.aprobar", "Cuentas por pagar", "Aprobar facturas", "Aprobación según matriz de montos", true},
 	{"cxp.tesoreria", "Cuentas por pagar", "Programar y pagar", "Programar, generar lote/macro, pagar y conciliar", true},
 	{"cxp.comprobante", "Cuentas por pagar", "Gestionar comprobantes", "Adjuntar y enviar el comprobante al proveedor", false},
 	{"cxp.proveedores", "Cuentas por pagar", "Gestionar proveedores", "Crear, editar y desactivar proveedores", false},
-	{"cxp.importar", "Cuentas por pagar", "Importar facturación", "Cargar el Excel de facturación electrónica", false},
+	{"cxp.importar", "Cuentas por pagar", "Importar facturación", "Cargar el Excel de facturación electrónica o los XML de los comprobantes", false},
+	{"cxp.recepcion", "Cuentas por pagar", "Ver la recepción de facturas", "Bandeja de lo que llega por correo y la cola de errores de recepción; reintentar una recepción parqueada", false},
 	{"cxp.anticipos", "Cuentas por pagar", "Aplicar anticipos", "Netear anticipos del proveedor contra la factura (y reversar antes del pago)", false},
 	{"cxp.caja_ver", "Cuentas por pagar", "Ver caja chica", "Fondos de caja chica y sus vales (el custodio sin ver-todo solo ve su fondo)", false},
 	{"cxp.caja_vale", "Cuentas por pagar", "Registrar vales de caja chica", "Registrar y anular vales del fondo (custodio o Contabilidad)", false},
@@ -86,6 +92,7 @@ var Catalogo = []PermisoDef{
 	// fusionar y declarar la naturaleza siguen siendo de Bancos, porque el catálogo es COMPARTIDO y
 	// esas tres cambian la historia bancaria y el EBITDA.
 	{"cxp.catalogo", "Cuentas por pagar", "Abrir rubros de gasto", "Crear y renombrar conceptos y clasificaciones de gasto visibles para CxP (no apaga, no fusiona, no declara naturaleza)", false},
+	{"cxp.fuentes", "Cuentas por pagar", "Configurar los buzones de recepción", "Da de alta el correo de cada empresa y genera su credencial: define desde qué buzón el sistema acepta facturas", true},
 	{"cxp.parametros", "Cuentas por pagar", "Configurar los umbrales de validación", "Define desde qué monto y en qué casos una factura requiere que el área confirme la conformidad (cambia cuánto gasto se paga sin revisión humana)", true},
 	// Cuentas por cobrar — la cartera de 70 000+ contratos. El alcance de datos del
 	// operador es su SEDE: sin cxc.ver_todas_sedes solo ve la cartera que le asignaron.
@@ -193,7 +200,10 @@ var MatrizDefault = map[string][]string{
 	"SUPERVISOR_FINANCIERO": conLecturaBancos(
 		"bancos.importar", "bancos.clasificar", "bancos.reglas", "bancos.catalogo",
 		"bancos.tc_registrar", "bancos.traslados", "bancos.saldos", "bancos.conciliar", "bancos.exportar", "bancos.cerrar_periodo",
-		"cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.cartera_abierta", "cxp.clasificar", "cxp.revisar", "cxp.validar_depto", "cxp.tesoreria", "cxp.comprobante", "cxp.importar", "cxp.anticipos",
+		"cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.cartera_abierta", "cxp.clasificar", "cxp.revisar", "cxp.validar_depto", "cxp.tesoreria", "cxp.comprobante", "cxp.importar", "cxp.recepcion", "cxp.anticipos",
+		// Denegar y anular: es lo que ya podía hacer cuando la autorización iba por código de rol
+		// (mig 0079). Se le mantiene tal cual para que el cambio no le quite nada a nadie.
+		"cxp.anular",
 		// Facturas de Contabilidad: el Supervisor las marca y las aprueba. Sigue SIN "cxp.aprobar"
 		// general —no firma el gasto de las áreas— pero sí resuelve el gasto que no tiene área que
 		// lo valide (honorarios contables, timbres, comisiones bancarias, Hacienda).
@@ -214,7 +224,7 @@ var MatrizDefault = map[string][]string{
 		// Revisa: marcar una factura como revisada es el trabajo diario del auxiliar de
 		// contabilidad —clasificarla y darla por buena para que siga—. No firma ni paga:
 		// aprobar y tesorería siguen fuera de este rol. Decisión del usuario (2026-08-14).
-		"cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.clasificar", "cxp.revisar", "cxp.comprobante", "cxp.proveedores", "cxp.importar", "cxp.anticipos",
+		"cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.clasificar", "cxp.revisar", "cxp.comprobante", "cxp.proveedores", "cxp.importar", "cxp.recepcion", "cxp.anticipos",
 		// Marca pero NO aprueba: marcar es parte de segmentar la factura, aprobar es firmar.
 		// Y abre rubros de gasto: es quien clasifica, así que es quien se topa con el gasto que
 		// todavía no existe en el catálogo.
@@ -225,7 +235,7 @@ var MatrizDefault = map[string][]string{
 		"inventario.ver", "inventario.entrada", "inventario.servicio", "inventario.traslado", "inventario.conteo",
 	),
 	// Gerencia General: lectura + validación de área + escalamiento + aprobación (firma mancomunada).
-	"GERENCIA_GENERAL": conLecturaBancos("cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.validar_depto", "cxp.validar_escalado", "cxp.aprobar", "cxp.aprobar_contabilidad", "cxp.parametros", "cxp.caja_ver", "cxc.ver", "cxc.ver_todas_sedes", "inventario.ver"),
+	"GERENCIA_GENERAL": conLecturaBancos("cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.validar_depto", "cxp.validar_escalado", "cxp.aprobar", "cxp.aprobar_contabilidad", "cxp.parametros", "cxp.fuentes", "cxp.caja_ver", "cxc.ver", "cxc.ver_todas_sedes", "inventario.ver"),
 	// Auditor Interno: solo lectura.
 	"AUDITOR_INTERNO": conLecturaBancos("cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.caja_ver", "cxc.ver", "cxc.ver_todas_sedes", "inventario.ver"),
 	// Supervisor de Piso: la autoridad de la operación de cobro. Es un cargo real que el

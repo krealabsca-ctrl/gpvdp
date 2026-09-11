@@ -35,8 +35,10 @@ func (r *pgRepository) ConceptoEsVisibleCxP(ctx context.Context, empresaID, conc
 	return visible, nil
 }
 
-// ClasificacionEsVisibleCxP: la clasificación hereda la visibilidad de su concepto, así que se
-// pregunta por el padre. Es la misma regla que usa ListarClasificaciones con soloCxP.
+// ClasificacionEsVisibleCxP: visible = el concepto Y la clasificación lo son (mig 0080). Es la
+// misma regla que usa ListarClasificaciones con soloCxP, y tiene que ser la misma: si acá faltara
+// la condición de la clasificación, Contabilidad podría renombrar por la puerta de `cxp.catalogo`
+// un rubro que la pantalla ya no le muestra.
 func (r *pgRepository) ClasificacionEsVisibleCxP(ctx context.Context, empresaID, clasificacionID string) (bool, error) {
 	if strings.TrimSpace(clasificacionID) == "" {
 		return false, nil
@@ -46,7 +48,8 @@ func (r *pgRepository) ClasificacionEsVisibleCxP(ctx context.Context, empresaID,
 		SELECT EXISTS (
 		  SELECT 1 FROM clasificacion cl
 		  JOIN concepto co ON co.id = cl.concepto_id
-		  WHERE cl.id = $2::uuid AND cl.empresa_id = $1::uuid AND cl.activo = true AND co.visible_cxp
+		  WHERE cl.id = $2::uuid AND cl.empresa_id = $1::uuid AND cl.activo = true
+		    AND co.visible_cxp AND cl.visible_cxp
 		)`, empresaID, clasificacionID).Scan(&visible)
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid input syntax") {

@@ -921,3 +921,76 @@ function invalidarDocumento(qc: QueryClient, empresaId: string, id: string): voi
   void qc.invalidateQueries({ queryKey: queryKeys.cxp.bandeja(empresaId) });
   void qc.invalidateQueries({ queryKey: queryKeys.cxp.lotes(empresaId) });
 }
+
+// ---------------------------------------------------------------------------
+// Recepción de facturas por buzón de correo (migración 0081)
+// ---------------------------------------------------------------------------
+
+/** La bandeja de lo que llegó por correo, con su resumen y la cola de errores. */
+export function useRecepciones(filtros: { estado?: string; q?: string } = {}) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.cxp.recepciones(empresaId, filtros),
+    queryFn: () => cxpApi.recepciones(filtros),
+    placeholderData: (prev) => prev,
+  });
+}
+
+/**
+ * Reprocesa una recepción parqueada.
+ *
+ * Invalida la bandeja de recepción Y los documentos: un reintento exitoso CREA una factura, así
+ * que dejar los documentos sin refrescar mostraría una recepción «procesada» cuya factura no
+ * aparece en la Bandeja hasta recargar.
+ */
+export function useReintentarRecepcion() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => cxpApi.reintentarRecepcion(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.cxp.recepcionesRaiz(empresaId) });
+      invalidarDocs(qc, empresaId);
+      invalidarProveedores(qc, empresaId);
+    },
+  });
+}
+
+/** Los buzones de la empresa. Nunca trae el token: solo su latido y sus contadores. */
+export function useFuentes() {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.cxp.fuentes(empresaId),
+    queryFn: () => cxpApi.fuentes(),
+  });
+}
+
+/** Da de alta un buzón. La respuesta trae el token en claro UNA sola vez. */
+export function useCrearFuente() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { nombre: string; correo: string }) =>
+      cxpApi.crearFuente(vars.nombre, vars.correo),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.cxp.fuentes(empresaId) }),
+  });
+}
+
+export function useRotarTokenFuente() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => cxpApi.rotarTokenFuente(id),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.cxp.fuentes(empresaId) }),
+  });
+}
+
+export function useCambiarEstadoFuente() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; activo: boolean }) =>
+      cxpApi.cambiarEstadoFuente(vars.id, vars.activo),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.cxp.fuentes(empresaId) }),
+  });
+}

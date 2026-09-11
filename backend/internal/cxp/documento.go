@@ -54,6 +54,12 @@ var (
 	// un candado, no una molestia: sin él, cxp.aprobar_contabilidad aprobaría cualquier factura y
 	// se convertiría en un cxp.aprobar sin la validación de área.
 	ErrNoEsDeContabilidad = errors.New("cxp: esta factura no está marcada como de Contabilidad: aprobala por la vía normal")
+	// ErrCorreoNoConfigurado: falta el servidor de correo saliente.
+	//
+	// Existe para no devolver «error interno» por una variable de entorno sin poner: el mensaje
+	// dice qué falta y quién lo pone, porque no es algo que el usuario pueda arreglar desde la
+	// pantalla. Pasó en producción el 9 de setiembre de 2026.
+	ErrCorreoNoConfigurado = errors.New("cxp: el correo saliente no está configurado; hay que definir SMTP_ADDR, SMTP_FROM, SMTP_USER y SMTP_PASS en el servidor")
 	// ErrParametroInvalido: la clave del umbral no existe o el valor no es un número >= 0.
 	ErrParametroInvalido = errors.New("cxp: parámetro de validación no válido")
 )

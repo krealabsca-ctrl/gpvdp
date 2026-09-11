@@ -134,6 +134,30 @@ type Repository interface {
 	ObtenerComprobante(ctx context.Context, empresaID, docID string) (Comprobante, error)
 	ObtenerComprobanteEnvio(ctx context.Context, empresaID, docID string) (ComprobanteEnvio, error)
 	MarcarComprobanteEnviado(ctx context.Context, empresaID, docID string) error
+
+	// Recepción de facturas por buzón de correo (etapa 2 de la ingesta).
+	CedulasDeEmpresa(ctx context.Context, empresaID string) ([]string, error)
+	CrearFuente(ctx context.Context, empresaID string, in FuenteInput, tokenHash, usuarioID string) (FuenteRecepcion, error)
+	ListarFuentes(ctx context.Context, empresaID string) ([]FuenteRecepcion, error)
+	RotarTokenFuente(ctx context.Context, empresaID, fuenteID, tokenHash string) error
+	CambiarEstadoFuente(ctx context.Context, empresaID, fuenteID string, activo bool) error
+	// FuentePorTokenHash resuelve la empresa y el buzón a partir del digest del token.
+	// Exige que la EMPRESA esté activa: sin ese filtro, desactivar una empresa no la haría
+	// dejar de ser escribible, porque los repositories filtran por empresa_id y no por activo.
+	FuentePorTokenHash(ctx context.Context, tokenHash string) (TokenMaquina, error)
+	TocarFuente(ctx context.Context, fuenteID string) error
+	// RecepcionPorLlave devuelve la recepción ya registrada con esa llave de idempotencia.
+	RecepcionPorLlave(ctx context.Context, empresaID, llave string) (Recepcion, error)
+	GuardarRecepcion(ctx context.Context, empresaID string, r RecepcionNueva) (string, error)
+	ResolverRecepcion(ctx context.Context, empresaID, id, estado, motivo, documentoID string) error
+	ListarRecepciones(ctx context.Context, empresaID string, f FiltrosRecepcion) ([]Recepcion, error)
+	RecepcionPorID(ctx context.Context, empresaID, id string) (Recepcion, error)
+	ArchivoDeRecepcion(ctx context.Context, empresaID, id, cual string) (ArchivoRecepcion, error)
+	ResumenRecepcion(ctx context.Context, empresaID string) (ResumenRecepcion, error)
+	// ClaveEnOtraEmpresa dice si esa clave ya entró en OTRA empresa del grupo, sin decir en cuál.
+	ClaveEnOtraEmpresa(ctx context.Context, empresaID, clave string) (bool, error)
+	// UsuarioTecnicoRecepcion es el usuario con el que la máquina firma lo que crea.
+	UsuarioTecnicoRecepcion(ctx context.Context) (string, error)
 }
 
 type pgRepository struct{ pool *pgxpool.Pool }

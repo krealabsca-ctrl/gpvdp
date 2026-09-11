@@ -35,6 +35,26 @@ func (s *Service) CambiarVisibilidadCxP(ctx context.Context, empresaID, concepto
 	return nil
 }
 
+// CambiarVisibilidadCxPClasificacion oculta o muestra UNA clasificación en el selector de gasto de
+// CxP (mig 0080).
+//
+// El corte fino: el concepto decide si el rubro es de CxP y esto decide, dentro de un concepto que
+// sí lo es, cuáles clasificaciones ve Contabilidad. Con 4 conceptos visibles quedaban 124
+// clasificaciones expuestas, y ahí salió gasto confidencial.
+//
+// Queda en auditoría: ocultar un rubro cambia quién ve qué gasto, y esa es una decisión de acceso.
+func (s *Service) CambiarVisibilidadCxPClasificacion(ctx context.Context, empresaID, clasificacionID string, visible bool, usuarioID string) error {
+	if err := s.repo.CambiarVisibilidadCxPClasificacion(ctx, empresaID, clasificacionID, visible); err != nil {
+		return err
+	}
+	s.audit.Registrar(ctx, shared.Evento{
+		EmpresaID: &empresaID, Entidad: "clasificacion", EntidadID: &clasificacionID,
+		Accion: "CAMBIAR_VISIBILIDAD_CXP", UsuarioID: &usuarioID,
+		ValorNuevo: map[string]bool{"visible_cxp": visible},
+	})
+	return nil
+}
+
 // CambiarNaturaleza declara si el concepto es INGRESO, GASTO o NEUTRO para el EBITDA.
 //
 // Es la decisión que arregla el KPI: antes el dashboard sumaba como ingreso cualquier crédito y como

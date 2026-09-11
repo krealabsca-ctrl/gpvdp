@@ -23,3 +23,10 @@ func (f *fakeRepo) SaludMeses(context.Context, string, string, string) ([]SaludM
 func (f *fakeRepo) SeriePorPartida(context.Context, string, string, string) ([]TendenciaPartida, error) {
 	return f.seriePartidas, nil
 }
+
+// Día a día: devuelve lo sembrado y GUARDA los ids pedidos, porque parte de lo que hay que probar
+// es justamente qué le pide el service al repositorio (cuántas partidas, sin repetidos).
+func (f *fakeRepo) SerieDiariaPorPartida(_ context.Context, _, _, _ string, clasificaciones []string) ([]SerieDiariaPartida, error) {
+	f.diarioPedido = clasificaciones
+	return f.serieDiaria, nil
+}

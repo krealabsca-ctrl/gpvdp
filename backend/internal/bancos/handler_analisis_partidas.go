@@ -4,6 +4,7 @@ package bancos
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -55,6 +56,58 @@ func (h *Handler) AnalisisPartidas(c *gin.Context) {
 	res, err := h.svc.AnalisisPartidas(c.Request.Context(), claims.EmpresaID, desde, hasta)
 	if err != nil {
 		h.responderError(c, err, "analisis-partidas")
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// SerieDiariaPartidas GET /v1/bancos/analisis/partidas/diario?desde=YYYY-MM&hasta=YYYY-MM&clasificaciones=id1,id2
+//
+// El día a día de unas partidas concretas: contesta CUÁNDO se movió la plata, no si está mal.
+// El juicio de anomalía sigue siendo mensual (ver analisis_diario.go).
+//
+// Sin `clasificaciones` devuelve vacío, no «todas»: es una pregunta sobre partidas elegidas.
+func (h *Handler) SerieDiariaPartidas(c *gin.Context) {
+	claims, ok := auth.ClaimsFromContext(c)
+	if !ok {
+		httpx.Abort(c, http.StatusUnauthorized, httpx.CodeNoAutenticado, "no autenticado")
+		return
+	}
+	hasta := c.Query("hasta")
+	if hasta == "" {
+		hasta = AhoraCR().Format("2006-01")
+	}
+	tHasta, err := time.Parse("2006-01", hasta)
+	if err != nil {
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "hasta debe ser YYYY-MM")
+		return
+	}
+	desde := c.Query("desde")
+	if desde == "" {
+		desde = tHasta.Format("2006-01")
+	}
+	tDesde, err := time.Parse("2006-01", desde)
+	if err != nil {
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "desde debe ser YYYY-MM")
+		return
+	}
+	if tDesde.After(tHasta) {
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "desde no puede ser posterior a hasta")
+		return
+	}
+	if meses := int(tHasta.Sub(tDesde).Hours()/24/28) + 1; meses > maxMesesAnalisis {
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion,
+			"el rango no puede pasar de 24 meses")
+		return
+	}
+
+	var ids []string
+	if crudo := strings.TrimSpace(c.Query("clasificaciones")); crudo != "" {
+		ids = strings.Split(crudo, ",")
+	}
+	res, err := h.svc.SerieDiariaDePartidas(c.Request.Context(), claims.EmpresaID, desde, hasta, ids)
+	if err != nil {
+		h.responderError(c, err, "analisis-partidas-diario")
 		return
 	}
 	c.JSON(http.StatusOK, res)

@@ -152,3 +152,42 @@ func TestEstadoCarga(t *testing.T) {
 		}
 	}
 }
+
+// Una empresa RECIÉN INSTALADA, sin cuentas bancarias todavía: los arreglos de la respuesta tienen
+// que ir vacíos, nunca nulos.
+//
+// Un slice nil de Go se serializa como `null` y el cliente le hace `.find()` encima: la pantalla se
+// cae con «Cannot read properties of null (reading 'find')». Pasó en producción el 8 de setiembre
+// de 2026 en /saldos-diarios, el primer día, con la empresa sin cuentas creadas.
+//
+// El test mira los CUATRO arreglos: `Serie` ya estaba protegido de una vez anterior y los otros
+// tres no, que es como el mismo error volvió por la puerta de al lado.
+func TestTesoreriaSinCuentasDevuelveArreglosVaciosNoNulos(t *testing.T) {
+	repo := &fakeRepo{hoyCR: "2026-09-08", saldosDia: nil}
+	svc := servicioSaldos(repo)
+
+	got, err := svc.Tesoreria(context.Background(), "emp-nueva", "2026-09-08")
+	if err != nil {
+		t.Fatalf("no esperaba error: %v", err)
+	}
+	if got.Saldos == nil {
+		t.Error("Saldos llegó nil: el cliente le hace .map() y se cae")
+	}
+	if got.Totales == nil {
+		t.Error("Totales llegó nil: es el que reventó /saldos-diarios en producción")
+	}
+	if got.Bancos == nil {
+		t.Error("Bancos llegó nil")
+	}
+	if got.Serie == nil {
+		t.Error("Serie llegó nil")
+	}
+	// Y los conteos de un día sin cuentas son cero, no basura.
+	if got.Cuentas != 0 || got.SinCapturar != 0 || got.NoCuadran != 0 {
+		t.Errorf("conteos = cuentas:%d sin_capturar:%d no_cuadran:%d, quería todos en 0",
+			got.Cuentas, got.SinCapturar, got.NoCuadran)
+	}
+	if got.DiaRevisado {
+		t.Error("un día sin ninguna captura no puede estar «revisado»")
+	}
+}

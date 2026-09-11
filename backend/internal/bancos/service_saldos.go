@@ -140,6 +140,30 @@ func (s *Service) Tesoreria(ctx context.Context, empresaID, fecha string) (Tesor
 	if t.Serie, err = s.repo.SerieSaldos(ctx, empresaID, fecha, diasSerieSaldos); err != nil {
 		return Tesoreria{}, err
 	}
+
+	// Los CUATRO arreglos van vacíos, nunca nulos.
+	//
+	// Un slice nil de Go se serializa como `null`, y el cliente le hace `.find()` o `.map()`
+	// encima: la pantalla se cae con «Cannot read properties of null». Y se cae SOLO cuando no hay
+	// datos, que es justo el primer día de una instalación nueva —así fue como reventó
+	// `/saldos-diarios` en producción el 8 de setiembre de 2026, con la empresa sin cuentas
+	// creadas todavía—.
+	//
+	// `Serie` ya tenía esta guarda desde la primera vez que pasó; los otros tres no, y ahí estaba
+	// el agujero. Se normalizan juntos a propósito: proteger un campo y dejar sus hermanos es como
+	// se repite el mismo error en la pantalla de al lado.
+	//
+	// Va en el servicio y no en el handler porque es el servicio el que los construye con `append`
+	// desde mapas que pueden quedar vacíos.
+	if t.Saldos == nil {
+		t.Saldos = []SaldoDelDia{}
+	}
+	if t.Totales == nil {
+		t.Totales = []TotalMoneda{}
+	}
+	if t.Bancos == nil {
+		t.Bancos = []TotalBanco{}
+	}
 	if t.Serie == nil {
 		t.Serie = []PuntoSaldo{}
 	}
