@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict 8fnMvGLb2A1DO8ctmFPsNafSTEug2EunQDjSUg7jqXQfucDg5qABealXe1PQmyV
+\restrict 8wIOkjoOg7TEyEFLPfcyVlSmgT3rzp3YSvq9isrArk0pKFtFCFZyTNI6zUyvZ5W
 
 -- Dumped from database version 16.14 (Debian 16.14-1.pgdg13+1)
 -- Dumped by pg_dump version 16.14 (Debian 16.14-1.pgdg13+1)
@@ -285,7 +285,8 @@ CREATE TABLE public.clasificacion (
     creado_en timestamp with time zone DEFAULT now() NOT NULL,
     es_contabilidad boolean DEFAULT false NOT NULL,
     departamento_id uuid,
-    sede_id uuid
+    sede_id uuid,
+    visible_cxp boolean DEFAULT true NOT NULL
 );
 
 
@@ -818,6 +819,23 @@ CREATE TABLE public.cxc_usuario_sede (
 
 
 --
+-- Name: cxp_fuente_recepcion; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.cxp_fuente_recepcion (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    empresa_id uuid NOT NULL,
+    nombre text NOT NULL,
+    correo text NOT NULL,
+    token_hash text NOT NULL,
+    activo boolean DEFAULT true NOT NULL,
+    ultimo_contacto_en timestamp with time zone,
+    creado_por uuid,
+    creado_en timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: cxp_parametro; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -828,6 +846,36 @@ CREATE TABLE public.cxp_parametro (
     descripcion text DEFAULT ''::text NOT NULL,
     actualizado_en timestamp with time zone DEFAULT now() NOT NULL,
     actualizado_por uuid
+);
+
+
+--
+-- Name: cxp_recepcion; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.cxp_recepcion (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    empresa_id uuid NOT NULL,
+    fuente_id uuid,
+    idempotency_key text NOT NULL,
+    clave text,
+    tipo_documento text,
+    version_schema text,
+    receptor text,
+    xml_crudo bytea,
+    pdf bytea,
+    pdf_filename text,
+    message_id text,
+    asunto text,
+    remitente text,
+    buzon text,
+    estado text DEFAULT 'PENDIENTE'::text NOT NULL,
+    motivo text,
+    documento_id uuid,
+    intentos integer DEFAULT 0 NOT NULL,
+    creado_en timestamp with time zone DEFAULT now() NOT NULL,
+    procesado_en timestamp with time zone,
+    CONSTRAINT cxp_recepcion_estado_check CHECK ((estado = ANY (ARRAY['PENDIENTE'::text, 'PROCESADA'::text, 'DUPLICADA'::text, 'PARQUEADA'::text, 'DESCARTADA'::text])))
 );
 
 
@@ -1035,6 +1083,21 @@ CREATE TABLE public.empresa (
     activo boolean DEFAULT true NOT NULL,
     creado_en timestamp with time zone DEFAULT now() NOT NULL,
     tolerancia_traslado numeric(6,4) DEFAULT 0.01 NOT NULL
+);
+
+
+--
+-- Name: empresa_cedula; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.empresa_cedula (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    empresa_id uuid NOT NULL,
+    cedula text NOT NULL,
+    titular text DEFAULT ''::text NOT NULL,
+    principal boolean DEFAULT false NOT NULL,
+    creado_en timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT empresa_cedula_formato CHECK ((cedula ~ '^[0-9]{9,12}$'::text))
 );
 
 
@@ -2531,11 +2594,43 @@ ALTER TABLE ONLY public.cxc_usuario_sede
 
 
 --
+-- Name: cxp_fuente_recepcion cxp_fuente_recepcion_empresa_id_correo_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cxp_fuente_recepcion
+    ADD CONSTRAINT cxp_fuente_recepcion_empresa_id_correo_key UNIQUE (empresa_id, correo);
+
+
+--
+-- Name: cxp_fuente_recepcion cxp_fuente_recepcion_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cxp_fuente_recepcion
+    ADD CONSTRAINT cxp_fuente_recepcion_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: cxp_fuente_recepcion cxp_fuente_recepcion_token_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cxp_fuente_recepcion
+    ADD CONSTRAINT cxp_fuente_recepcion_token_hash_key UNIQUE (token_hash);
+
+
+--
 -- Name: cxp_parametro cxp_parametro_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.cxp_parametro
     ADD CONSTRAINT cxp_parametro_pkey PRIMARY KEY (empresa_id, clave);
+
+
+--
+-- Name: cxp_recepcion cxp_recepcion_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cxp_recepcion
+    ADD CONSTRAINT cxp_recepcion_pkey PRIMARY KEY (id);
 
 
 --
@@ -2616,6 +2711,22 @@ ALTER TABLE ONLY public.empleado
 
 ALTER TABLE ONLY public.empleado
     ADD CONSTRAINT empleado_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: empresa_cedula empresa_cedula_cedula_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.empresa_cedula
+    ADD CONSTRAINT empresa_cedula_cedula_key UNIQUE (cedula);
+
+
+--
+-- Name: empresa_cedula empresa_cedula_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.empresa_cedula
+    ADD CONSTRAINT empresa_cedula_pkey PRIMARY KEY (id);
 
 
 --
@@ -3359,6 +3470,13 @@ CREATE INDEX idx_clasificacion_empresa ON public.clasificacion USING btree (empr
 
 
 --
+-- Name: idx_clasificacion_visible_cxp; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_clasificacion_visible_cxp ON public.clasificacion USING btree (empresa_id) WHERE visible_cxp;
+
+
+--
 -- Name: idx_cobro_aplicacion_cargo; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3576,6 +3694,41 @@ CREATE INDEX idx_cxc_usuario_sede_usuario ON public.cxc_usuario_sede USING btree
 
 
 --
+-- Name: idx_cxp_fuente_empresa; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_cxp_fuente_empresa ON public.cxp_fuente_recepcion USING btree (empresa_id, activo);
+
+
+--
+-- Name: idx_cxp_recepcion_clave; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_cxp_recepcion_clave ON public.cxp_recepcion USING btree (empresa_id, clave);
+
+
+--
+-- Name: idx_cxp_recepcion_estado; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_cxp_recepcion_estado ON public.cxp_recepcion USING btree (empresa_id, estado, creado_en DESC);
+
+
+--
+-- Name: idx_cxp_recepcion_idem; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_cxp_recepcion_idem ON public.cxp_recepcion USING btree (empresa_id, idempotency_key) WHERE ((idempotency_key IS NOT NULL) AND (idempotency_key <> ''::text));
+
+
+--
+-- Name: idx_cxp_recepcion_msg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_cxp_recepcion_msg ON public.cxp_recepcion USING btree (empresa_id, message_id);
+
+
+--
 -- Name: idx_deduccion_empleado; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3678,6 +3831,13 @@ CREATE INDEX idx_docxp_vencimiento ON public.documento_cxp USING btree (empresa_
 --
 
 CREATE INDEX idx_empleado_empresa ON public.empleado USING btree (empresa_id) WHERE activo;
+
+
+--
+-- Name: idx_empresa_cedula_empresa; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_empresa_cedula_empresa ON public.empresa_cedula USING btree (empresa_id);
 
 
 --
@@ -4967,6 +5127,22 @@ ALTER TABLE ONLY public.cxc_usuario_sede
 
 
 --
+-- Name: cxp_fuente_recepcion cxp_fuente_recepcion_creado_por_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cxp_fuente_recepcion
+    ADD CONSTRAINT cxp_fuente_recepcion_creado_por_fkey FOREIGN KEY (creado_por) REFERENCES public.usuario(id);
+
+
+--
+-- Name: cxp_fuente_recepcion cxp_fuente_recepcion_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cxp_fuente_recepcion
+    ADD CONSTRAINT cxp_fuente_recepcion_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
+
+
+--
 -- Name: cxp_parametro cxp_parametro_actualizado_por_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4980,6 +5156,30 @@ ALTER TABLE ONLY public.cxp_parametro
 
 ALTER TABLE ONLY public.cxp_parametro
     ADD CONSTRAINT cxp_parametro_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
+
+
+--
+-- Name: cxp_recepcion cxp_recepcion_documento_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cxp_recepcion
+    ADD CONSTRAINT cxp_recepcion_documento_id_fkey FOREIGN KEY (documento_id) REFERENCES public.documento_cxp(id) ON DELETE SET NULL;
+
+
+--
+-- Name: cxp_recepcion cxp_recepcion_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cxp_recepcion
+    ADD CONSTRAINT cxp_recepcion_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
+
+
+--
+-- Name: cxp_recepcion cxp_recepcion_fuente_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cxp_recepcion
+    ADD CONSTRAINT cxp_recepcion_fuente_id_fkey FOREIGN KEY (fuente_id) REFERENCES public.cxp_fuente_recepcion(id) ON DELETE SET NULL;
 
 
 --
@@ -5140,6 +5340,14 @@ ALTER TABLE ONLY public.empleado
 
 ALTER TABLE ONLY public.empleado
     ADD CONSTRAINT empleado_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id);
+
+
+--
+-- Name: empresa_cedula empresa_cedula_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.empresa_cedula
+    ADD CONSTRAINT empresa_cedula_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresa(id) ON DELETE CASCADE;
 
 
 --
@@ -6218,7 +6426,7 @@ ALTER TABLE ONLY public.vacacion
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 8fnMvGLb2A1DO8ctmFPsNafSTEug2EunQDjSUg7jqXQfucDg5qABealXe1PQmyV
+\unrestrict 8wIOkjoOg7TEyEFLPfcyVlSmgT3rzp3YSvq9isrArk0pKFtFCFZyTNI6zUyvZ5W
 
 
 --
@@ -6227,5 +6435,5 @@ ALTER TABLE ONLY public.vacacion
 -- Sin esta fila, el backend arranca creyendo que la base está sin migrar e intenta aplicar todo
 -- desde la 0001 sobre tablas que ya existen: la primera falla y la base queda «dirty».
 --
-INSERT INTO public.schema_migrations (version, dirty) VALUES (78, false)
+INSERT INTO public.schema_migrations (version, dirty) VALUES (81, false)
     ON CONFLICT DO NOTHING;

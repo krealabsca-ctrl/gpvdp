@@ -77,7 +77,12 @@ import {
 } from "@/features/bancos/hooks";
 import { PeriodoSelector } from "@/features/bancos/components/PeriodoSelector";
 import { AdminDepartamentos } from "@/features/bancos/components/AdminDepartamentos";
-import type { EstadoControl, FilaControl, GastoPartidaDimension } from "@/api/bancos";
+import type {
+  EstadoControl,
+  FilaControl,
+  GastoPartidaDimension,
+  OrigenDimension,
+} from "@/api/bancos";
 
 const TRAMOS = [
   { meses: 1, label: "Este mes" },
@@ -720,6 +725,12 @@ function DetallePartidas({
                           clasificacion={p.clasificacion}
                           departamentos={departamentos}
                           sedes={sedes}
+                          departamentoActual={p.partida_departamento_id}
+                          sedeActual={p.partida_sede_id}
+                          origen={p.origen}
+                          origenLegible={p.origen_legible}
+                          movs={p.movs}
+                          abiertoDeEntrada
                           onHecho={onHecho}
                           onError={onError}
                         />
@@ -751,7 +762,24 @@ function DetallePartidas({
                           </Badge>
                         </TD>
                         <TD>
-                          <span className="text-xs text-content-muted">{p.origen_legible}</span>
+                          {/* La atribución tiene que poder CORREGIRSE acá, no solo fijarse una
+                              vez. La operación cambia —un rubro pasa de un área a otra— y hasta
+                              ahora el selector solo existía en «sin asignar», así que una partida
+                              ya atribuida quedaba congelada aunque el endpoint siempre permitió
+                              cambiarla. */}
+                          <AsignarPartida
+                            clasificacionID={p.clasificacion_id}
+                            clasificacion={p.clasificacion}
+                            departamentos={departamentos}
+                            sedes={sedes}
+                            departamentoActual={p.partida_departamento_id}
+                            sedeActual={p.partida_sede_id}
+                            origen={p.origen}
+                            origenLegible={p.origen_legible}
+                            movs={p.movs}
+                            onHecho={onHecho}
+                            onError={onError}
+                          />
                         </TD>
                       </>
                     )}
@@ -894,6 +922,12 @@ function AsignarPartida({
   clasificacion,
   departamentos,
   sedes,
+  departamentoActual,
+  sedeActual,
+  origen,
+  origenLegible,
+  movs,
+  abiertoDeEntrada = false,
   onHecho,
   onError,
 }: {
@@ -901,12 +935,23 @@ function AsignarPartida({
   clasificacion: string;
   departamentos: { id: string; nombre: string }[];
   sedes: { id: string; nombre: string }[];
+  /** El default que HOY tiene la partida. Hace falta para precargar y para no borrar nada. */
+  departamentoActual: string;
+  sedeActual: string;
+  origen: OrigenDimension;
+  origenLegible: string;
+  movs: number;
+  /** En «sin asignar» el selector se muestra directo; en las demás tablas hay que pedirlo. */
+  abiertoDeEntrada?: boolean;
   onHecho: (msg: string) => void;
   onError: (msg: string) => void;
 }) {
   const asignar = useAsignarDimensionesPartida();
-  const [deptoID, setDeptoID] = useState("");
-  const [sedeID, setSedeID] = useState("");
+  const [editando, setEditando] = useState(abiertoDeEntrada);
+  // Se precargan los DOS. El endpoint escribe `departamento_id` y `sede_id` juntos, así que
+  // guardar con la sede vacía se la BORRARÍA a la partida sin que nadie lo haya pedido.
+  const [deptoID, setDeptoID] = useState(departamentoActual);
+  const [sedeID, setSedeID] = useState(sedeActual);
 
   // Sin partida no hay nada que atribuir: pasa con «(sin clasificar)», que es un movimiento sin
   // partida todavía. Ahí el trabajo es clasificarlo, no atribuirlo.
@@ -918,48 +963,99 @@ function AsignarPartida({
     );
   }
 
-  function guardar() {
-    if (!deptoID && !sedeID) {
-      onError("Elegí al menos un departamento o una sede.");
+  if (!editando) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-content-muted">{origenLegible}</span>
+        <button
+          type="button"
+          className="text-xs text-accent underline"
+          onClick={() => {
+            setDeptoID(departamentoActual);
+            setSedeID(sedeActual);
+            setEditando(true);
+          }}
+        >
+          cambiar
+        </button>
+      </div>
+    );
+  }
+
+  function guardar(vaciar = false) {
+    const depto = vaciar ? "" : deptoID;
+    const sede = vaciar ? "" : sedeID;
+    if (!vaciar && !depto && !sede) {
+      onError("Elegí un departamento o una sede. Para dejarla sin atribuir, usá «Quitar».");
       return;
     }
     asignar.mutate(
-      { clasificacionId: clasificacionID, departamento_id: deptoID, sede_id: sedeID },
+      { clasificacionId: clasificacionID, departamento_id: depto, sede_id: sede },
       {
-        onSuccess: (r) =>
+        onSuccess: (r) => {
+          const n = r.movimientos_afectados.toLocaleString("es-CR");
           onHecho(
-            `«${clasificacion}» quedó atribuida: ${r.movimientos_afectados.toLocaleString("es-CR")} movimiento(s), incluida su historia.`,
-          ),
+            vaciar
+              ? `«${clasificacion}» quedó sin atribuir: ${n} movimiento(s) vuelven a «sin asignar».`
+              : `«${clasificacion}» quedó atribuida: ${n} movimiento(s), incluida su historia.`,
+          );
+          if (!abiertoDeEntrada) setEditando(false);
+        },
         onError: (err) => onError(mensajeError(err)),
       },
     );
   }
 
+  const yaAtribuida = departamentoActual !== "" || sedeActual !== "";
+
   return (
-    <div className="flex flex-wrap items-end gap-2">
-      <Select
-        aria-label={`Departamento de ${clasificacion}`}
-        value={deptoID}
-        onChange={(e) => setDeptoID(e.target.value)}
-        options={[
-          { value: "", label: "— departamento —" },
-          ...departamentos.map((d) => ({ value: d.id, label: d.nombre })),
-        ]}
-        className="min-w-40"
-      />
-      <Select
-        aria-label={`Sede de ${clasificacion}`}
-        value={sedeID}
-        onChange={(e) => setSedeID(e.target.value)}
-        options={[
-          { value: "", label: "— sede —" },
-          ...sedes.map((s) => ({ value: s.id, label: s.nombre })),
-        ]}
-        className="min-w-36"
-      />
-      <Button size="sm" onClick={guardar} loading={asignar.isPending}>
-        Asignar
-      </Button>
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-end gap-2">
+        <Select
+          aria-label={`Departamento de ${clasificacion}`}
+          value={deptoID}
+          onChange={(e) => setDeptoID(e.target.value)}
+          options={[
+            { value: "", label: "— departamento —" },
+            ...departamentos.map((d) => ({ value: d.id, label: d.nombre })),
+          ]}
+          className="min-w-40"
+        />
+        <Select
+          aria-label={`Sede de ${clasificacion}`}
+          value={sedeID}
+          onChange={(e) => setSedeID(e.target.value)}
+          options={[
+            { value: "", label: "— sede —" },
+            ...sedes.map((s) => ({ value: s.id, label: s.nombre })),
+          ]}
+          className="min-w-36"
+        />
+        <Button size="sm" onClick={() => guardar()} loading={asignar.isPending}>
+          {yaAtribuida ? "Cambiar" : "Asignar"}
+        </Button>
+        {yaAtribuida && (
+          <Button size="sm" variant="ghost" onClick={() => guardar(true)} loading={asignar.isPending}>
+            Quitar
+          </Button>
+        )}
+        {!abiertoDeEntrada && (
+          <Button size="sm" variant="ghost" onClick={() => setEditando(false)}>
+            Cancelar
+          </Button>
+        )}
+      </div>
+
+      {/* Cambiar el default de la PARTIDA no mueve los movimientos que tienen la atribución
+          escrita encima. Decirlo acá evita el peor final: cambiar, ver que la fila sigue igual, y
+          concluir que el sistema no guardó. */}
+      {(origen === "MOVIMIENTO" || origen === "FACTURA") && (
+        <span className="text-xs text-pendiente">
+          {origen === "MOVIMIENTO"
+            ? `Ojo: la atribución de estos ${movs} movimiento(s) está escrita en el movimiento, así que cambiar el default de la partida no los va a mover. Eso se corrige en Clasificar.`
+            : `Ojo: estos ${movs} movimiento(s) heredan la atribución de su factura de CxP, así que cambiar el default de la partida no los va a mover.`}
+        </span>
+      )}
     </div>
   );
 }

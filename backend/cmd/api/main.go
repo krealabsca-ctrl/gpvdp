@@ -110,7 +110,7 @@ func run(migrateOnly bool) error {
 	}
 	bancosH := bancos.NewHandler(bancosSvc, logger)
 	cxpSvc := cxp.NewService(cxp.NewRepository(pool), audit, logger)
-	cxpSvc.SetMailer(cxp.NewMailer(cfg.SMTPAddr, cfg.SMTPFrom, logger))
+	cxpSvc.SetMailer(cxp.NewMailer(cfg.SMTPAddr, cfg.SMTPFrom, cfg.SMTPUser, cfg.SMTPPass, logger))
 	cxpSvc.SetPermisos(rbacSvc) // scoping por área: sin cxp.ver_todo, el validador solo ve su departamento
 	// Siembra el set base de departamentos por empresa (idempotente, cada arranque).
 	if err := cxpSvc.EnsureDepartamentos(ctx); err != nil {
@@ -135,7 +135,7 @@ func run(migrateOnly bool) error {
 		logger.Error("nomina: no se pudieron sembrar los conceptos base (se continúa)", zap.Error(err))
 	}
 	// RRHH notifica boletas y vacaciones por correo (antes no enviaba nada).
-	nominaSvc.SetNotificaciones(plantillasSvc, shared.NewMailer(cfg.SMTPAddr, cfg.SMTPFrom, logger))
+	nominaSvc.SetNotificaciones(plantillasSvc, shared.NewMailer(cfg.SMTPAddr, cfg.SMTPFrom, cfg.SMTPUser, cfg.SMTPPass, logger))
 	// ── Cuentas por cobrar. El scoping por sede se resuelve con la misma matriz RBAC.
 	cxcSvc := cxc.NewService(cxc.NewRepository(pool), audit, logger)
 	cxcSvc.SetPermisos(rbacSvc)

@@ -646,7 +646,7 @@ export interface ResultadoMasivo {
 
 export type ImportEstado = "NUEVO" | "DUPLICADO";
 
-/** Una factura leída del Excel de facturación (montos como string decimal). */
+/** Una factura leída del Excel de facturación o de un XML (montos como string decimal). */
 export interface FilaImportada {
   clave: string;
   consecutivo: string;
@@ -659,8 +659,19 @@ export interface FilaImportada {
   total: string;
   condicion: string;
   vencimiento: string;
+  /** Tipo de cambio DE LA FACTURA. Solo en moneda extranjera. */
+  tc: string;
   estado: ImportEstado;
   proveedor_nuevo: boolean;
+
+  // ── Solo del camino XML ──
+  /** Raíz del comprobante: FacturaElectronica, NotaCreditoElectronica, … */
+  tipo_documento?: string;
+  /** Cédula del receptor: a quién se le facturó. El Excel lo perdía por completo. */
+  receptor?: string;
+  receptor_nombre?: string;
+  /** Por qué la aritmética del comprobante no cierra. Vacío o ausente = cierra. */
+  descuadre?: string;
 }
 
 export interface ResumenImportacion {
@@ -668,6 +679,126 @@ export interface ResumenImportacion {
   nuevas: number;
   duplicadas: number;
   proveedores_nuevos: number;
+  /**
+   * Traza de lectura: de dónde salieron las filas y qué se descartó.
+   *
+   * Existe para poder EXPLICAR un faltante. Antes, un archivo de 500 facturas del que se leían 85
+   * se veía igual que un archivo de 85, porque las filas sin clave se descartaban en silencio.
+   */
+  hoja: string;
+  hojas: string[];
+  filas_hoja: number;
+  sin_clave: number;
+  sin_fecha: number;
+  /**
+   * Filas donde la columna de fecha del Excel no coincidía con la fecha que trae la clave numérica
+   * (posiciones 4-9, `ddmmaa`) y se tomó la de la clave, que no admite dos lecturas.
+   */
+  fecha_corregida: number;
+
+  // ── Solo cuando se subieron XML de comprobante (ausentes en el camino del Excel) ──
+  /** Versiones del esquema de Hacienda que se encontraron: v4.2 / v4.3 / v4.4. */
+  versiones?: string[];
+  /** Comprobantes leídos que NO generan cuenta por pagar, por tipo (nota de crédito, tiquete…). */
+  descartados?: Record<string, number>;
+  /** Archivos que no se pudieron decodificar como XML. */
+  xml_ilegibles?: number;
+  /** El mismo comprobante venía dos veces en la misma entrega. */
+  repetidas_en_archivo?: number;
+  /** Comprobantes cuya aritmética no cierra (ver FilaImportada.descuadre). */
+  descuadres?: number;
+  /** Comprobantes que no dicen a quién se le facturó: no se puede cotejar la empresa. */
+  sin_receptor?: number;
+}
+
+
+// ---------------------------------------------------------------------------
+// Recepción de facturas por buzón de correo (migración 0081)
+// ---------------------------------------------------------------------------
+
+/**
+ * Estados de una recepción. Nada se borra: lo que no se pudo procesar queda con su motivo.
+ *
+ * PARQUEADA es la cola de errores y es lo único reintentable. DESCARTADA es lo que
+ * legítimamente no es una cuenta por pagar (nota de crédito, recibo de pago) y conserva el XML.
+ */
+export type EstadoRecepcion = "PENDIENTE" | "PROCESADA" | "DUPLICADA" | "PARQUEADA" | "DESCARTADA";
+
+export interface Recepcion {
+  id: string;
+  fuente_id?: string;
+  fuente_nombre?: string;
+  clave?: string;
+  tipo_documento?: string;
+  version_schema?: string;
+  /** La cédula del receptor que dice el XML: es lo que se coteja contra las de la empresa. */
+  receptor?: string;
+  message_id?: string;
+  asunto?: string;
+  remitente?: string;
+  buzon?: string;
+  estado: EstadoRecepcion;
+  motivo?: string;
+  documento_id?: string;
+  consecutivo?: string;
+  proveedor?: string;
+  total?: string;
+  moneda?: string;
+  intentos: number;
+  tiene_xml: boolean;
+  tiene_pdf: boolean;
+  creado_en: string;
+  procesado_en?: string;
+}
+
+export interface ResumenRecepcion {
+  pendientes: number;
+  procesadas: number;
+  duplicadas: number;
+  parqueadas: number;
+  descartadas: number;
+  ultima_en?: string;
+}
+
+export interface BandejaRecepcion {
+  resumen: ResumenRecepcion;
+  recepciones: Recepcion[];
+  /** Las cédulas contra las que se coteja. Vacío = el guardarraíl no puede funcionar. */
+  cedulas: string[];
+}
+
+export interface ResultadoRecepcion {
+  recepcion_id: string;
+  estado: EstadoRecepcion;
+  motivo?: string;
+  repetido: boolean;
+  clave?: string;
+  documento_id?: string;
+  consecutivo?: string;
+}
+
+/** Un buzón dado de alta para la empresa. La fuente ES la credencial. */
+export interface FuenteRecepcion {
+  id: string;
+  nombre: string;
+  correo: string;
+  activo: boolean;
+  /** El LATIDO: la última vez que el script llamó, aunque no trajera facturas. */
+  ultimo_contacto?: string;
+  creado_en: string;
+  recibidas: number;
+  parqueadas: number;
+}
+
+export interface FuentesResponse {
+  fuentes: FuenteRecepcion[];
+  cedulas: string[];
+}
+
+/** El token viaja UNA sola vez, al crear o al rotar: la base solo guarda su hash. */
+export interface FuenteCreada {
+  fuente: FuenteRecepcion;
+  token: string;
 }
 
 /** Preview de la importación (POST /cxp/importaciones): no crea nada. */
@@ -1096,6 +1227,47 @@ export const cxpApi = {
   /** Resumen por fase de la Bandeja (conteo + monto por pestaña). */
   bandeja(): Promise<{ fases: FaseBandeja[] | null }> {
     return apiFetch<{ fases: FaseBandeja[] | null }>("/cxp/bandeja", { method: "GET" });
+  },
+
+
+  // --- Recepción de facturas por buzón de correo ---
+  /** La bandeja de lo que llegó por correo, con el resumen y la cola de errores. */
+  recepciones(filtros: { estado?: string; q?: string; limite?: number } = {}): Promise<BandejaRecepcion> {
+    const p = new URLSearchParams();
+    if (filtros.estado) p.set("estado", filtros.estado);
+    if (filtros.q) p.set("q", filtros.q);
+    if (filtros.limite) p.set("limite", String(filtros.limite));
+    const qs = p.toString();
+    return apiFetch<BandejaRecepcion>("/cxp/recepciones" + (qs ? "?" + qs : ""));
+  },
+  /** Reprocesa una recepción PARQUEADA con el XML que ya está guardado. */
+  reintentarRecepcion(id: string): Promise<ResultadoRecepcion> {
+    return apiFetch<ResultadoRecepcion>(`/cxp/recepciones/${id}/reintentar`, { method: "POST" });
+  },
+  /**
+   * Descarga el XML o el PDF originales del comprobante recibido.
+   *
+   * Va por `apiFetch` con `blob` y no por un <a href>: la ruta exige el Bearer de la sesión, así
+   * que un enlace directo daría 401.
+   */
+  descargarArchivoRecepcion(id: string, cual: "xml" | "pdf"): Promise<Blob> {
+    return apiFetch<Blob>(`/cxp/recepciones/${id}/archivo?cual=${cual}`, { method: "GET", blob: true });
+  },
+
+  // --- Buzones de recepción (configuración) ---
+  fuentes(): Promise<FuentesResponse> {
+    return apiFetch<FuentesResponse>("/cxp/fuentes");
+  },
+  /** Da de alta un buzón. La respuesta trae el token EN CLARO: es la única vez que se puede ver. */
+  crearFuente(nombre: string, correo: string): Promise<FuenteCreada> {
+    return apiFetch<FuenteCreada>("/cxp/fuentes", { method: "POST", json: { nombre, correo } });
+  },
+  /** Nueva credencial: el token viejo deja de servir de inmediato. */
+  rotarTokenFuente(id: string): Promise<{ token: string }> {
+    return apiFetch<{ token: string }>(`/cxp/fuentes/${id}/rotar`, { method: "POST" });
+  },
+  cambiarEstadoFuente(id: string, activo: boolean): Promise<{ ok: boolean }> {
+    return apiFetch<{ ok: boolean }>(`/cxp/fuentes/${id}`, { method: "PATCH", json: { activo } });
   },
 
   // --- Importador de facturación (Excel) ---

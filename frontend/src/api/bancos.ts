@@ -443,6 +443,35 @@ export interface DepartamentoRef {
 /** De dónde salió la atribución de un gasto a un departamento. */
 export type OrigenDimension = "MOVIMIENTO" | "FACTURA" | "PARTIDA" | "SIN_ASIGNAR";
 
+/** Lo que se movió en una partida en UN día. Solo vienen los días CON movimiento. */
+export interface DiaDePartida {
+  fecha: string;
+  monto: string;
+  movs: number;
+}
+
+/** Una partida con su día a día dentro del rango. */
+export interface SerieDiariaPartida {
+  clasificacion_id: string;
+  clasificacion: string;
+  concepto: string;
+  total: string;
+  movs: number;
+  dias: DiaDePartida[];
+}
+
+/**
+ * El día a día de las partidas elegidas. Contesta CUÁNDO se movió la plata; el juicio de anomalía
+ * sigue siendo mensual, porque el gasto diario es a saltos y un promedio diario no significa nada.
+ */
+export interface AnalisisDiario {
+  desde: string;
+  hasta: string;
+  /** Días DISTINTOS con movimiento en el conjunto (dos partidas el mismo día cuentan una vez). */
+  dias_con_movimiento: number;
+  partidas: SerieDiariaPartida[];
+}
+
 /** En qué partida gastó un departamento (o sede), y de dónde salió esa atribución. */
 export interface GastoPartidaDimension {
   /** Vacío = movimientos sin clasificar. Con valor sirve para asignar y para el subpresupuesto. */
@@ -458,6 +487,13 @@ export interface GastoPartidaDimension {
   disponible: string;
   consumido_pct: string;
   estado: EstadoControl;
+  /**
+   * El default que HOY tiene escrito la partida. NO es el departamento de la fila: la fila
+   * muestra el efectivo (que puede venir del movimiento o de la factura). Viajan los dos porque
+   * el endpoint escribe departamento y sede JUNTOS: mandar uno con el otro vacío borraría el otro.
+   */
+  partida_departamento_id: string;
+  partida_sede_id: string;
 }
 
 /** Estado de un departamento frente a su presupuesto. */
@@ -536,6 +572,13 @@ export interface ClasificacionCatalogo {
   concepto_id: string;
   concepto: string;
   nombre: string;
+  /** Si Contabilidad la ve al clasificar gastos (mig 0080). El corte fino dentro del concepto. */
+  visible_cxp: boolean;
+  /**
+   * Si el CONCEPTO padre es visible para CxP. Sirve para explicar por qué una clasificación
+   * tildada igual no aparece: la está tapando su concepto.
+   */
+  visible_concepto: boolean;
 }
 
 export interface ConceptoInput {
@@ -941,6 +984,13 @@ export const bancosApi = {
       json: { visible_cxp: visible },
     });
   },
+  /** Oculta o muestra UNA clasificación para Contabilidad (el corte fino, mig 0080). */
+  cambiarVisibilidadCxPClasificacion(id: string, visible: boolean): Promise<void> {
+    return apiFetch<void>(`/bancos/catalogo/clasificaciones/${id}`, {
+      method: "PATCH",
+      json: { visible_cxp: visible },
+    });
+  },
   /** Declara si el concepto suma a ingresos, a gastos, o no entra al EBITDA. */
   cambiarNaturaleza(id: string, naturaleza: NaturalezaConcepto): Promise<void> {
     return apiFetch<void>(`/bancos/catalogo/conceptos/${id}`, {
@@ -1217,6 +1267,20 @@ export const bancosApi = {
     return apiFetch<SerieMensualPunto[]>("/bancos/analisis/serie-mensual", {
       method: "GET",
       query: { hasta, meses },
+    });
+  },
+  /**
+   * El día a día de unas partidas concretas. SIN clasificaciones el servidor devuelve vacío a
+   * propósito: es una pregunta sobre partidas elegidas, no sobre las 168 del catálogo.
+   */
+  analisisPartidasDiario(
+    desde: string,
+    hasta: string,
+    clasificaciones: string[],
+  ): Promise<AnalisisDiario> {
+    return apiFetch<AnalisisDiario>("/bancos/analisis/partidas/diario", {
+      method: "GET",
+      query: { desde, hasta, clasificaciones: clasificaciones.join(",") },
     });
   },
   analisisPartidas(desde: string, hasta: string): Promise<AnalisisPartidas> {

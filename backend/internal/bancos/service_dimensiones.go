@@ -90,6 +90,16 @@ type GastoPartidaDimension struct {
 	ConsumidoPct string `json:"consumido_pct"`
 	// Estado: SIN_PRESUPUESTO | EN_RANGO | ALERTA | EXCEDIDO (los mismos del departamento).
 	Estado string `json:"estado"`
+
+	// ── El default ACTUAL de la partida, para poder corregirlo ─────────────
+	//
+	// No es lo mismo que el departamento de la fila: la fila muestra el departamento EFECTIVO
+	// (que puede venir del movimiento o de la factura), y esto es lo que tiene escrito la
+	// clasificación. Viaja porque la pantalla necesita los DOS para reasignar: el UPDATE escribe
+	// `departamento_id` y `sede_id` juntos, así que mandar el departamento con la sede vacía le
+	// BORRARÍA la sede a la partida sin que nadie lo pidiera.
+	PartidaDepartamentoID string `json:"partida_departamento_id"`
+	PartidaSedeID         string `json:"partida_sede_id"`
 }
 
 // PresupuestoLinea es un monto autorizado en un mes: del departamento completo o de una de sus

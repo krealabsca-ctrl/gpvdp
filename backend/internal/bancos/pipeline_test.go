@@ -24,6 +24,8 @@ type fakeRepo struct {
 	naturalezaActual       string
 	// visibleCxP: si el rubro está dentro del alcance de `cxp.catalogo` (la puerta de Contabilidad).
 	visibleCxP bool
+	// Visibilidad por clasificación (mig 0080): id + valor guardado.
+	visibleClasifGuardada [2]string
 	// Dimensiones del gasto (departamento y sede) y presupuesto
 	sedes         []Sede
 	departamentos []Departamento
@@ -50,6 +52,10 @@ type fakeRepo struct {
 	// Análisis de partidas en el tiempo (tendencia y desvío contra su propio promedio)
 	saludMeses    []SaludMes
 	seriePartidas []TendenciaPartida
+	// Día a día por partida: `serieDiaria` es lo que devuelve y `diarioPedido` guarda los ids con
+	// los que se lo llamó, para poder verificar el recorte y el dedup que hace el service.
+	serieDiaria  []SerieDiariaPartida
+	diarioPedido []string
 	// Resumen de la selección activa (hoja de trabajo)
 	resumenFiltro []ResumenFiltroRow
 	inserted      []MovimientoParaInsertar

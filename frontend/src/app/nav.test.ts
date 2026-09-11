@@ -25,6 +25,17 @@ describe("permisoDeRuta", () => {
     expect(permisoDeRuta("/cxp/validacion")).toBe("cxp.parametros");
   });
 
+  it("separa la bandeja de recepción de la configuración de buzones", () => {
+    // Son dos permisos DISTINTOS a propósito: ver lo que llegó es trabajo de operación, mientras
+    // dar de alta un buzón crea una CREDENCIAL y decide de qué empresa son las facturas que
+    // entran. Si las dos rutas resolvieran al mismo permiso, cualquiera que revisa la cola de
+    // errores podría emitir credenciales.
+    expect(permisoDeRuta("/cxp/recepcion")).toBe("cxp.recepcion");
+    expect(permisoDeRuta("/cxp/fuentes")).toBe("cxp.fuentes");
+    // Y ninguna de las dos se come la de importar, que comparte el módulo.
+    expect(permisoDeRuta("/cxp/importar")).toBe("cxp.importar");
+  });
+
   it("con rutas anidadas gana la MÁS ESPECÍFICA, no la primera del registro", () => {
     // `/inventario` es prefijo de `/inventario/entradas`. Resolviendo por la primera coincidencia,
     // la pantalla de entradas heredaba `inventario.ver`: cualquiera que viera existencias la abría,

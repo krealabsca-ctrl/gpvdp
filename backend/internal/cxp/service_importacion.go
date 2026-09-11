@@ -12,7 +12,7 @@ import (
 // PreviewImportacion parsea el Excel y marca cada fila (nueva/duplicada por clave) y si su
 // proveedor (por cédula) ya existe. No crea nada.
 func (s *Service) PreviewImportacion(ctx context.Context, empresaID string, data []byte) (PreviewImportacion, error) {
-	filas, err := parsearFacturas(data)
+	filas, traza, err := parsearEntrega(data)
 	if err != nil {
 		return PreviewImportacion{}, err
 	}
@@ -23,7 +23,9 @@ func (s *Service) PreviewImportacion(ctx context.Context, empresaID string, data
 
 	cedulaExiste := map[string]bool{}
 	contadas := map[string]bool{}
-	var res ResumenImportacion
+	// La traza de lectura viaja al preview: la pantalla tiene que poder decir POR QUÉ leyó menos
+	// facturas de las que el archivo parece tener.
+	res := traza
 	for i := range filas {
 		if existentes[filas[i].Clave] {
 			filas[i].Estado = ImpDuplicado
@@ -57,7 +59,7 @@ func (s *Service) PreviewImportacion(ctx context.Context, empresaID string, data
 // ConfirmarImportacion crea los documentos nuevos (omite duplicados por clave) y da de alta
 // los proveedores que no existan (por cédula). Best-effort por fila: acumula errores.
 func (s *Service) ConfirmarImportacion(ctx context.Context, empresaID string, data []byte, usuarioID string) (ResultadoImportacion, error) {
-	filas, err := parsearFacturas(data)
+	filas, _, err := parsearEntrega(data)
 	if err != nil {
 		return ResultadoImportacion{}, err
 	}
@@ -151,11 +153,42 @@ func (s *Service) resolverProveedor(ctx context.Context, empresaID string, fila 
 	return p.ID, nil
 }
 
-// filaAInput convierte una fila del Excel en DocumentoInput. USD requiere TC (no viene en el
-// Excel): esas filas se rechazan para no calcular un total_crc incorrecto.
+// filaAInput convierte una fila del Excel en DocumentoInput.
+//
+// ── LAS DOS COSAS QUE SE ARREGLARON ACÁ (2026-09-09) ────────────────────────
+//
+//  1. USD ya no se rechaza. Antes decía «cargala manualmente con su tipo de cambio» porque se
+//     suponía que el TC no venía en el archivo — y sí viene: la columna «Tipo Cambio». Se usa el TC
+//     DE LA FACTURA, que es el que manda para lo que se le debe al proveedor (el congelado del mes
+//     es de Bancos). Sin TC no se inventa uno: la fila se rechaza diciendo qué falta.
+//
+//  2. La fecha de emisión se exige. Antes viajaba cruda al `::date` de Postgres, que está en MDY:
+//     las de día 13 al 31 reventaban y las de día 1 al 12 entraban con el mes y el día invertidos,
+//     en silencio. Ahora viene normalizada del parser, y si no se entendió se rechaza la fila —una
+//     factura sin fecha de emisión no tiene vencimiento ni aging, así que no sirve igual—.
 func filaAInput(fila FilaImportada, provID string) (DocumentoInput, error) {
-	if fila.Moneda == "USD" {
-		return DocumentoInput{}, errors.New("factura en USD: cargala manualmente con su tipo de cambio")
+	if fila.FechaEmision == "" {
+		return DocumentoInput{}, errors.New("fecha de emisión ilegible o vacía (se esperan dd/mm/aaaa o aaaa-mm-dd)")
+	}
+	moneda := fila.Moneda
+	if moneda == "" {
+		moneda = "CRC"
+	}
+	tc := decimal.Zero
+	switch moneda {
+	case "CRC":
+		// El TC de una factura en colones no se guarda: sería 1 o basura, y en los dos casos
+		// confunde al leer el expediente.
+	case "USD":
+		v, err := decimal.NewFromString(strings.TrimSpace(fila.TC))
+		if err != nil || v.LessThanOrEqual(decimal.Zero) {
+			return DocumentoInput{}, errors.New("factura en USD sin tipo de cambio en el archivo (columna «Tipo Cambio»)")
+		}
+		tc = v
+	default:
+		// La base solo acepta CRC y USD (CHECK de `documento_cxp.moneda`). Se dice cuál es la
+		// moneda para que se entienda por qué no entró, en vez de un 500 desde el CHECK.
+		return DocumentoInput{}, errors.New("moneda " + moneda + " no soportada: el sistema maneja CRC y USD")
 	}
 	sub, err := decOrZero(fila.Subtotal)
 	if err != nil {
@@ -169,20 +202,44 @@ func filaAInput(fila FilaImportada, provID string) (DocumentoInput, error) {
 	if err != nil {
 		return DocumentoInput{}, errors.New("total inválido")
 	}
-	return DocumentoInput{
+	in := DocumentoInput{
 		ProveedorID:  provID,
 		Clave:        fila.Clave,
 		Consecutivo:  fila.Consecutivo,
 		FechaEmision: fila.FechaEmision,
-		Moneda:       "CRC",
+		Moneda:       moneda,
 		Subtotal:     sub,
 		IVA:          iva,
 		Retencion:    decimal.Zero,
 		Total:        total,
-		TC:           decimal.Zero,
+		TC:           tc,
 		Descripcion:  descripcionImport(fila),
-		Vencimiento:  fechaISO(fila.Vencimiento),
-	}, nil
+		// Ya viene normalizada del parser: pasarla por `fechaISO` otra vez sería inofensivo pero
+		// sugeriría que puede llegar cruda, y es justo lo que no debe volver a pasar.
+		Vencimiento: fila.Vencimiento,
+	}
+
+	// ── LA FACTURA DE CONTADO NACE BLOQUEADA PARA PAGO ──────────────────────
+	//
+	// Decisión del Director Financiero (2026-09-09). El caso que la motiva: se compra en la
+	// ferretería, se paga con el fondo de caja chica y el custodio registra el vale. La misma
+	// factura llega después por correo, la ingesta la vuelve cuenta por pagar a nombre del
+	// proveedor, y en paralelo la reposición del fondo crea un REINTEGRO al custodio por el mismo
+	// monto: **el gasto sale dos veces por la puerta del banco**. Nada puede detectarlo hoy,
+	// porque el vale de caja chica no tiene la clave del comprobante con la que cruzarlo.
+	//
+	// Bloqueada, la factura entra al expediente y se ve —el gasto queda registrado—, pero no puede
+	// llegar al archivo de pagos sin que una persona la libere: las consultas que arman ese archivo
+	// filtran por `NOT bloqueado_para_pago`.
+	//
+	// Solo aplica al camino XML, que es el único que sabe la condición de venta declarada por el
+	// emisor. El .xlsx no trae `TipoDocumento`, y su columna «Condición» ya se usa nada más para
+	// derivar el plazo.
+	if fila.TipoDocumento != "" && strings.EqualFold(strings.TrimSpace(fila.Condicion), "contado") {
+		in.BloqueadoParaPago = true
+		in.BloqueoMotivo = "contado: confirmar si ya se pagó (caja chica, tarjeta o efectivo)"
+	}
+	return in, nil
 }
 
 // descripcionImport arma la descripción (la fecha de vencimiento ya va en su propio campo).

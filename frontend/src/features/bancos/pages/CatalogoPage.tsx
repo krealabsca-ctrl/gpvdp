@@ -49,6 +49,7 @@ import {
   useCambiarActivoCuenta,
   useCambiarNaturaleza,
   useCambiarVisibilidadCxP,
+  useCambiarVisibilidadCxPClasificacion,
   useClasificaciones,
   useConceptos,
   useCrearBanco,
@@ -1030,6 +1031,7 @@ function ClasificacionesTab() {
   const reasignar = useReasignarConceptoClasificacion();
   const eliminar = useEliminarClasificacion();
   const fusionarClasif = useFusionarClasificacion();
+  const visibilidadClasif = useCambiarVisibilidadCxPClasificacion();
   const [conceptoId, setConceptoId] = useState("");
   const [nombre, setNombre] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
@@ -1179,6 +1181,11 @@ function ClasificacionesTab() {
               <TR>
                 <TH>Concepto</TH>
                 <TH>Clasificación</TH>
+                {/* El corte FINO de la visibilidad. El concepto decide si el rubro es de CxP; esto
+                    decide, dentro de un concepto que sí lo es, cuáles clasificaciones ve
+                    Contabilidad. Hacía falta porque 4 conceptos visibles exponían 124
+                    clasificaciones, y ahí salió gasto confidencial. */}
+                <TH className="text-center">Visible en CxP</TH>
                 {/* El alcance de consulta se edita ACÁ y no en Seguridad: segmentar la partida y
                     decir quién la consulta son el mismo acto, y la lista a elegir son 3 o 4 roles
                     en vez de 170 partidas. En Seguridad se LEE el espejo por rol. */}
@@ -1212,6 +1219,52 @@ function ClasificacionesTab() {
                       />
                     ) : (
                       c.nombre
+                    )}
+                  </TD>
+                  <TD className="text-center">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={c.visible_cxp}
+                      aria-label={`Visible en CxP: ${c.nombre}`}
+                      onClick={() =>
+                        visibilidadClasif.mutate(
+                          { id: c.id, visible: !c.visible_cxp },
+                          {
+                            onSuccess: () =>
+                              toast.success(
+                                c.visible_cxp
+                                  ? `«${c.nombre}» ya no le aparece a Contabilidad.`
+                                  : `«${c.nombre}» vuelve a aparecerle a Contabilidad.`,
+                              ),
+                            onError: (err) => toast.error(mensajeError(err)),
+                          },
+                        )
+                      }
+                      disabled={visibilidadClasif.isPending}
+                      className={cn(
+                        "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
+                        c.visible_cxp ? "bg-accent" : "border border-border bg-surface-muted",
+                      )}
+                      title={
+                        !c.visible_concepto
+                          ? `El concepto «${c.concepto}» está oculto para CxP, así que esta clasificación tampoco aparece — se muestra desde la pestaña Conceptos`
+                          : c.visible_cxp
+                            ? "Contabilidad LA VE al clasificar gastos — clic para ocultarla"
+                            : "Oculta para Contabilidad — clic para mostrarla"
+                      }
+                    >
+                      <span
+                        className="inline-block h-3.5 w-3.5 rounded-full bg-surface-raised shadow transition-transform"
+                        style={{ transform: c.visible_cxp ? "translateX(18px)" : "translateX(2px)" }}
+                      />
+                    </button>
+                    {/* Un interruptor encendido que igual no surte efecto se lee como un bug. Se
+                        dice quién lo está tapando en vez de dejar a la gente peleando con él. */}
+                    {c.visible_cxp && !c.visible_concepto && (
+                      <span className="mt-0.5 block text-[11px] text-content-muted">
+                        el concepto está oculto
+                      </span>
                     )}
                   </TD>
                   <TD>

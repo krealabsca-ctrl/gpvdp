@@ -44,7 +44,8 @@ import {
   Users,
   Wallet,
   Waves,
-} from "lucide-react";
+  Mailbox,
+  KeyRound,} from "lucide-react";
 
 export interface NavPage {
   label: string;
@@ -135,7 +136,11 @@ export const MODULES: NavModule[] = [
     pages: [
       { label: "Bandeja", descripcion: "El trabajo, por fases", to: "/cxp/bandeja", icon: Inbox },
       { label: "Dashboard", descripcion: "Cartera, vencimientos y cola", to: "/cxp/dashboard", icon: LayoutDashboard, permiso: "cxp.dashboard" },
-      { label: "Importar", descripcion: "Facturación (Excel)", to: "/cxp/importar", icon: Upload, permiso: "cxp.importar" },
+      { label: "Importar", descripcion: "Excel o XML de facturación", to: "/cxp/importar", icon: Upload, permiso: "cxp.importar" },
+      // La recepción por correo va JUNTO a Importar: son las dos puertas de lo mismo —una a mano y
+      // otra sola—, y ponerlas separadas haría que nadie encuentre la automática.
+      { label: "Recepción", descripcion: "Lo que llega del correo", to: "/cxp/recepcion", icon: Mailbox, permiso: "cxp.recepcion" },
+      { label: "Buzones", descripcion: "Correo y credencial por empresa", to: "/cxp/fuentes", icon: KeyRound, permiso: "cxp.fuentes" },
       { label: "Proveedores", descripcion: "Maestro", to: "/cxp/proveedores", icon: Building2, permiso: "cxp.ver_todo" },
       { label: "Anticipos", descripcion: "Saldos a favor del proveedor", to: "/cxp/anticipos", icon: Coins, permiso: "cxp.anticipos" },
       { label: "Caja chica", descripcion: "Fondos fijos y vales", to: "/cxp/cajas", icon: PiggyBank, permiso: "cxp.caja_ver" },

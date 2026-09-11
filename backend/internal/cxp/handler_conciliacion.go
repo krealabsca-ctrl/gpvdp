@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/gpvdp/erp/internal/httpx"
+	"github.com/gpvdp/erp/internal/shared"
 )
 
 // ArchivoPago GET /v1/cxp/pagos/archivo?fecha=YYYY-MM-DD — CSV formato SINPE de los PROGRAMADOS.
@@ -25,13 +26,18 @@ func (h *Handler) ArchivoPago(c *gin.Context) {
 }
 
 // escribirCSVPago serializa las líneas del archivo de pago (formato SINPE) al response.
+//
+// El nombre pasa por `shared.TextoParaBanco`: sin eso, un nombre con coma obliga al escritor de CSV
+// a entrecomillar el campo (y hay bancos que no esperan comillas), y una tilde o una eñe pueden
+// rebotar en la plataforma. Ver el comentario de esa función.
 func escribirCSVPago(c *gin.Context, rows []PagoRow) {
 	c.Header("Content-Type", "text/csv; charset=utf-8")
 	c.Header("Content-Disposition", `attachment; filename="pagos-cxp.csv"`)
 	w := csv.NewWriter(c.Writer)
 	_ = w.Write([]string{"Cedula", "Nombre", "IBAN", "Moneda", "MontoNeto", "Descripcion", "Consecutivo"})
 	for _, r := range rows {
-		_ = w.Write([]string{r.Cedula, r.Nombre, r.IBAN, r.Moneda, r.MontoNeto, r.Descripcion, r.Consecutivo})
+		_ = w.Write([]string{r.Cedula, shared.TextoParaBanco(r.Nombre), r.IBAN, r.Moneda,
+			r.MontoNeto, r.Descripcion, r.Consecutivo})
 	}
 	w.Flush()
 }
@@ -45,7 +51,10 @@ func escribirMacroTxt(c *gin.Context, rows []PagoRow) {
 	var b strings.Builder
 	for _, r := range rows {
 		desc := macroDescripcion(r.Consecutivo, r.Descripcion)
-		campos := []string{r.IBAN, sanitizarMacro(r.Nombre), r.Cedula, r.MontoNeto, desc, desc, desc}
+		// El nombre se limpia con la regla del banco: sin tildes, sin eñes y sin caracteres
+		// especiales. Antes solo se cambiaban las comas, así que «PETRÓLEOS DELTA S.A.» viajaba con
+		// la tilde y «X; S.A.» partía la línea en dos campos.
+		campos := []string{r.IBAN, shared.TextoParaBanco(r.Nombre), r.Cedula, r.MontoNeto, desc, desc, desc}
 		b.WriteString(strings.Join(campos, ","))
 		b.WriteString("\r\n")
 	}
@@ -88,11 +97,6 @@ func soloDigitos(s string) string {
 		}
 	}
 	return b.String()
-}
-
-// sanitizarMacro quita comas (el formato es separado por comas sin comillas).
-func sanitizarMacro(s string) string {
-	return strings.ReplaceAll(s, ",", " ")
 }
 
 type conciliarMatchRequest struct {

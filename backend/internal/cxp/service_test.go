@@ -361,6 +361,57 @@ func (f *fakeRepo) MarcarComprobanteEnviado(context.Context, string, string) err
 	return nil
 }
 
+// ── Recepción de facturas por buzón de correo (migración 0081) ──────────────
+//
+// Stubs: los tests de la recepción prueban las funciones PURAS (cotejarReceptor,
+// llaveIdempotencia, el token) porque ahí vive el juicio. Lo que toca la base se prueba de punta a
+// punta contra Postgres, no contra este fake.
+//
+// CedulasDeEmpresa devuelve una lista vacía a propósito: es el caso «no se puede cotejar», y que
+// sea el default del fake obliga a que cualquier prueba que dependa del cotejo lo declare.
+func (f *fakeRepo) CedulasDeEmpresa(context.Context, string) ([]string, error) {
+	return []string{}, nil
+}
+func (f *fakeRepo) CrearFuente(context.Context, string, FuenteInput, string, string) (FuenteRecepcion, error) {
+	return FuenteRecepcion{}, nil
+}
+func (f *fakeRepo) ListarFuentes(context.Context, string) ([]FuenteRecepcion, error) {
+	return []FuenteRecepcion{}, nil
+}
+func (f *fakeRepo) RotarTokenFuente(context.Context, string, string, string) error  { return nil }
+func (f *fakeRepo) CambiarEstadoFuente(context.Context, string, string, bool) error { return nil }
+func (f *fakeRepo) FuentePorTokenHash(context.Context, string) (TokenMaquina, error) {
+	return TokenMaquina{}, ErrTokenRecepcionInvalido
+}
+func (f *fakeRepo) TocarFuente(context.Context, string) error { return nil }
+func (f *fakeRepo) RecepcionPorLlave(context.Context, string, string) (Recepcion, error) {
+	return Recepcion{}, ErrRecepcionNoEncontrada
+}
+func (f *fakeRepo) GuardarRecepcion(context.Context, string, RecepcionNueva) (string, error) {
+	return "rec-1", nil
+}
+func (f *fakeRepo) ResolverRecepcion(context.Context, string, string, string, string, string) error {
+	return nil
+}
+func (f *fakeRepo) ListarRecepciones(context.Context, string, FiltrosRecepcion) ([]Recepcion, error) {
+	return []Recepcion{}, nil
+}
+func (f *fakeRepo) RecepcionPorID(context.Context, string, string) (Recepcion, error) {
+	return Recepcion{}, ErrRecepcionNoEncontrada
+}
+func (f *fakeRepo) ArchivoDeRecepcion(context.Context, string, string, string) (ArchivoRecepcion, error) {
+	return ArchivoRecepcion{}, ErrRecepcionNoEncontrada
+}
+func (f *fakeRepo) ResumenRecepcion(context.Context, string) (ResumenRecepcion, error) {
+	return ResumenRecepcion{}, nil
+}
+func (f *fakeRepo) ClaveEnOtraEmpresa(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+func (f *fakeRepo) UsuarioTecnicoRecepcion(context.Context) (string, error) {
+	return "00000000-0000-0000-0000-000000000001", nil
+}
+
 func TestCrearProveedor(t *testing.T) {
 	repo := &fakeRepo{}
 	svc := NewService(repo, nil, zap.NewNop()) // audit nil => auditar() no-op

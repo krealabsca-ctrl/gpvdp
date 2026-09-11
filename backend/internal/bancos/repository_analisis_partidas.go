@@ -5,6 +5,9 @@ package bancos
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 // SaludMeses devuelve, por mes del rango, cuántos movimientos hay y qué porcentaje tiene su
@@ -129,4 +132,79 @@ func (r *pgRepository) SeriePorPartida(ctx context.Context, empresaID, desde, ha
 		out[n-1].Serie = append(out[n-1].Serie, PuntoPartida{Periodo: periodo, Monto: monto, Movs: movs})
 	}
 	return out, rows.Err()
+}
+
+// SerieDiariaPorPartida devuelve, por partida, los días CON movimiento dentro del rango de meses.
+//
+// Mismos filtros y misma expresión de monto que `SeriePorPartida`: si difirieran, la vista diaria
+// y la mensual de la misma pantalla mostrarían totales distintos del mismo gasto.
+//
+// No hay `generate_series` de días a propósito: los días sin movimiento no se devuelven. Rellenar
+// con ceros multiplicaría por 30 el tamaño de la respuesta para dibujar una línea en el suelo.
+func (r *pgRepository) SerieDiariaPorPartida(ctx context.Context, empresaID, desde, hasta string, clasificaciones []string) ([]SerieDiariaPartida, error) {
+	const q = `
+		SELECT cl.id::text, cl.nombre, COALESCE(co.nombre, '(sin concepto)'),
+		       m.fecha,
+		       ` + sqlMontoEnSuSentido + ` AS monto,
+		       count(*)::int AS movs
+		FROM movimiento_bancario m
+		` + joinConcepto + `
+		JOIN clasificacion cl ON cl.id = m.clasificacion_id
+		WHERE m.empresa_id = $1::uuid AND m.incluido
+		  AND NOT m.es_traslado
+		  AND m.clasificacion_id = ANY($4::uuid[])
+		  AND to_char(m.fecha, 'YYYY-MM') BETWEEN $2 AND $3
+		GROUP BY cl.id, cl.nombre, co.nombre, m.fecha
+		ORDER BY cl.nombre, m.fecha`
+
+	rows, err := r.pool.Query(ctx, q, empresaID, desde, hasta, clasificaciones)
+	if err != nil {
+		return nil, fmt.Errorf("bancos: serie diaria por partida: %w", err)
+	}
+	defer rows.Close()
+
+	// Se arma agrupando en Go y no con un array en SQL: la consulta queda legible y el volumen es
+	// el de unas pocas partidas por un rango de meses.
+	orden := []string{}
+	porID := map[string]*SerieDiariaPartida{}
+	for rows.Next() {
+		var (
+			id, nombre, concepto string
+			fecha                time.Time
+			monto                decimal.Decimal
+			movs                 int
+		)
+		if err := rows.Scan(&id, &nombre, &concepto, &fecha, &monto, &movs); err != nil {
+			return nil, fmt.Errorf("bancos: scan serie diaria: %w", err)
+		}
+		p, ok := porID[id]
+		if !ok {
+			p = &SerieDiariaPartida{
+				ClasificacionID: id, Clasificacion: nombre, Concepto: concepto,
+				Total: "0", Dias: []DiaDePartida{},
+			}
+			porID[id] = p
+			orden = append(orden, id)
+		}
+		p.Dias = append(p.Dias, DiaDePartida{
+			Fecha: fecha.Format("2006-01-02"),
+			Monto: monto.String(),
+			Movs:  movs,
+		})
+		total, err := decimal.NewFromString(p.Total)
+		if err != nil {
+			return nil, fmt.Errorf("bancos: total de la serie diaria de %s: %w", nombre, err)
+		}
+		p.Total = total.Add(monto).String()
+		p.Movs += movs
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]SerieDiariaPartida, 0, len(orden))
+	for _, id := range orden {
+		out = append(out, *porID[id])
+	}
+	return out, nil
 }

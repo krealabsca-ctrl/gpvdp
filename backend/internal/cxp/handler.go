@@ -193,6 +193,14 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 	case errors.Is(err, ErrProveedorNoEncontrado), errors.Is(err, ErrDocumentoNoEncontrado), errors.Is(err, ErrComprobanteNoEncontrado), errors.Is(err, ErrDepartamentoNoEncontrado), errors.Is(err, ErrAplicacionNoEncontrada),
 		errors.Is(err, ErrFondoNoEncontrado), errors.Is(err, ErrValeNoEncontrado):
 		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, err.Error())
+	case errors.Is(err, ErrFuenteNoEncontrada), errors.Is(err, ErrRecepcionNoEncontrada):
+		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, err.Error())
+	case errors.Is(err, ErrFuenteDuplicada):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
+	case errors.Is(err, ErrRecepcionNoReintentable):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
+	case errors.Is(err, ErrTokenRecepcionInvalido):
+		httpx.Abort(c, http.StatusUnauthorized, httpx.CodeNoAutenticado, err.Error())
 	case errors.Is(err, ErrFondoDuplicado):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
 	case errors.Is(err, ErrNoEsCustodio), errors.Is(err, ErrSinPermisoCartera):
@@ -225,7 +233,10 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 	case errors.Is(err, ErrDeptoRequerido), errors.Is(err, ErrRespaldoRequerido), errors.Is(err, ErrEscalamientoNoAplica),
 		errors.Is(err, ErrClaveRequerida), errors.Is(err, ErrMotivoAnticipoRequerido),
 		errors.Is(err, ErrMotivoContabilidadRequerido), errors.Is(err, ErrContabilidadNoModificable),
-		errors.Is(err, ErrNoEsDeContabilidad), errors.Is(err, ErrParametroInvalido):
+		errors.Is(err, ErrNoEsDeContabilidad), errors.Is(err, ErrParametroInvalido),
+		// Falta configurar el correo saliente. Es 422 y no 500 a propósito: el sistema está bien,
+		// falta un dato del servidor, y el mensaje dice cuál.
+		errors.Is(err, ErrCorreoNoConfigurado):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
 	case errors.Is(err, ErrNoEsAnticipo), errors.Is(err, ErrAnticipoNoPagado), errors.Is(err, ErrProveedorDistinto),
 		errors.Is(err, ErrMonedaNoNeteable), errors.Is(err, ErrFacturaNoNeteable), errors.Is(err, ErrMontoAplicacionInvalido),

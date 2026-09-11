@@ -18,7 +18,11 @@ func (s *Service) TransicionMasiva(ctx context.Context, empresaID, usuarioID, ro
 	if len(ids) == 0 {
 		return ResultadoMasivo{}, ErrSinDocumentos
 	}
-	if !rolPuedeAccion(rol, accion) {
+	permitido, err := s.puedeAccion(ctx, empresaID, rol, accion)
+	if err != nil {
+		return ResultadoMasivo{}, err
+	}
+	if !permitido {
 		return ResultadoMasivo{}, ErrRolNoAutorizado
 	}
 	if accion == AccProgramar && fechaPago == "" {
@@ -48,6 +52,31 @@ func (s *Service) TransicionMasiva(ctx context.Context, empresaID, usuarioID, ro
 		res.Resultados = append(res.Resultados, rt)
 	}
 	return res, nil
+}
+
+// puedeAccion resuelve si (empresa, rol) tiene ALGUNO de los permisos que habilitan la acción.
+//
+// Dos decisiones acá:
+//
+//   - Sin verificador inyectado responde que NO. Deny-by-default: un servicio mal armado no puede
+//     terminar autorizando transiciones de dinero. En producción lo inyecta main.go.
+//   - Un fallo del verificador se PROPAGA, no se traduce a «no tenés permiso». Si la base está
+//     caída, el usuario tiene que ver un error del sistema; decirle que le falta un permiso lo
+//     manda a revisar la matriz por un problema que no está ahí.
+func (s *Service) puedeAccion(ctx context.Context, empresaID, rol, accion string) (bool, error) {
+	if s.perms == nil {
+		return false, nil
+	}
+	for _, permiso := range permisosPorAccion[accion] {
+		tiene, err := s.perms.Tiene(ctx, empresaID, rol, permiso)
+		if err != nil {
+			return false, err
+		}
+		if tiene {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // aplicarAccion despacha la acción a la transición por documento correspondiente.

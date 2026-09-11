@@ -30,6 +30,7 @@ import {
   montoACentimos,
   montoLegible,
   montoParaApi,
+  formatFechaHora,
   toNumber,
 } from "@/lib/format";
 import { mensajeError } from "@/lib/apiError";
@@ -370,19 +371,6 @@ export function DocumentoDetailPage() {
       </Card>
     </div>
   );
-}
-
-/** Formatea un timestamp ISO a fecha y hora local legible (es-CR). */
-function formatFechaHora(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("es-CR", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 // Netting de anticipos: desglose Total/−Anticipos/=Neto + aplicar/reversar anticipos del proveedor.

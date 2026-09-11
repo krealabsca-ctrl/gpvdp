@@ -3,7 +3,7 @@
 **Generado desde el catálogo de PostgreSQL de la base en operación.** No escrito a mano: refleja
 exactamente lo que existe hoy. Se regenera cuando cambia el esquema.
 
-**86 tablas · 936 columnas**
+**89 tablas · 973 columnas**
 
 ## Cómo leer las tablas
 
@@ -260,7 +260,7 @@ colas. El histórico de avisos resueltos del mismo movimiento sí admite varias 
 
 ### `clasificacion`
 
-8 columnas.
+9 columnas.
 
 | Columna | Tipo | Nulo | Default | Notas |
 |---|---|---|---|---|
@@ -272,6 +272,7 @@ colas. El histórico de avisos resueltos del mismo movimiento sí admite varias 
 | `activo` | `boolean` | **NN** | `true` | — |
 | `creado_en` | `timestamptz` | **NN** | `now()` | — |
 | `es_contabilidad` | `boolean` | **NN** | `false` | — |
+| `visible_cxp` | `boolean` | **NN** | `true` | El corte FINO de la visibilidad para CxP (mig 0080). Visible = `concepto.visible_cxp` **Y** este. Existe porque 4 conceptos visibles exponían 124 clasificaciones a Contabilidad |
 
 ### `subclasificacion`
 
@@ -690,6 +691,766 @@ la lista.
 | `contenido` | `bytea` | **NN** | — | — |
 | `subido_por` | `uuid` | sí | — | → `usuario.id` |
 | `subido_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `empresa_cedula`
+
+6 columnas. Las cédulas jurídicas que responde cada empresa. Es una LISTA y no una columna de
+`empresa` porque una empresa del grupo puede facturar bajo más de una razón social; el UNIQUE es
+**global** sobre la cédula, porque una misma cédula respondiendo a dos empresas haría ambiguo el
+cotejo del receptor —y esa ambigüedad es lo que metería una factura en la empresa equivocada—.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `cedula` | `text` | **NN** | — | UNIQUE global · CHECK `^[0-9]{9,12}# GPVDP ERP — Diccionario de datos
+
+**Generado desde el catálogo de PostgreSQL de la base en operación.** No escrito a mano: refleja
+exactamente lo que existe hoy. Se regenera cuando cambia el esquema.
+
+**89 tablas · 973 columnas**
+
+## Cómo leer las tablas
+
+- **PK** — forma parte de la clave primaria.
+- **→** — clave foránea, con la tabla y columna a la que apunta.
+- **NN** — `NOT NULL`: la columna es obligatoria.
+- **Default** — valor que pone PostgreSQL si no se indica uno.
+
+## Convenciones de tipo (respetarlas al agregar columnas)
+
+| Para | Tipo a usar |
+|---|---|
+| Identificador | `uuid DEFAULT gen_random_uuid()` |
+| Texto | `text` — **nunca** `varchar(n)` |
+| Dinero | `numeric(14,2)` (o 16,2 / 18,2 si el monto lo pide). **Jamás** `float`, `double precision` ni `real` |
+| Fecha con hora | `timestamptz` — **siempre** con zona |
+| Fecha sola | `date` |
+| Bandera | `boolean` |
+| Tipo de cambio | `numeric(14,4)` |
+| Porcentaje | `numeric(5,2)` |
+| Estructura variable | `jsonb` |
+
+**`empresa_id uuid NOT NULL`** va en toda tabla con datos de una empresa, y **toda** consulta filtra
+por ella tomándola del token. Ver el manual técnico, sección 6.1.
+
+---
+
+## Núcleo, seguridad y auditoría
+
+10 tablas, 60 columnas.
+
+### `empresa`
+
+6 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `nombre` | `text` | **NN** | — | — |
+| `tipo_legal` | `text` | sí | — | — |
+| `activo` | `boolean` | **NN** | `true` | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `tolerancia_traslado` | `numeric(6,4)` | **NN** | `0.01` | — |
+
+### `usuario`
+
+8 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `nombre` | `text` | **NN** | — | — |
+| `email` | `text` | **NN** | — | — |
+| `password_hash` | `text` | **NN** | — | — |
+| `activo` | `boolean` | **NN** | `true` | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `actualizado_en` | `timestamptz` | **NN** | `now()` | — |
+| `debe_cambiar_password` | `boolean` | **NN** | `false` | — |
+
+### `usuario_empresa_rol`
+
+5 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `usuario_id` | `uuid` | **NN** | — | → `usuario.id` |
+| `rol_id` | `uuid` | **NN** | — | → `rol.id` |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `rol`
+
+6 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `codigo` | `text` | **NN** | — | — |
+| `nombre` | `text` | **NN** | — | — |
+| `descripcion` | `text` | sí | — | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `empresa_id` | `uuid` | sí | — | → `empresa.id` |
+
+### `permiso`
+
+7 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `codigo` | `text` | **NN** | — | — |
+| `modulo` | `text` | **NN** | — | — |
+| `nombre` | `text` | **NN** | — | — |
+| `descripcion` | `text` | sí | — | — |
+| `critico` | `boolean` | **NN** | `false` | — |
+| `orden` | `integer` | **NN** | `0` | — |
+
+### `rol_permiso`
+
+4 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `empresa_id` | `uuid` | **NN** | — | **PK** → `empresa.id` |
+| `rol_id` | `uuid` | **NN** | — | **PK** → `rol.id` |
+| `permiso_id` | `uuid` | **NN** | — | **PK** → `permiso.id` |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `rol_clasificacion_consulta`
+
+El ALCANCE de la consulta por segmento (mig 0077): qué partidas de gasto/ingreso puede consultar
+cada rol en la pantalla «Mi partida». Es una capa distinta del permiso: `bancos.ver_mi_segmento`
+dice **qué pantalla** abre el rol; esta tabla dice **cuáles filas** ve ahí.
+
+Sin filas para un rol, ese rol no ve NADA (nunca «todo»): el servicio corta antes de consultar y
+el repositorio agrega una condición imposible. Es el estado normal de casi todos los roles.
+
+4 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `empresa_id` | `uuid` | **NN** | — | **PK** → `empresa.id` |
+| `rol_id` | `uuid` | **NN** | — | **PK** → `rol.id` |
+| `clasificacion_id` | `uuid` | **NN** | — | **PK** → `clasificacion.id` |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `movimiento_reporte_segmentacion`
+
+Los avisos «este movimiento está mal segmentado» que levantan los equipos de consulta. El equipo
+señala; corregir la partida sigue siendo de quien clasifica.
+
+El estado se DERIVA de `resuelto_en` (nulo = pendiente): no hay columna «estado» que mantener
+sincronizada. Un índice único parcial sobre `movimiento_id WHERE resuelto_en IS NULL` deja **un
+solo aviso abierto por movimiento**, para que tres personas avisando del mismo no generen tres
+colas. El histórico de avisos resueltos del mismo movimiento sí admite varias filas.
+
+13 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `movimiento_id` | `uuid` | sí | — | → `movimiento_bancario.id`. **Nulo en un aviso de FALTANTE** que no se pudo enganchar (mig 0078) |
+| `usuario_id` | `uuid` | **NN** | — | → `usuario.id` (quién avisó) |
+| `motivo` | `text` | **NN** | — | obligatorio: sin él no se puede corregir |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `resuelto_en` | `timestamptz` | sí | — | nulo = pendiente |
+| `resuelto_por` | `uuid` | sí | — | → `usuario.id` |
+| `resolucion` | `text` | sí | — | `RECLASIFICADO` \| `SIN_CAMBIO` |
+| `respuesta` | `text` | sí | — | obligatoria si `SIN_CAMBIO`; la ve el equipo |
+| `fecha_esperada` | `date` | sí | — | Aviso de FALTANTE: el día en que el equipo esperaba el movimiento |
+| `monto_esperado` | `numeric(16,2)` | sí | — | Aviso de FALTANTE: el monto exacto que esperaba |
+| `referencia` | `text` | sí | — | Nº de recibo o comprobante con el que buscarlo |
+
+### `sesion`
+
+6 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `usuario_id` | `uuid` | **NN** | — | → `usuario.id` |
+| `token_hash` | `text` | **NN** | — | — |
+| `expira_en` | `timestamptz` | **NN** | — | — |
+| `revocado` | `boolean` | **NN** | `false` | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `auditoria_evento`
+
+9 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | sí | — | → `empresa.id` |
+| `entidad` | `text` | **NN** | — | — |
+| `entidad_id` | `uuid` | sí | — | — |
+| `accion` | `text` | **NN** | — | — |
+| `valor_anterior` | `jsonb` | sí | — | — |
+| `valor_nuevo` | `jsonb` | sí | — | — |
+| `usuario_id` | `uuid` | sí | — | → `usuario.id` |
+| `ts` | `timestamptz` | **NN** | `now()` | — |
+
+### `plantilla_correo`
+
+7 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `clave` | `text` | **NN** | — | — |
+| `asunto` | `text` | **NN** | — | — |
+| `cuerpo` | `text` | **NN** | — | — |
+| `actualizado_por` | `uuid` | sí | — | → `usuario.id` |
+| `actualizado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `schema_migrations`
+
+2 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `version` | `bigint` | **NN** | — | **PK** |
+| `dirty` | `boolean` | **NN** | — | — |
+
+## Bancos
+
+18 tablas, 172 columnas.
+
+### `banco`
+
+5 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `nombre` | `text` | **NN** | — | — |
+| `activo` | `boolean` | **NN** | `true` | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `cuenta_bancaria`
+
+8 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `banco_id` | `uuid` | **NN** | — | → `banco.id` |
+| `iban` | `text` | sí | — | — |
+| `moneda` | `text` | **NN** | — | — |
+| `alias` | `text` | sí | — | — |
+| `activo` | `boolean` | **NN** | `true` | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `concepto`
+
+9 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `nombre` | `text` | **NN** | — | — |
+| `activo` | `boolean` | **NN** | `true` | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `visible_cxp` | `boolean` | **NN** | `true` | — |
+| `es_contabilidad` | `boolean` | **NN** | `false` | — |
+| `naturaleza` | `text` | **NN** | `'NEUTRO'::text` | — |
+| `naturaleza_declarada` | `boolean` | **NN** | `false` | Separa la decisión del silencio: false = nadie la declaró y el valor de `naturaleza` viene del default |
+
+### `clasificacion`
+
+9 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `concepto_id` | `uuid` | **NN** | — | → `concepto.id` |
+| `nombre` | `text` | **NN** | — | — |
+| `cuenta_contable_futura` | `text` | sí | — | — |
+| `activo` | `boolean` | **NN** | `true` | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `es_contabilidad` | `boolean` | **NN** | `false` | — |
+| `visible_cxp` | `boolean` | **NN** | `true` | El corte FINO de la visibilidad para CxP (mig 0080). Visible = `concepto.visible_cxp` **Y** este. Existe porque 4 conceptos visibles exponían 124 clasificaciones a Contabilidad |
+
+### `subclasificacion`
+
+6 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `clasificacion_id` | `uuid` | **NN** | — | → `clasificacion.id` |
+| `nombre` | `text` | **NN** | — | — |
+| `activo` | `boolean` | **NN** | `true` | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `movimiento_bancario`
+
+26 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `cuenta_bancaria_id` | `uuid` | **NN** | — | → `cuenta_bancaria.id` |
+| `importacion_id` | `uuid` | sí | — | → `importacion.id` |
+| `fecha` | `date` | **NN** | — | — |
+| `documento` | `text` | sí | — | — |
+| `descripcion` | `text` | sí | — | — |
+| `debito` | `numeric(16,2)` | **NN** | `0` | — |
+| `credito` | `numeric(16,2)` | **NN** | `0` | — |
+| `moneda_original` | `text` | **NN** | `'CRC'::text` | — |
+| `monto_original` | `numeric(16,2)` | **NN** | `0` | — |
+| `monto_crc` | `numeric(16,2)` | **NN** | `0` | — |
+| `tc_aplicado` | `numeric(14,4)` | sí | — | — |
+| `concepto_id` | `uuid` | sí | — | → `clasificacion.id` → `clasificacion.concepto_id` → `concepto.id` |
+| `clasificacion_id` | `uuid` | sí | — | → `clasificacion.id` → `clasificacion.concepto_id` |
+| `estado_clasificacion` | `text` | **NN** | `'NO_IDENTIFICADO'::text` | — |
+| `confianza` | `numeric(5,2)` | sí | — | — |
+| `es_traslado` | `boolean` | **NN** | `false` | — |
+| `par_traslado_id` | `uuid` | sí | — | → `movimiento_bancario.id` |
+| `natural_key` | `text` | **NN** | — | — |
+| `indice_ocurrencia` | `integer` | **NN** | `1` | — |
+| `incluido` | `boolean` | **NN** | `true` | — |
+| `origen_historico` | `boolean` | **NN** | `false` | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `actualizado_en` | `timestamptz` | **NN** | `now()` | — |
+| `documento_cxp_id` | `uuid` | sí | — | → `documento_cxp.id` |
+
+### `importacion`
+
+10 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `cuenta_bancaria_id` | `uuid` | **NN** | — | → `cuenta_bancaria.id` |
+| `source_file_hash` | `text` | **NN** | — | — |
+| `nombre_archivo` | `text` | **NN** | — | — |
+| `estado` | `text` | **NN** | `'CARGADA'::text` | — |
+| `creado_por` | `uuid` | sí | — | → `usuario.id` |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `archivo` | `bytea` | sí | — | — |
+| `banco` | `text` | sí | — | — |
+
+### `regla_clasificacion`
+
+10 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `nombre` | `text` | **NN** | — | — |
+| `aplica_a` | `text` | **NN** | — | — |
+| `concepto_id` | `uuid` | **NN** | — | → `concepto.id` → `clasificacion.id` → `clasificacion.concepto_id` |
+| `clasificacion_id` | `uuid` | **NN** | — | → `clasificacion.id` → `clasificacion.concepto_id` |
+| `prioridad` | `integer` | **NN** | `100` | — |
+| `activo` | `boolean` | **NN** | `true` | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `aciertos` | `integer` | **NN** | `0` | — |
+
+### `palabra_clave`
+
+4 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `regla_id` | `uuid` | **NN** | — | → `regla_clasificacion.id` |
+| `texto` | `text` | **NN** | — | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `proveedor_gasto`
+
+8 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `proveedor_id` | `uuid` | **NN** | — | → `proveedor.id` |
+| `concepto_id` | `uuid` | **NN** | — | → `concepto.id` |
+| `clasificacion_id` | `uuid` | sí | — | → `clasificacion.id` |
+| `subclasificacion_id` | `uuid` | sí | — | → `subclasificacion.id` |
+| `usos` | `integer` | **NN** | `1` | — |
+| `ultimo_uso` | `timestamptz` | **NN** | `now()` | — |
+
+### `tipo_cambio_mes`
+
+8 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `anio` | `integer` | **NN** | — | — |
+| `mes` | `integer` | **NN** | — | — |
+| `valor_congelado` | `numeric(14,4)` | sí | — | — |
+| `estado` | `text` | **NN** | `'PROVISIONAL'::text` | — |
+| `congelado_en` | `timestamptz` | sí | — | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `tipo_cambio_cotizacion`
+
+6 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `fecha` | `date` | **NN** | — | — |
+| `valor` | `numeric(14,4)` | **NN** | — | — |
+| `fuente` | `text` | **NN** | — | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `bccr_sync_log`
+
+8 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `fecha` | `date` | **NN** | — | — |
+| `indicador` | `text` | **NN** | — | — |
+| `valor` | `numeric(14,4)` | sí | — | — |
+| `exito` | `boolean` | **NN** | — | — |
+| `mensaje` | `text` | sí | — | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `periodo_cierre`
+
+7 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `anio` | `integer` | **NN** | — | — |
+| `mes` | `integer` | **NN** | — | — |
+| `no_identificados_al_cierre` | `integer` | **NN** | `0` | — |
+| `cerrado_por` | `uuid` | sí | — | → `usuario.id` |
+| `cerrado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `proyeccion_escenario`
+
+13 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `periodo` | `text` | **NN** | — | — |
+| `metodo` | `text` | **NN** | — | — |
+| `metodo_efectivo` | `text` | **NN** | — | — |
+| `meta_crecimiento_pct` | `numeric(6,2)` | **NN** | `0` | — |
+| `lineas_ingreso` | `text[]` | **NN** | `'{}'::text[]` | — |
+| `dia_calculo` | `integer` | **NN** | — | — |
+| `real_acumulado` | `numeric(18,2)` | **NN** | — | — |
+| `cierre_proyectado` | `numeric(18,2)` | **NN** | — | — |
+| `meta_monto` | `numeric(18,2)` | **NN** | — | — |
+| `creado_por` | `uuid` | sí | — | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `saldo_cuenta_diario`
+
+11 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `cuenta_bancaria_id` | `uuid` | **NN** | — | → `cuenta_bancaria.id` |
+| `fecha` | `date` | **NN** | — | — |
+| `saldo` | `numeric(16,2)` | **NN** | — | — |
+| `nota` | `text` | sí | — | — |
+| `capturado_por` | `uuid` | sí | — | → `usuario.id` |
+| `capturado_en` | `timestamptz` | **NN** | `now()` | — |
+| `actualizado_en` | `timestamptz` | **NN** | `now()` | — |
+| `revisado_por` | `uuid` | sí | — | → `usuario.id` |
+| `revisado_en` | `timestamptz` | sí | — | — |
+
+### `acta_conciliacion`
+
+12 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `cuenta_bancaria_id` | `uuid` | **NN** | — | → `cuenta_bancaria.id` |
+| `anio` | `integer` | **NN** | — | — |
+| `mes` | `integer` | **NN** | — | — |
+| `saldo_banco` | `numeric(16,2)` | **NN** | — | — |
+| `saldo_libros` | `numeric(16,2)` | **NN** | — | — |
+| `ajuste_partidas` | `numeric(16,2)` | **NN** | — | — |
+| `preparado_por` | `uuid` | sí | — | → `usuario.id` |
+| `preparado_en` | `timestamptz` | **NN** | `now()` | — |
+| `firmado_por` | `uuid` | sí | — | → `usuario.id` |
+| `firmado_en` | `timestamptz` | sí | — | — |
+
+### `partida_conciliacion`
+
+14 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `cuenta_bancaria_id` | `uuid` | **NN** | — | → `cuenta_bancaria.id` |
+| `anio` | `integer` | **NN** | — | — |
+| `mes` | `integer` | **NN** | — | — |
+| `tipo` | `text` | **NN** | — | — |
+| `descripcion` | `text` | **NN** | — | — |
+| `monto` | `numeric(16,2)` | **NN** | — | — |
+| `signo` | `smallint` | **NN** | — | — |
+| `anulada` | `boolean` | **NN** | `false` | — |
+| `registrado_por` | `uuid` | sí | — | → `usuario.id` |
+| `registrado_en` | `timestamptz` | **NN** | `now()` | — |
+| `anulada_por` | `uuid` | sí | — | → `usuario.id` |
+| `anulada_en` | `timestamptz` | sí | — | — |
+
+## Cuentas por Pagar (CxP)
+
+11 tablas, 136 columnas.
+
+### `proveedor`
+
+20 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `nombre` | `text` | **NN** | — | — |
+| `tipo_identificacion` | `text` | sí | — | — |
+| `identificacion` | `text` | sí | — | — |
+| `email` | `text` | sí | — | — |
+| `telefono` | `text` | sí | — | — |
+| `iban` | `text` | sí | — | — |
+| `retencion_renta_pct` | `numeric(5,2)` | **NN** | `0` | — |
+| `exento_iva` | `boolean` | **NN** | `false` | — |
+| `activo` | `boolean` | **NN** | `true` | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `actualizado_en` | `timestamptz` | **NN** | `now()` | — |
+| `gasto_concepto_id` | `uuid` | sí | — | → `concepto.id` |
+| `gasto_clasificacion_id` | `uuid` | sí | — | → `clasificacion.id` |
+| `gasto_subclasificacion_id` | `uuid` | sí | — | → `subclasificacion.id` |
+| `condicion_pago` | `text` | **NN** | `'CONTADO'::text` | — |
+| `plazo_credito_dias` | `integer` | **NN** | `0` | — |
+| `departamento` | `text` | sí | — | — |
+| `es_contabilidad` | `boolean` | **NN** | `false` | — |
+
+### `documento_cxp`
+
+43 columnas.
+
+**`bloqueado_para_pago` es un candado contra el doble pago, y es una marca POSITIVA a propósito.** Las
+tres consultas que arman el archivo de pagos filtran por `estado = 'PROGRAMADO'`; ninguna mira el
+tipo. La provisión que genera Inventario al usar un cofre consignado es de tipo `INTERNO` —vía
+expresa, aprobable directo desde RECIBIDO—, así que recorría ese camino completo: si alguien la pagaba
+antes de conciliarla, después entraba la factura electrónica real del proveedor y se pagaba el mismo
+cofre dos veces. Con la marca, `Programar` la rechaza (y el mensaje dice el motivo) y el archivo de
+pagos la excluye. El default en `false` deja intactas las facturas existentes: solo afecta lo que se
+marque a propósito. Negar tipo por tipo sería peor — bastaría que una consulta futura se olvidara de
+la lista.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `proveedor_id` | `uuid` | **NN** | — | → `proveedor.id` |
+| `clave` | `text` | **NN** | — | — |
+| `consecutivo` | `text` | sí | — | — |
+| `fecha_emision` | `date` | **NN** | — | — |
+| `moneda` | `text` | **NN** | `'CRC'::text` | — |
+| `subtotal` | `numeric(16,2)` | **NN** | `0` | — |
+| `iva` | `numeric(16,2)` | **NN** | `0` | — |
+| `retencion` | `numeric(16,2)` | **NN** | `0` | — |
+| `total` | `numeric(16,2)` | **NN** | `0` | — |
+| `tc_aplicado` | `numeric(14,4)` | sí | — | — |
+| `total_crc` | `numeric(16,2)` | **NN** | `0` | — |
+| `descripcion` | `text` | sí | — | — |
+| `estado` | `text` | **NN** | `'RECIBIDO'::text` | — |
+| `fecha_pago_programada` | `date` | sí | — | — |
+| `huella` | `text` | sí | — | — |
+| `creado_por` | `uuid` | sí | — | → `usuario.id` |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `actualizado_en` | `timestamptz` | **NN** | `now()` | — |
+| `concepto_id` | `uuid` | sí | — | → `concepto.id` |
+| `clasificacion_id` | `uuid` | sí | — | → `clasificacion.id` |
+| `fecha_vencimiento` | `date` | sí | — | — |
+| `tipo` | `text` | **NN** | `'CXP'::text` | — |
+| `subclasificacion_id` | `uuid` | sí | — | → `subclasificacion.id` |
+| `lote_id` | `uuid` | sí | — | → `lote_pago.id` |
+| `comprobante_enviado_en` | `timestamptz` | sí | — | — |
+| `clasif_auto` | `boolean` | **NN** | `false` | — |
+| `prioridad` | `text` | **NN** | `''::text` | — |
+| `nota_revision` | `text` | sí | — | — |
+| `departamento_id` | `uuid` | sí | — | → `departamento.id` |
+| `validado_depto_por` | `uuid` | sí | — | — |
+| `validado_depto_en` | `timestamptz` | sí | — | — |
+| `validacion_respaldo` | `text` | sí | — | — |
+| `validacion_nota` | `text` | sí | — | — |
+| `es_contabilidad` | `boolean` | sí | — | — |
+| `contabilidad_motivo` | `text` | sí | — | — |
+| `contabilidad_marcado_por` | `uuid` | sí | — | → `usuario.id` |
+| `contabilidad_marcado_en` | `timestamptz` | sí | — | — |
+| `requiere_validacion` | `boolean` | sí | — | — |
+| `validacion_motivo` | `text` | sí | — | — |
+| `bloqueado_para_pago` | `boolean` | **NN** | `false` | no se puede programar ni entrar al archivo del banco (mig 0072) |
+| `bloqueo_motivo` | `text` | sí | — | por qué está bloqueado, en palabras |
+
+### `documento_cxp_aprobacion`
+
+6 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `documento_id` | `uuid` | **NN** | — | → `documento_cxp.id` |
+| `usuario_id` | `uuid` | **NN** | — | → `usuario.id` |
+| `rol` | `text` | **NN** | — | — |
+| `aprobado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `anticipo_aplicacion`
+
+10 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `anticipo_id` | `uuid` | **NN** | — | → `documento_cxp.id` |
+| `factura_id` | `uuid` | **NN** | — | → `documento_cxp.id` |
+| `monto_crc` | `numeric(14,2)` | **NN** | — | — |
+| `aplicado_por` | `uuid` | sí | — | → `usuario.id` |
+| `aplicado_en` | `timestamptz` | **NN** | `now()` | — |
+| `activo` | `boolean` | **NN** | `true` | — |
+| `reversado_por` | `uuid` | sí | — | → `usuario.id` |
+| `reversado_en` | `timestamptz` | sí | — | — |
+
+### `departamento`
+
+9 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `nombre` | `text` | **NN** | — | — |
+| `codigo` | `text` | sí | — | — |
+| `centro_costo` | `text` | sí | — | — |
+| `activo` | `boolean` | **NN** | `true` | — |
+| `orden` | `integer` | **NN** | `0` | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `actualizado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `departamento_validador`
+
+4 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `departamento_id` | `uuid` | **NN** | — | **PK** → `departamento.id` |
+| `usuario_id` | `uuid` | **NN** | — | **PK** → `usuario.id` |
+| `rol` | `text` | **NN** | `'TITULAR'::text` | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `lote_pago`
+
+7 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `numero` | `bigint` | **NN** | — | — |
+| `fecha_corte` | `date` | **NN** | — | — |
+| `estado` | `text` | **NN** | `'ABIERTO'::text` | — |
+| `creado_por` | `uuid` | sí | — | → `usuario.id` |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `comprobante_pago`
+
+8 columnas.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `documento_id` | `uuid` | **NN** | — | → `documento_cxp.id` |
+| `filename` | `text` | **NN** | — | — |
+| `mime` | `text` | **NN** | `'application/pdf'::text` | — |
+| `contenido` | `bytea` | **NN** | — | — |
+| `subido_por` | `uuid` | sí | — | → `usuario.id` |
+ |
+| `titular` | `text` | **NN** | `''` | La razón social exacta de esa cédula |
+| `principal` | `boolean` | **NN** | `false` | La cédula con la que la empresa se identifica por defecto |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `cxp_fuente_recepcion`
+
+9 columnas. Un buzón de correo dado de alta para una empresa. **La fuente ES la credencial**: no hay
+tabla de tokens aparte. Una fila = un buzón = una empresa = un token.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `nombre` | `text` | **NN** | — | — |
+| `correo` | `text` | **NN** | — | UNIQUE con `empresa_id` · se compara contra el buzón que reporta el conector |
+| `token_hash` | `text` | **NN** | — | UNIQUE · sha256 hex; el token en claro **nunca** se guarda |
+| `activo` | `boolean` | **NN** | `true` | Desactivada, su token deja de resolver |
+| `ultimo_contacto_en` | `timestamptz` | sí | — | **El latido.** Se actualiza en CADA llamada, incluso sin facturas: distingue «no hubo facturas» de «el conector está muerto» |
+| `creado_por` | `uuid` | sí | — | → `usuario.id` |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+
+### `cxp_recepcion`
+
+22 columnas. La tabla de aterrizaje: lo recibido se guarda **antes** de intentar interpretarlo, así
+que nada se pierde. `PARQUEADA` es la cola de errores y es lo único reintentable.
+
+| Columna | Tipo | Nulo | Default | Notas |
+|---|---|---|---|---|
+| `id` | `uuid` | **NN** | `gen_random_uuid()` | **PK** |
+| `empresa_id` | `uuid` | **NN** | — | → `empresa.id` |
+| `fuente_id` | `uuid` | sí | — | → `cxp_fuente_recepcion.id` ON DELETE SET NULL |
+| `idempotency_key` | `text` | **NN** | — | `message_id` + clave normalizada (o hash del XML si no trae clave). Índice único PARCIAL con `empresa_id` |
+| `clave` | `text` | sí | — | La clave de 50 dígitos de Hacienda, normalizada |
+| `tipo_documento` | `text` | sí | — | Raíz del XML: `FacturaElectronica`, `NotaCreditoElectronica`, … |
+| `version_schema` | `text` | sí | — | `v4.2` / `v4.3` / `v4.4`, del namespace |
+| `receptor` | `text` | sí | — | La cédula a la que dice estar dirigida: se coteja contra `empresa_cedula` |
+| `xml_crudo` | `bytea` | sí | — | El original. **Se borra** si el receptor es de otra empresa (ver nota) |
+| `pdf` | `bytea` | sí | — | La representación gráfica, si el correo la traía |
+| `pdf_filename` | `text` | sí | — | — |
+| `message_id` | `text` | sí | — | Trazabilidad al correo; permite conciliar Gmail contra el ERP |
+| `asunto` | `text` | sí | — | — |
+| `remitente` | `text` | sí | — | — |
+| `buzon` | `text` | sí | — | El buzón al que llegó, según el conector |
+| `estado` | `text` | **NN** | `'PENDIENTE'` | CHECK: `PENDIENTE`, `PROCESADA`, `DUPLICADA`, `PARQUEADA`, `DESCARTADA` |
+| `motivo` | `text` | sí | — | Por qué quedó así, **en palabras**: es lo que la persona lee en la cola |
+| `documento_id` | `uuid` | sí | — | → `documento_cxp.id` ON DELETE SET NULL |
+| `intentos` | `int` | **NN** | `0` | — |
+| `creado_en` | `timestamptz` | **NN** | `now()` | — |
+| `procesado_en` | `timestamptz` | sí | — | — |
+
+> **Por qué se borra el contenido de una factura ajena.** Si el receptor no corresponde a la empresa
+> del token, la recepción se parquea SIN `xml_crudo` ni `pdf`. Guardarlos convertiría la cola de
+> errores en un repositorio de documentos de la otra empresa —razón social, proveedor, líneas de
+> detalle, montos— visible para quien solo tiene acceso a la suya, que es algo imposible en el resto
+> del sistema.
 
 ### `caja_chica_fondo`
 

@@ -126,6 +126,12 @@ export const queryKeys = {
     /** Análisis de partidas en el tiempo: cambia con el rango. */
     analisisPartidas: (empresaId: string, desde: string, hasta: string) =>
       ["bancos", "dashboard", empresaId, "partidas", desde, hasta] as const,
+    /**
+     * Día a día por partida. Las clasificaciones van EN LA CLAVE: cambiar la selección es otra
+     * consulta, no la misma con otros datos, y sin esto la pantalla mostraría la serie anterior.
+     */
+    analisisPartidasDiario: (empresaId: string, desde: string, hasta: string, clasifs: string[]) =>
+      ["bancos", "analisis-partidas-diario", empresaId, desde, hasta, clasifs.join(",")] as const,
     cuentasResumen: (empresaId: string, periodo: string) =>
       ["bancos", "dashboard", empresaId, "cuentas", periodo] as const,
     /** Prefijo para invalidar el resumen sin importar el período. */
@@ -216,6 +222,15 @@ export const queryKeys = {
     /** Prefijo para invalidar el tablero de CUALQUIER período tras una mutación. */
     dashboardRaiz: (empresaId: string) => ["cxp", "dashboard", empresaId] as const,
     bandeja: (empresaId: string) => ["cxp", "bandeja", empresaId] as const,
+
+    /**
+     * Recepción de facturas por buzón (mig 0081). El filtro va al final, así que
+     * `recepcionesRaiz` invalida la bandeja con CUALQUIER filtro por coincidencia de prefijo.
+     */
+    recepciones: (empresaId: string, filtros?: unknown) =>
+      ["cxp", "recepciones", empresaId, filtros ?? null] as const,
+    recepcionesRaiz: (empresaId: string) => ["cxp", "recepciones", empresaId] as const,
+    fuentes: (empresaId: string) => ["cxp", "fuentes", empresaId] as const,
     subclasificaciones: (empresaId: string, clasificacionId: string) =>
       ["cxp", "subclasificaciones", empresaId, clasificacionId] as const,
     subclasificacionesRaiz: (empresaId: string) => ["cxp", "subclasificaciones", empresaId] as const,

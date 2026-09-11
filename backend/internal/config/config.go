@@ -22,9 +22,18 @@ type Config struct {
 	SeedPassword string
 	// CierreBloqueante: si true, no se cierra un período con movimientos "No identificado" (RN-22).
 	CierreBloqueante bool
-	// SMTP para envío de comprobantes de pago a proveedores (dev: MailHog en mailhog:1025).
+	// SMTP para el comprobante de pago al proveedor y las notificaciones de RRHH.
+	//
+	// En dev apunta a MailHog (mailhog:1025, sin autenticación) para ver lo que sale sin mandarle
+	// nada a nadie. En producción hace falta un servidor real: `SMTP_USER` y `SMTP_PASS` vacíos
+	// significan «sin autenticación», que es lo que ningún proveedor real acepta —y por eso el
+	// envío daba error interno en producción con el valor por defecto—.
+	//
+	// Puerto: 587 (STARTTLS). El 465 (TLS implícito) no está soportado.
 	SMTPAddr string
 	SMTPFrom string
+	SMTPUser string
+	SMTPPass string
 	// BCCR: auto-sync del tipo de cambio (§22/§23). Desactivado por defecto: sin
 	// credenciales (correo+token registrados en el BCCR) el sync no funciona y el
 	// motor sigue siendo 100% manual. El indicador por defecto es 318 (venta) —
@@ -53,6 +62,8 @@ func Load() (Config, error) {
 		CierreBloqueante: getbool("CIERRE_PERIODO_BLOQUEANTE", true),
 		SMTPAddr:         getenv("SMTP_ADDR", "mailhog:1025"),
 		SMTPFrom:         getenv("SMTP_FROM", "cxp@valledepazcr.com"),
+		SMTPUser:         os.Getenv("SMTP_USER"),
+		SMTPPass:         os.Getenv("SMTP_PASS"),
 		BCCRSyncEnabled:  getbool("BCCR_SYNC_ENABLED", false),
 		BCCRWSURL:        getenv("BCCR_WS_URL", "https://gee.bccr.fi.cr/Indicadores/Suministro/SW/wsindicadoreseconomicos.asmx/ObtenerIndicadoresEconomicosXML"),
 		BCCREmail:        os.Getenv("BCCR_EMAIL"),
@@ -70,6 +81,17 @@ func Load() (Config, error) {
 	// offline y permite forjar cualquier token (incluido rol ADMIN). Se exige ≥ 32 bytes.
 	if len(cfg.JWTSecret) < 32 {
 		return cfg, fmt.Errorf("config: JWT_SECRET debe tener al menos 32 caracteres (tiene %d)", len(cfg.JWTSecret))
+	}
+	// El MailHog por defecto vale SOLO fuera de producción.
+	//
+	// En el servidor ese host no existe, así que el default convertía «falta configurar el correo»
+	// en un «error interno» al mandarle el comprobante al proveedor —pasó el 9 de setiembre de
+	// 2026—. Vacío, quien envía puede decir exactamente qué falta.
+	//
+	// Se limpia acá y no con el default de `getenv` porque una variable presente pero VACÍA —como
+	// la deja el compose de producción— cae igual en el default.
+	if cfg.IsProduction() && strings.TrimSpace(os.Getenv("SMTP_ADDR")) == "" {
+		cfg.SMTPAddr = ""
 	}
 	return cfg, nil
 }

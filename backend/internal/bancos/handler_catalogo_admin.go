@@ -83,9 +83,13 @@ func (h *Handler) EliminarConcepto(c *gin.Context) {
 type actualizarClasificacionRequest struct {
 	Nombre     string `json:"nombre"`
 	ConceptoID string `json:"concepto_id" validate:"omitempty,uuid"`
+	// VisibleCxP: nil = no se toca. Puntero y no bool para poder APAGARLO: con un bool, `false` y
+	// «no vino en el cuerpo» son el mismo valor y no habría forma de ocultar una clasificación.
+	VisibleCxP *bool `json:"visible_cxp"`
 }
 
-// RenombrarClasificacion PATCH /v1/bancos/catalogo/clasificaciones/:id — nombre y/o concepto.
+// RenombrarClasificacion PATCH /v1/bancos/catalogo/clasificaciones/:id — nombre, concepto y/o
+// visibilidad para CxP.
 func (h *Handler) RenombrarClasificacion(c *gin.Context) {
 	claims, ok := auth.ClaimsFromContext(c)
 	if !ok {
@@ -101,7 +105,7 @@ func (h *Handler) RenombrarClasificacion(c *gin.Context) {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, err.Error())
 		return
 	}
-	if req.Nombre == "" && req.ConceptoID == "" {
+	if req.Nombre == "" && req.ConceptoID == "" && req.VisibleCxP == nil {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "nada que actualizar")
 		return
 	}
@@ -115,6 +119,13 @@ func (h *Handler) RenombrarClasificacion(c *gin.Context) {
 	if req.Nombre != "" {
 		if err := h.svc.RenombrarClasificacion(c.Request.Context(), claims.EmpresaID, c.Param("id"), req.Nombre, claims.UsuarioID()); err != nil {
 			h.responderError(c, err, "renombrar-clasificacion")
+			return
+		}
+	}
+	if req.VisibleCxP != nil {
+		if err := h.svc.CambiarVisibilidadCxPClasificacion(c.Request.Context(), claims.EmpresaID,
+			c.Param("id"), *req.VisibleCxP, claims.UsuarioID()); err != nil {
+			h.responderError(c, err, "visibilidad-clasificacion")
 			return
 		}
 	}

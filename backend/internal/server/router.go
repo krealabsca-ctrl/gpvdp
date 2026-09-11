@@ -46,6 +46,22 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 	v1.POST("/auth/login", rateLimit(10, time.Minute), authH.Login)
 	v1.POST("/auth/refresh", rateLimit(30, time.Minute), authH.Refresh)
 
+	// ── Puerta de MÁQUINA: recepción de facturas desde el buzón de cada empresa ──────────
+	//
+	// Cuelga de `v1` a propósito: NO pasa por RequireAuth (el token de recepción no es un JWT de
+	// usuario) y NO usa P("..."), porque RequirePermiso lee un código de rol del token y esta
+	// llamada no tiene usuario: con rol vacío daría 403 siempre y con empresa vacía daría 500.
+	// El middleware `RequireTokenRecepcion` ES el autorizador de estas dos rutas, y la empresa
+	// sale de la FILA del token, nunca del cuerpo.
+	//
+	// OJO al registrar rutas acá: los tres grupos (`v1`, `authed`, `scoped`) comparten prefijo
+	// vacío, así que `v1.POST` y `scoped.POST` se ven casi iguales. Una ruta protegida colgada de
+	// `v1` por error queda ABIERTA sin que nada avise.
+	maquina := v1.Group("")
+	maquina.Use(cxpH.RequireTokenRecepcion())
+	maquina.POST("/cxp/recepcion", cxpH.Recepcion)
+	maquina.POST("/cxp/recepcion/latido", cxpH.LatidoRecepcion)
+
 	// Requieren access token
 	authed := v1.Group("")
 	authed.Use(tenant.RequireAuth(cfg.JWTSecret))
@@ -104,6 +120,8 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.GET("/bancos/analisis/calendario", P("bancos.ver_dashboard"), bancosH.CalendarioDiario)
 			scoped.GET("/bancos/analisis/cuentas", P("bancos.ver_dashboard"), bancosH.ResumenPorCuenta)
 			scoped.GET("/bancos/analisis/partidas", P("bancos.ver_analisis"), bancosH.AnalisisPartidas)
+			// El día a día de unas partidas elegidas: CUÁNDO se movió, no si está mal.
+			scoped.GET("/bancos/analisis/partidas/diario", P("bancos.ver_analisis"), bancosH.SerieDiariaPartidas)
 			// Dimensiones del gasto (departamento y sede) y control presupuestario.
 			scoped.GET("/bancos/catalogo/sedes", PAlguno("bancos.ver", "inventario.ver", "cxc.ver"), bancosH.Sedes)
 			scoped.GET("/bancos/catalogo/departamentos", P("bancos.ver"), bancosH.Departamentos)
@@ -306,6 +324,17 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.POST("/cxp/proveedores/iban", P("cxp.proveedores"), cxpH.CargarIBAN)
 			scoped.POST("/cxp/importaciones", P("cxp.importar"), cxpH.SubirImportacion)
 			scoped.POST("/cxp/importaciones/confirmar", P("cxp.importar"), cxpH.ConfirmarImportacion)
+
+			// Bandeja de recepción: lo que llegó por correo y la cola de errores.
+			scoped.GET("/cxp/recepciones", P("cxp.recepcion"), cxpH.Recepciones)
+			scoped.POST("/cxp/recepciones/:id/reintentar", P("cxp.recepcion"), cxpH.ReintentarRecepcion)
+			scoped.GET("/cxp/recepciones/:id/archivo", P("cxp.recepcion"), cxpH.ArchivoRecepcion)
+			// Buzones de recepción: crear una fuente crea una CREDENCIAL y decide de qué empresa
+			// son las facturas que entran, así que va con quien configura, no con quien opera.
+			scoped.GET("/cxp/fuentes", P("cxp.fuentes"), cxpH.Fuentes)
+			scoped.POST("/cxp/fuentes", P("cxp.fuentes"), cxpH.CrearFuente)
+			scoped.POST("/cxp/fuentes/:id/rotar", P("cxp.fuentes"), cxpH.RotarTokenFuente)
+			scoped.PATCH("/cxp/fuentes/:id", P("cxp.fuentes"), cxpH.CambiarEstadoFuente)
 
 			// ── Módulo RRHH / Nómina ──
 			// Dashboard del mes (costo real, ciclo, alertas)

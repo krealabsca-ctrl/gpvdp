@@ -164,6 +164,26 @@ export function useCambiarVisibilidadCxP() {
   });
 }
 
+/**
+ * El corte FINO de la visibilidad: ocultar una clasificación dentro de un concepto que sí es de CxP
+ * (mig 0080).
+ *
+ * Invalida las clasificaciones de TODOS los ámbitos —la raíz, no la clave con `ambito`—: la lista
+ * del catálogo y la del selector de gasto de CxP son la misma consulta con distinto filtro, y si
+ * solo se refrescara una, el rubro seguiría ofreciéndose en la bandeja después de ocultarlo.
+ */
+export function useCambiarVisibilidadCxPClasificacion() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; visible: boolean }) =>
+      bancosApi.cambiarVisibilidadCxPClasificacion(vars.id, vars.visible),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.bancos.clasificacionesRaiz(empresaId) });
+    },
+  });
+}
+
 export function useCrearClasificacion() {
   const empresaId = useEmpresaId();
   const qc = useQueryClient();
@@ -813,6 +833,22 @@ export function useAnalisisPartidas(desde: string, hasta: string) {
   return useQuery({
     queryKey: queryKeys.bancos.analisisPartidas(empresaId, desde, hasta),
     queryFn: () => bancosApi.analisisPartidas(desde, hasta),
+  });
+}
+
+/**
+ * El día a día de las partidas seleccionadas.
+ *
+ * `enabled` con la selección vacía: sin partidas elegidas no hay pregunta que hacer, y pedirlo
+ * igual traería el día a día de nada. El servidor también lo protege, pero la pantalla no debería
+ * hacer el viaje.
+ */
+export function useAnalisisPartidasDiario(desde: string, hasta: string, clasificaciones: string[]) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.bancos.analisisPartidasDiario(empresaId, desde, hasta, clasificaciones),
+    queryFn: () => bancosApi.analisisPartidasDiario(desde, hasta, clasificaciones),
+    enabled: clasificaciones.length > 0,
   });
 }
 

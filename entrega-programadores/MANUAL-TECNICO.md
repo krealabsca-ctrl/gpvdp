@@ -3,7 +3,7 @@
 Documento para el equipo de programación que va a recibir, poner en producción y mantener el
 sistema. Todos los números de este manual salieron de medir el sistema real, no de estimaciones.
 
-**Fecha de corte:** 3 de setiembre de 2026 · **Migración aplicada:** 0078 · **86 tablas**
+**Fecha de corte:** 3 de setiembre de 2026 · **Migración aplicada:** 0080 · **86 tablas**
 
 ---
 
@@ -37,7 +37,7 @@ tienen **cero filas**. Nadie cargó todavía el catálogo de artículos ni las e
 tampoco hay sedes creadas (`sede` está en 0). Cualquier medición de rendimiento o de volumen sobre
 ese módulo hoy no significa nada.
 
-**Tamaño:** 51.962 líneas de Go (más 12.365 de pruebas) y 45.085 de TypeScript, en 78 migraciones.
+**Tamaño:** 51.962 líneas de Go (más 12.365 de pruebas) y 45.085 de TypeScript, en 80 migraciones.
 
 ### Lo que este sistema NO hace
 
@@ -76,7 +76,7 @@ Decirlo evita que alguien lo busque:
 
 | Archivo | Para qué sirve |
 |---|---|
-| **`schema.sql`** | El esquema completo: 86 tablas, 286 índices, 250 claves foráneas. Se corre sobre una base vacía y queda toda la estructura. **Probado**: recrea la base real con exactamente las mismas 86 tablas, 936 columnas, 286 índices y 250 FKs. |
+| **`schema.sql`** | El esquema completo: 86 tablas, 286 índices, 250 claves foráneas. Se corre sobre una base vacía y queda toda la estructura. **Probado**: recrea la base real con exactamente las mismas 86 tablas, 937 columnas, 286 índices y 250 FKs. |
 | **`ENDPOINTS.md`** | Las 321 rutas de la API con su método y el permiso que exige cada una. Generado del router, no escrito a mano. |
 | **`MANUAL-TECNICO.md`** | Este documento. |
 
@@ -102,7 +102,7 @@ Dos caminos, y conviene entender la diferencia:
 **Camino A — dejar que el backend construya el esquema** (recomendado para ambientes reales):
 
 1. Base vacía y `DATABASE_URL` apuntando a ella.
-2. Arrancar el backend: aplica las 78 migraciones en orden y registra en `schema_migrations`.
+2. Arrancar el backend: aplica las 80 migraciones en orden y registra en `schema_migrations`.
 3. Poner `SEED_ON_START=true` **solo en ese primer arranque** para sembrar empresas, roles,
    permisos y el usuario administrador. **Apagarlo después** (ver §9).
 
@@ -116,11 +116,11 @@ psql -U postgres -d gpvdp -f schema.sql
 El `schema.sql` que se entrega ya trae **sellada** la versión al final del archivo (el
 `INSERT INTO schema_migrations` lo agrega `deploy/regenerar-entrega.sh`), así que el backend arranca
 sin volver a aplicar nada. Si se usa un `schema.sql` viejo que **no** lo traiga, el backend intentará
-aplicar las 78 migraciones sobre tablas que ya existen y fallará; en ese caso hay que marcar la
+aplicar las 80 migraciones sobre tablas que ya existen y fallará; en ese caso hay que marcar la
 versión a mano:
 
 ```sql
-INSERT INTO schema_migrations (version, dirty) VALUES (78, false);
+INSERT INTO schema_migrations (version, dirty) VALUES (80, false);
 ```
 
 > Por eso el Camino A es el bueno para producción: deja la base y el registro de migraciones
@@ -138,6 +138,9 @@ INSERT INTO schema_migrations (version, dirty) VALUES (78, false);
 | `SEED_ON_START` | Siembra catálogos al arrancar | Ver §9: debe quedar en `false` una vez sembrado |
 | `SEED_ADMIN_EMAIL` / `_PASSWORD` | Administrador inicial | Solo se usan si `SEED_ON_START=true` |
 | `CIERRE_PERIODO_BLOQUEANTE` | Exige 100 % clasificado para cerrar mes | `true` por decisión del negocio |
+| `SMTP_ADDR` | Servidor de correo saliente, `host:puerto` | **Puerto 587 (STARTTLS)**; el 465 no está soportado. Fuera de producción el default es `mailhog:1025`; en producción **no tiene default** — vacío, el envío responde «el correo no está configurado» en vez de un error interno |
+| `SMTP_FROM` | Remitente | El proveedor de correo suele exigir que sea una dirección real del dominio autenticado |
+| `SMTP_USER` / `SMTP_PASS` | Credenciales SMTP | Vacías = sin autenticación, y **eso solo sirve contra un relay interno**: ningún proveedor real acepta correo sin autenticar. Con Google Workspace o Microsoft 365 hay que usar una contraseña de aplicación, no la del usuario |
 | `APP_ENV` | `development` / `production` | En producción, Gin pasa a modo release |
 
 ---
@@ -146,7 +149,7 @@ INSERT INTO schema_migrations (version, dirty) VALUES (78, false);
 
 ### 5.1 Convenciones de tipos — respeten estas
 
-Medido sobre las 936 columnas reales:
+Medido sobre las 937 columnas reales:
 
 | Para | Tipo | Columnas | Por qué |
 |---|---|---|---|
@@ -180,7 +183,7 @@ negocio: la crea golang-migrate y se documenta acá porque hay un caso en que se
 | `usuario` | 8 | Personas. `password_hash` bcrypt, `debe_cambiar_password` fuerza el cambio al primer ingreso |
 | `usuario_empresa_rol` | 5 | Qué rol tiene cada persona **en cada empresa** |
 | `rol` | 6 | Roles. **Son globales** (`empresa_id IS NULL`) salvo los creados a medida |
-| `permiso` | 7 | Catálogo de 74 permisos. `critico` marca los sensibles |
+| `permiso` | 7 | Catálogo de 76 permisos. `critico` marca los sensibles |
 | `rol_permiso` | 4 | La matriz permiso × rol × **empresa**. Editable en caliente |
 | `rol_clasificacion_consulta` | 4 | El ALCANCE de la consulta por segmento: qué partidas ve cada rol. Capa distinta del permiso — ver §6.1 |
 | `movimiento_reporte_segmentacion` | 13 | Los avisos de los equipos de consulta: «esto está mal segmentado» y «esto no aparece». Estado derivado de `resuelto_en` |
@@ -349,6 +352,18 @@ Consecuencia útil: el alcance **se deriva de la segmentación**, no se administ
 un movimiento le cambia el dueño solo, y uno sin clasificar no está en ningún alcance —así que no lo
 ve nadie—.
 
+**Y una regla que se rompió tres veces: la autorización se pregunta por PERMISO, nunca por el
+nombre del rol.** El sistema permite crear roles a medida y marcarles permisos desde la matriz, así
+que cualquier `switch rol { case "SUPERVISOR_FINANCIERO": ... }` en Go es una bomba de tiempo: el
+día que alguien cree un rol nuevo, la matriz dirá que sí y el código que no, y la única salida será
+editar el código —que es justo lo que la matriz existe para evitar—. Pasó con `bancos.ver` (mig
+0074), con los roles ausentes de `MatrizDefault`, y con las acciones en lote de CxP (mig 0079).
+
+Si una ruta transporta varias acciones —el caso de `transicion-masiva`, que lleva diez— hace falta
+una segunda verificación **por permiso de la acción concreta**, y ese permiso tiene que ser **el
+mismo que pide la ruta individual**. Cuando el lote y el de a uno piden cosas distintas aparece el
+peor síntoma posible: la misma factura, dos respuestas.
+
 ### 6.2 Dinero nunca en punto flotante
 
 `numeric` en la base → `decimal.Decimal` en Go → **string** en el JSON. Un `float64` en la ruta del
@@ -458,7 +473,7 @@ oscuro y el de cada empresa funcionan sin tocar cada componente.
 
 ## 8. Permisos (RBAC)
 
-**74 permisos** en `backend/internal/rbac/catalogo.go`, que es la fuente de verdad. La matriz
+**76 permisos** en `backend/internal/rbac/catalogo.go`, que es la fuente de verdad. La matriz
 permiso × rol × empresa se edita desde la interfaz y surte efecto casi en vivo.
 
 Roles base: `ADMIN` (bypass total por diseño, para que nadie se auto-bloquee),

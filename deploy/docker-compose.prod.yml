@@ -60,6 +60,19 @@ services:
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD}
       CIERRE_PERIODO_BLOQUEANTE: "true"
+      # Correo saliente: el comprobante de pago al proveedor y las notificaciones de RRHH.
+      #
+      # No tiene valor por defecto A PROPÓSITO. El default del binario es el MailHog de desarrollo
+      # (`mailhog:1025`), que en el servidor no existe: con eso, mandar el comprobante daba «error
+      # interno» y nadie sabía por qué. Vacío, el backend responde que el correo no está
+      # configurado, que sí se puede leer y arreglar.
+      #
+      # Puerto 587 (STARTTLS). `SMTP_USER` y `SMTP_PASS` vacíos = sin autenticación, y eso solo
+      # sirve contra un relay interno: ningún proveedor real acepta correo sin autenticar.
+      SMTP_ADDR: ${SMTP_ADDR:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
       TZ: America/Costa_Rica
     # SIN `ports`: solo Caddy le habla, por la red interna.
     depends_on:

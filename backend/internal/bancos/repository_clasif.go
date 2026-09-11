@@ -450,12 +450,16 @@ func (r *pgRepository) ListarConceptos(ctx context.Context, empresaID string, so
 }
 
 func (r *pgRepository) ListarClasificaciones(ctx context.Context, empresaID string, soloCxP bool) ([]ClasificacionItem, error) {
-	// soloCxP: las clasificaciones heredan la visibilidad de su concepto.
+	// soloCxP: visible para CxP = el concepto es visible Y la clasificación es visible (mig 0080).
+	// El concepto es el corte grueso; la clasificación, el fino dentro de un concepto que sí es de
+	// CxP. Las DOS condiciones tienen que estar acá: con solo la del concepto, apagar una
+	// clasificación no la ocultaba del selector de gasto, que es de donde salió el problema.
 	const q = `
-		SELECT c.id::text, c.concepto_id::text, co.nombre, c.nombre
+		SELECT c.id::text, c.concepto_id::text, co.nombre, c.nombre, c.visible_cxp, co.visible_cxp
 		FROM clasificacion c
 		JOIN concepto co ON co.id = c.concepto_id
-		WHERE c.empresa_id = $1::uuid AND c.activo = true AND (NOT $2::bool OR co.visible_cxp)
+		WHERE c.empresa_id = $1::uuid AND c.activo = true
+		  AND (NOT $2::bool OR (co.visible_cxp AND c.visible_cxp))
 		ORDER BY co.nombre, c.nombre`
 	rows, err := r.pool.Query(ctx, q, empresaID, soloCxP)
 	if err != nil {
@@ -465,7 +469,8 @@ func (r *pgRepository) ListarClasificaciones(ctx context.Context, empresaID stri
 	var out []ClasificacionItem
 	for rows.Next() {
 		var c ClasificacionItem
-		if err := rows.Scan(&c.ID, &c.ConceptoID, &c.Concepto, &c.Nombre); err != nil {
+		if err := rows.Scan(&c.ID, &c.ConceptoID, &c.Concepto, &c.Nombre,
+			&c.VisibleCxP, &c.VisibleConcepto); err != nil {
 			return nil, fmt.Errorf("bancos: scan clasificación: %w", err)
 		}
 		out = append(out, c)

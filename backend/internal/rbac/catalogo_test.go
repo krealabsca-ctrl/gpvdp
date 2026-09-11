@@ -48,8 +48,15 @@ func TestCatalogoSinDuplicados(t *testing.T) {
 	// Servicio / Sala, Emergencias), y los roles financieros ya leen el módulo por su propio
 	// permiso. DIRECTOR_FINANCIERO lo recibe igual porque su fila es `codigos()`, y ahí es
 	// inofensivo: con el alcance vacío la pantalla no muestra ni una fila.
-	if len(Catalogo) != 74 {
-		t.Errorf("catálogo tiene %d permisos, se esperaban 74", len(Catalogo))
+	// → 76 al pasar las acciones en lote de CxP de código de rol a permiso (mig 0079): `cxp.anular`
+	// y `cxp.resultado_pago` existen porque su recorte vivía SOLO en una lista de roles escrita a
+	// mano, y por eso ningún rol a medida podía denegar, anular ni rebotar.
+	// → 78 con la recepción de facturas por buzón de correo (mig 0081): `cxp.recepcion` abre la
+	// bandeja de lo que llega por correo y la cola de errores, y `cxp.fuentes` da de alta los
+	// buzones. `cxp.fuentes` es SENSIBLE porque crear una fuente crea una credencial y decide de
+	// qué empresa son las facturas que entran.
+	if len(Catalogo) != 78 {
+		t.Errorf("catálogo tiene %d permisos, se esperaban 78", len(Catalogo))
 	}
 }
 
