@@ -197,6 +197,12 @@ export interface Documento {
    */
   requiere_validacion: boolean | null;
   validacion_motivo: MotivoValidacion;
+  /**
+   * La recepción de la que salió esta factura, si entró por el buzón y conserva su XML.
+   * Vacío = entró por Excel o a mano: por ese camino el XML nunca llegó al ERP, así que NO HAY
+   * comprobante que mostrar. Es lo que decide si la fila ofrece «Ver factura».
+   */
+  recepcion_id?: string;
 }
 
 export type MotivoValidacion = "" | "MONTO" | "PROVEEDOR_NUEVO" | "DESVIO";
@@ -483,6 +489,14 @@ export interface FiltrosDocumentos {
    */
   contabilidad?: "si" | "no";
   /**
+   * Prioridad de pago: "AA" (sí o sí) · "A" (puede esperar) · "AA_A" (las dos) · "sin" (sin
+   * priorizar) · ausente = todas.
+   *
+   * Es lo que permite armar el corte «solo las AA». La prioridad se veía y ordenaba desde siempre,
+   * pero no se podía filtrar: con miles de facturas abiertas, lo urgente había que buscarlo a ojo.
+   */
+  prioridad?: "AA" | "A" | "AA_A" | "sin";
+  /**
    * Validación por riesgo: "si" = solo las que esperan la conformidad del área, "no" = las que
    * fluyen derecho a aprobación. Es lo que separa la cola del validador del resto del ciclo.
    */
@@ -744,6 +758,8 @@ export interface Recepcion {
   proveedor?: string;
   total?: string;
   moneda?: string;
+  /** El IVA del documento. Texto, como todo el dinero. */
+  total_impuesto?: string;
   intentos: number;
   tiene_xml: boolean;
   tiene_pdf: boolean;
@@ -1283,4 +1299,315 @@ export const cxpApi = {
     fd.append("archivo", archivo);
     return apiFetch<ResultadoImportacion>("/cxp/importaciones/confirmar", { method: "POST", raw: fd });
   },
+
+  // ── Responsabilidades mensuales (mig 0082) ──────────────────────────────────────────────────
+  /** El VISOR: la factura ya interpretada desde el XML que guarda la recepción. */
+  comprobanteRecepcion(id: string): Promise<VistaComprobante> {
+    return apiFetch<VistaComprobante>(`/cxp/recepciones/${id}/comprobante`, { method: "GET" });
+  },
+
+  responsabilidades(filtros: FiltrosResponsabilidades = {}): Promise<Responsabilidad[]> {
+    return apiFetch<Responsabilidad[]>("/cxp/responsabilidades", { method: "GET", query: { ...filtros } });
+  },
+  responsabilidad(id: string): Promise<Responsabilidad> {
+    return apiFetch<Responsabilidad>(`/cxp/responsabilidades/${id}`, { method: "GET" });
+  },
+  crearResponsabilidad(input: ResponsabilidadInput): Promise<Responsabilidad> {
+    return apiFetch<Responsabilidad>("/cxp/responsabilidades", { method: "POST", json: input });
+  },
+  actualizarResponsabilidad(id: string, input: ResponsabilidadInput): Promise<Responsabilidad> {
+    return apiFetch<Responsabilidad>(`/cxp/responsabilidades/${id}`, { method: "PUT", json: input });
+  },
+  cambiarEstadoResponsabilidad(id: string, estado: EstadoResponsabilidad, motivo: string): Promise<{ ok: boolean }> {
+    return apiFetch<{ ok: boolean }>(`/cxp/responsabilidades/${id}/estado`, { method: "POST", json: { estado, motivo } });
+  },
+  /** La pantalla «El mes»: encabezado, filas con semáforo y lo que nadie abrió. */
+  mesDeResponsabilidades(periodo: string): Promise<VistaDelMes> {
+    return apiFetch<VistaDelMes>("/cxp/responsabilidades/mes", { method: "GET", query: { periodo } });
+  },
+  /** La lista corta: solo las que la persona lleva. No pide permiso de módulo. */
+  misResponsabilidades(periodo: string): Promise<PeriodoResponsabilidad[]> {
+    return apiFetch<PeriodoResponsabilidad[]>("/cxp/responsabilidades/mias", { method: "GET", query: { periodo } });
+  },
+  /** Qué va a hacer «Abrir el mes» ANTES de hacerlo, con lo que queda afuera explicado. */
+  planDelMes(periodo: string): Promise<PlanDelMes> {
+    return apiFetch<PlanDelMes>("/cxp/responsabilidades/mes/plan", { method: "GET", query: { periodo } });
+  },
+  /** `esperadas` es el total que la persona vio: si el plan cambió, el servidor se detiene. */
+  abrirMes(periodo: string, esperadas: number): Promise<PlanDelMes> {
+    return apiFetch<PlanDelMes>("/cxp/responsabilidades/mes/abrir", { method: "POST", json: { periodo, esperadas } });
+  },
+  cerrarPeriodo(id: string, cierre: CierrePeriodo): Promise<{ ok: boolean }> {
+    return apiFetch<{ ok: boolean }>(`/cxp/responsabilidades/periodos/${id}/cerrar`, { method: "POST", json: cierre });
+  },
+  reabrirPeriodo(id: string, motivo: string): Promise<{ ok: boolean }> {
+    return apiFetch<{ ok: boolean }>(`/cxp/responsabilidades/periodos/${id}/reabrir`, { method: "POST", json: { motivo } });
+  },
 };
+
+// ── Responsabilidades mensuales: tipos ─────────────────────────────────────────────────────────
+//
+// Todo el resto del módulo describe LO QUE LLEGÓ. Esto describe LO QUE SE ESPERA, que es lo que
+// permite ver un olvido: hoy, olvidar significa no crear la factura, y no crear la factura
+// significa que la obligación nunca existió para el sistema.
+
+export type EstadoResponsabilidad = "ACTIVA" | "SUSPENDIDA" | "FINALIZADA";
+export type TipoResponsabilidad = "PAGO" | "TRAMITE";
+export type Periodicidad = "MENSUAL" | "BIMENSUAL" | "TRIMESTRAL" | "SEMESTRAL" | "ANUAL";
+export type MontoTipo = "FIJO" | "VARIABLE";
+export type RespaldoTipo = "CONTRATO" | "ACTA" | "CORREO" | "VERBAL" | "NINGUNO";
+export type EstadoPeriodo = "PENDIENTE" | "CUMPLIDA" | "NO_APLICA";
+export type PruebaCumplimiento = "FACTURA" | "MOVIMIENTO" | "ACUSE";
+
+/**
+ * El semáforo lo calcula el servidor al leer; nunca se guarda. SIN_DATO es la guarda de
+ * honestidad: cuando el banco no está importado hasta el día de vencimiento, el sistema no puede
+ * afirmar que algo está vencido, así que no lo afirma.
+ */
+export type Semaforo =
+  | "CUMPLIDA"
+  | "NO_APLICA"
+  | "SIN_DATO"
+  | "VENCIDA"
+  | "POR_VENCER"
+  | "AL_DIA"
+  | "SIN_ABRIR";
+
+export interface FiltrosResponsabilidades {
+  estado?: EstadoResponsabilidad;
+  tipo?: TipoResponsabilidad;
+  q?: string;
+}
+
+export interface Responsabilidad {
+  id: string;
+  nombre: string;
+  /** Texto libre: el arrendante de palabra no está en el maestro de proveedores. */
+  contraparte: string;
+  proveedor_id?: string;
+  proveedor_nombre?: string;
+  tipo: TipoResponsabilidad;
+  periodicidad: Periodicidad;
+  dia_vencimiento: number;
+  mes_ancla?: number;
+  moneda: "CRC" | "USD";
+  /** Dinero como texto: un número en coma flotante pierde centavos en el camino. */
+  monto_esperado: string;
+  monto_tipo: MontoTipo;
+  respaldo_tipo: RespaldoTipo;
+  respaldo_archivo?: string;
+  espera_factura: boolean;
+  deducible: boolean;
+  clasificacion_id?: string;
+  clasificacion_nombre?: string;
+  departamento_id?: string;
+  departamento_nombre?: string;
+  estado: EstadoResponsabilidad;
+  motivo_estado?: string;
+  notas?: string;
+  titular_id?: string;
+  titular_nombre?: string;
+  suplente_id?: string;
+  suplente_nombre?: string;
+  creado_en: string;
+}
+
+export interface ResponsabilidadInput {
+  nombre: string;
+  contraparte: string;
+  proveedor_id?: string;
+  tipo?: TipoResponsabilidad;
+  periodicidad?: Periodicidad;
+  dia_vencimiento: number;
+  mes_ancla?: number;
+  moneda?: "CRC" | "USD";
+  monto_esperado?: string;
+  monto_tipo?: MontoTipo;
+  respaldo_tipo?: RespaldoTipo;
+  respaldo_archivo?: string;
+  espera_factura?: boolean;
+  deducible?: boolean;
+  clasificacion_id?: string;
+  departamento_id?: string;
+  notas?: string;
+  titular_id?: string;
+  suplente_id?: string;
+}
+
+export interface PeriodoResponsabilidad {
+  id: string;
+  responsabilidad_id: string;
+  nombre: string;
+  contraparte: string;
+  periodo: string;
+  vence_en: string;
+  monto_esperado: string;
+  moneda: "CRC" | "USD";
+  monto_tipo: MontoTipo;
+  estado: EstadoPeriodo;
+  cumplida_con?: PruebaCumplimiento;
+  documento_id?: string;
+  movimiento_id?: string;
+  acuse_archivo?: string;
+  motivo?: string;
+  respaldo_tipo?: RespaldoTipo;
+  deducible: boolean;
+  titular_nombre?: string;
+  suplente_nombre?: string;
+  cerrado_por_nombre?: string;
+  cerrado_en?: string;
+  semaforo: Semaforo;
+  /** Positivo cuando ya venció. Lo calcula el servidor: la zona horaria del navegador lo corre un día. */
+  dias_de_atraso: number;
+}
+
+export interface ResumenDelMes {
+  periodo: string;
+  /** Activas que tocan este mes y NO tienen fila: el número que delata que nadie abrió el mes. */
+  sin_abrir: number;
+  pendiente: number;
+  por_vencer: number;
+  vencida: number;
+  sin_dato: number;
+  cumplida: number;
+  no_aplica: number;
+  monto_esperado: string;
+  monto_vencido: string;
+  /** Hasta cuándo alcanzan los datos del banco. Sin esto, «SIN DATO» parece un error del sistema. */
+  banco_hasta?: string;
+}
+
+export interface VistaDelMes {
+  resumen: ResumenDelMes;
+  filas: PeriodoResponsabilidad[];
+  sin_abrir: Responsabilidad[];
+}
+
+export interface MotivoAfuera {
+  razon: string;
+  cuantas: number;
+  nombres: string[];
+}
+
+export interface PlanDelMes {
+  periodo: string;
+  va_a_crear: number;
+  ya_estaban: number;
+  monto_esperado: string;
+  /** Lo que queda afuera, agrupado por razón: «38 de 41» sin explicar las 3 no le sirve a nadie. */
+  afuera: MotivoAfuera[];
+}
+
+export interface CierrePeriodo {
+  estado: Exclude<EstadoPeriodo, "PENDIENTE">;
+  cumplida_con?: PruebaCumplimiento;
+  documento_id?: string;
+  movimiento_id?: string;
+  acuse_archivo?: string;
+  motivo?: string;
+}
+
+// ── EL VISOR DEL COMPROBANTE ───────────────────────────────────────────────────────────────────
+//
+// La factura ya interpretada, para poder VER qué se compró. Se arma en el servidor a partir del
+// XML que la recepción guarda: parsearlo en el navegador perdería el ISO-8859-1 en que emite
+// Hacienda (convirtiendo «SEÑOR» en basura sin avisar) y mostraría solo el primero cuando el
+// archivo trae varios comprobantes pegados.
+//
+// TODO monto viaja como STRING tal como vino del XML. Cadena vacía significa EL ELEMENTO NO VINO,
+// y es distinto de "0": no usar toNumber() para decidir si mostrar un campo, porque devuelve 0
+// para los dos casos.
+
+/** COMPROBANTE = se puede pintar · DESCONOCIDO = no es un comprobante · SIN_XML = ya no se conserva. */
+export type ModoVisor = "COMPROBANTE" | "DESCONOCIDO" | "SIN_XML";
+
+export interface ImpuestoComprobante {
+  codigo: string;
+  /** El PORCENTAJE, tomado del propio XML. Vacío si el comprobante no lo declara. */
+  tarifa: string;
+  /** El código de catálogo, CRUDO: no hay tabla oficial para traducirlo sin inventar. */
+  codigo_tarifa: string;
+  monto: string;
+}
+
+export interface DescuentoComprobante {
+  monto: string;
+  codigo: string;
+  /** Tal como lo escribió el emisor en el XML ("Descuento al cliente"). */
+  naturaleza: string;
+}
+
+export interface LineaComprobante {
+  numero: string;
+  detalle: string;
+  cabys: string;
+  /** El código del proveedor: es el que sirve para cotejar contra inventario. */
+  codigo_comercial: string;
+  cantidad: string;
+  unidad_medida: string;
+  precio_unitario: string;
+  monto_total: string;
+  descuentos: DescuentoComprobante[];
+  subtotal: string;
+  base_imponible: string;
+  /** Repetible: así es como UNA línea lleva más de una tarifa. */
+  impuestos: ImpuestoComprobante[];
+  monto_total_linea: string;
+}
+
+export interface ParteComprobante {
+  nombre: string;
+  nombre_comercial?: string;
+  tipo_identificacion?: string;
+  identificacion: string;
+}
+
+export interface MedioPagoComprobante {
+  tipo: string;
+  monto: string;
+}
+
+export interface Comprobante {
+  tipo: string;
+  tipo_nombre: string;
+  version: string;
+  clave: string;
+  /** 50 dígitos exactos. Si es false, NO cortar la clave por posiciones fijas. */
+  clave_valida: boolean;
+  consecutivo: string;
+  fecha_emision: string;
+  condicion_venta: string;
+  /** Vacía cuando el código no está entre los confirmados: ahí se muestra el código crudo. */
+  condicion_venta_etiqueta: string;
+  plazo_credito: string;
+  emisor: ParteComprobante;
+  /** null en un tiquete electrónico, que normalmente no trae receptor. */
+  receptor: ParteComprobante | null;
+  moneda: string;
+  tipo_cambio: string;
+  lineas: LineaComprobante[];
+  /** El desglose por tarifa: LA respuesta a los «varios IVAs». */
+  desglose: ImpuestoComprobante[];
+  medios_pago: MedioPagoComprobante[];
+  total_venta: string;
+  total_descuentos: string;
+  total_venta_neta: string;
+  total_impuesto: string;
+  total_otros_cargos: string;
+  total_iva_devuelto: string;
+  total_comprobante: string;
+  total_gravado: string;
+  total_exento: string;
+  total_exonerado: string;
+  /** Vacío = los números del comprobante cuadran. No se corrigió nada. */
+  descuadre: string;
+}
+
+export interface VistaComprobante {
+  modo: ModoVisor;
+  /** Lo que el visor NO pudo leer, en palabras. Nunca null. */
+  avisos: string[];
+  /** Cuántos comprobantes MÁS traía el mismo archivo (normal: 0). */
+  otros_en_el_archivo: number;
+  comprobante: Comprobante | null;
+}

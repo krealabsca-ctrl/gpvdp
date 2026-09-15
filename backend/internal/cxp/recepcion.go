@@ -95,6 +95,9 @@ type Recepcion struct {
 	Proveedor     string `json:"proveedor,omitempty"`
 	Total         string `json:"total,omitempty"`
 	Moneda        string `json:"moneda,omitempty"`
+	// TotalImpuesto es el IVA del documento, para la columna «Total impuesto» de la parrilla.
+	// Texto, igual que todo el dinero del proyecto.
+	TotalImpuesto string `json:"total_impuesto,omitempty"`
 	Intentos      int    `json:"intentos"`
 	TieneXML      bool   `json:"tiene_xml"`
 	TienePDF      bool   `json:"tiene_pdf"`

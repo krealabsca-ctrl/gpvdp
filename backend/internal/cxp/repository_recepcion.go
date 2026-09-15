@@ -186,7 +186,10 @@ const recepcionCols = `rc.id::text, COALESCE(rc.fuente_id::text,''), COALESCE(f.
 	COALESCE(rc.receptor,''), COALESCE(rc.message_id,''), COALESCE(rc.asunto,''),
 	COALESCE(rc.remitente,''), COALESCE(rc.buzon,''), rc.estado, COALESCE(rc.motivo,''),
 	COALESCE(rc.documento_id::text,''), COALESCE(d.consecutivo,''), COALESCE(p.nombre,''),
-	COALESCE(d.total::text,''), COALESCE(d.moneda,''), rc.intentos,
+	COALESCE(d.total::text,''), COALESCE(d.moneda,''),
+	-- El impuesto del documento, para la columna «Total impuesto» de la parrilla. Sale del mismo
+	-- JOIN que ya estaba: no agrega ni una consulta.
+	COALESCE(d.iva::text,''), rc.intentos,
 	(rc.xml_crudo IS NOT NULL), (rc.pdf IS NOT NULL),
 	to_char(rc.creado_en, 'YYYY-MM-DD"T"HH24:MI:SSOF'),
 	COALESCE(to_char(rc.procesado_en, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '')`
@@ -202,7 +205,7 @@ func escanearRecepcion(row pgx.Row) (Recepcion, error) {
 	err := row.Scan(&r.ID, &r.FuenteID, &r.FuenteNombre, &r.Clave, &r.TipoDocumento,
 		&r.VersionSchema, &r.Receptor, &r.MessageID, &r.Asunto, &r.Remitente, &r.Buzon,
 		&r.Estado, &r.Motivo, &r.DocumentoID, &r.Consecutivo, &r.Proveedor, &r.Total,
-		&r.Moneda, &r.Intentos, &r.TieneXML, &r.TienePDF, &r.CreadoEn, &r.ProcesadoEn)
+		&r.Moneda, &r.TotalImpuesto, &r.Intentos, &r.TieneXML, &r.TienePDF, &r.CreadoEn, &r.ProcesadoEn)
 	return r, err
 }
 
@@ -324,6 +327,30 @@ func (r *pgRepository) RecepcionPorID(ctx context.Context, empresaID, id string)
 }
 
 // ArchivoDeRecepcion devuelve el XML o el PDF originales. `cual` es "xml" o "pdf".
+// XMLDeRecepcion trae el XML crudo de una recepción para el VISOR.
+//
+// No reusa ArchivoDeRecepcion a propósito: aquella devuelve el MISMO error para «la recepción no
+// existe» y para «existe pero ya no conserva el XML», y el visor necesita distinguirlos — el
+// segundo caso es legítimo (el XML se borra cuando la factura no era de esta empresa) y hay que
+// explicarlo en palabras, no devolverlo como si la recepción no existiera.
+//
+// Por eso acá un XML ausente devuelve `nil, nil`: el que decide qué mostrar es el visor.
+func (r *pgRepository) XMLDeRecepcion(ctx context.Context, empresaID, id string) ([]byte, error) {
+	const q = `SELECT xml_crudo FROM cxp_recepcion WHERE empresa_id = $1::uuid AND id = $2::uuid`
+	var xml []byte
+	err := r.pool.QueryRow(ctx, q, empresaID, id).Scan(&xml)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrRecepcionNoEncontrada
+	}
+	if err != nil {
+		if esIDInvalido(err) {
+			return nil, ErrRecepcionNoEncontrada
+		}
+		return nil, fmt.Errorf("cxp: xml de recepción: %w", err)
+	}
+	return xml, nil
+}
+
 func (r *pgRepository) ArchivoDeRecepcion(ctx context.Context, empresaID, id, cual string) (ArchivoRecepcion, error) {
 	const q = `SELECT COALESCE(clave,'sin-clave'), xml_crudo, pdf, COALESCE(pdf_filename,'')
 	           FROM cxp_recepcion WHERE empresa_id = $1::uuid AND id = $2::uuid`

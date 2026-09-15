@@ -153,11 +153,34 @@ type Repository interface {
 	ListarRecepciones(ctx context.Context, empresaID string, f FiltrosRecepcion) ([]Recepcion, error)
 	RecepcionPorID(ctx context.Context, empresaID, id string) (Recepcion, error)
 	ArchivoDeRecepcion(ctx context.Context, empresaID, id, cual string) (ArchivoRecepcion, error)
+	// XMLDeRecepcion: para el VISOR. Devuelve nil,nil si la recepción existe pero ya no conserva
+	// el XML — caso legítimo que el visor explica, en vez de tratarlo como «no existe».
+	XMLDeRecepcion(ctx context.Context, empresaID, id string) ([]byte, error)
 	ResumenRecepcion(ctx context.Context, empresaID string) (ResumenRecepcion, error)
 	// ClaveEnOtraEmpresa dice si esa clave ya entró en OTRA empresa del grupo, sin decir en cuál.
 	ClaveEnOtraEmpresa(ctx context.Context, empresaID, clave string) (bool, error)
 	// UsuarioTecnicoRecepcion es el usuario con el que la máquina firma lo que crea.
 	UsuarioTecnicoRecepcion(ctx context.Context) (string, error)
+
+	// Responsabilidades mensuales (migración 0082). Lo que se ESPERA, no lo que llegó.
+	ListarResponsabilidades(ctx context.Context, empresaID string, f FiltrosResponsabilidad) ([]Responsabilidad, error)
+	ResponsabilidadPorID(ctx context.Context, empresaID, id string) (Responsabilidad, error)
+	ResponsabilidadesActivas(ctx context.Context, empresaID string) ([]Responsabilidad, error)
+	CrearResponsabilidad(ctx context.Context, empresaID string, in ResponsabilidadInput, usuarioID string) (Responsabilidad, error)
+	ActualizarResponsabilidad(ctx context.Context, empresaID, id string, in ResponsabilidadInput) (Responsabilidad, error)
+	CambiarEstadoResponsabilidad(ctx context.Context, empresaID, id, estado, motivo string) error
+	// AbrirMes es idempotente: se apoya en UNIQUE (responsabilidad_id, periodo) y devuelve cuántas
+	// filas se crearon DE VERDAD, para que la pantalla no finja haber hecho algo.
+	AbrirMes(ctx context.Context, empresaID string, filas []PeriodoNuevo) (int, error)
+	ListarPeriodos(ctx context.Context, empresaID string, f FiltrosPeriodo) ([]PeriodoResponsabilidad, error)
+	CerrarPeriodo(ctx context.Context, empresaID, id string, c CierrePeriodo, usuarioID string) error
+	ReabrirPeriodo(ctx context.Context, empresaID, id, motivo string) error
+	IDsConFilaEnElMes(ctx context.Context, empresaID, periodo string) (map[string]bool, error)
+	// UltimaFechaBanco: hasta dónde alcanzan los datos para poder afirmar que algo está vencido.
+	UltimaFechaBanco(ctx context.Context, empresaID string) (string, error)
+	// PartidasDelRol: el recorte fino de «ver solo las mías», reutilizando la misma tabla con la
+	// que Bancos resuelve la consulta por segmento (migración 0077). Va por ROL, no por persona.
+	PartidasDelRol(ctx context.Context, empresaID, usuarioID string) ([]string, error)
 }
 
 type pgRepository struct{ pool *pgxpool.Pool }

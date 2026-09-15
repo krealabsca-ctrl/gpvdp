@@ -38,6 +38,8 @@ import { ImportarPage } from "@/features/cxp/pages/ImportarPage";
 import { RecepcionPage } from "@/features/cxp/pages/RecepcionPage";
 import { FuentesRecepcionPage } from "@/features/cxp/pages/FuentesRecepcionPage";
 import { DashboardCxpPage } from "@/features/cxp/pages/DashboardCxpPage";
+import { ResponsabilidadesPage } from "@/features/cxp/pages/ResponsabilidadesPage";
+import { MisResponsabilidadesPage } from "@/features/cxp/pages/MisResponsabilidadesPage";
 // Módulo CxC (fase 1) — cartera sobre partidas abiertas.
 import { CarteraPage } from "@/features/cxc/pages/CarteraPage";
 import { ColaPage } from "@/features/cxc/pages/ColaPage";
@@ -122,6 +124,9 @@ export const router = createBrowserRouter([
           { path: "cxp/dashboard", element: <DashboardCxpPage /> },
           { path: "cxp/importar", element: <ImportarPage /> },
           { path: "cxp/recepcion", element: <RecepcionPage /> },
+          // Responsabilidades mensuales (mig 0082): lo que se ESPERA, no lo que llegó.
+          { path: "cxp/responsabilidades", element: <ResponsabilidadesPage /> },
+          { path: "cxp/mis-responsabilidades", element: <MisResponsabilidadesPage /> },
           { path: "cxp/fuentes", element: <FuentesRecepcionPage /> },
           { path: "cxp/proveedores", element: <ProveedoresPage /> },
           { path: "cxp/anticipos", element: <AnticiposPage /> },

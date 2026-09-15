@@ -242,6 +242,19 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 		errors.Is(err, ErrMonedaNoNeteable), errors.Is(err, ErrFacturaNoNeteable), errors.Is(err, ErrMontoAplicacionInvalido),
 		errors.Is(err, ErrReversaNoPermitida):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
+	// Responsabilidades mensuales (migración 0082).
+	case errors.Is(err, ErrResponsabilidadNoEncontrada), errors.Is(err, ErrPeriodoNoEncontrado):
+		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, err.Error())
+	case errors.Is(err, ErrPeriodoYaCerrado):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
+	// ErrPruebaYaUsada es 409: esa factura o ese débito YA cerró otra responsabilidad, y dejar
+	// pasar el segundo haría que un solo pago apagara dos alarmas.
+	case errors.Is(err, ErrPruebaYaUsada):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
+	case errors.Is(err, ErrMotivoObligatorio), errors.Is(err, ErrPruebaObligatoria),
+		errors.Is(err, ErrSinComprobanteNoDeducible), errors.Is(err, ErrRespaldoSinArchivo),
+		errors.Is(err, ErrPeriodicidadInvalida):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
 	default:
 		// Red de seguridad: id UUID inválido (22P02) o fecha inválida (22007/22008) → 400, no 500.
 		var pgErr *pgconn.PgError

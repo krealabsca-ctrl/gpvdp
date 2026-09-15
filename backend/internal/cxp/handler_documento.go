@@ -135,6 +135,7 @@ func (h *Handler) ListarDocumentos(c *gin.Context) {
 		Contabilidad:       c.Query("contabilidad"),
 		RequiereValidacion: c.Query("requiere_validacion"),
 		Fase:               c.Query("fase"),
+		Prioridad:          c.Query("prioridad"),
 		Page:               atoiDefault(c.Query("page"), 1),
 		PageSize:           atoiDefault(c.Query("page_size"), 100),
 	})

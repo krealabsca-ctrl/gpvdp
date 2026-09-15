@@ -23,6 +23,7 @@ import {
   Input,
   LoadingState,
   PageHeader,
+  Paginador,
   Select,
   TBody,
   TD,
@@ -61,12 +62,14 @@ import {
 } from "@/features/cxp/hooks";
 import { useClasificaciones } from "@/features/bancos/hooks";
 import { GastoCombobox, type GastoElegido } from "@/features/cxp/components/GastoCombobox";
+import { VisorComprobante } from "@/features/cxp/components/VisorComprobante";
 import {
   cxpApi,
   etiquetaOrigenContabilidad,
   etiquetaMotivoValidacion,
   type AccionMasiva,
   type Documento,
+  type FiltrosDocumentos,
   type LotePago,
   type TipoFactura,
 } from "@/api/cxp";
@@ -205,6 +208,15 @@ export function BandejaPage() {
   const faseURL = esFaseKey(faseURLCruda) && puedeVerFase(faseURLCruda, tiene) ? faseURLCruda : null;
   const [fase, setFase] = useState<FaseKey>(faseURL ?? "rec");
   const [vencFiltro, setVencFiltro] = useState(() => normalizarVencimiento(params.get("vencimiento")));
+  // Prioridad: lo que permite armar el corte «solo las AA». Es un filtro de VISTA —cambia lo que
+  // se ve y por lo tanto lo que se puede marcar—, no un candado del lote.
+  const [prioFiltro, setPrioFiltro] = useState("");
+  // La recepción cuyo comprobante se está mirando. null = el visor está cerrado.
+  const [viendoComprobante, setViendoComprobante] = useState<string | null>(null);
+  // Paginado. Antes la Bandeja pedía 200 fijas y no ofrecía pasar de página: con 4.471 facturas
+  // abiertas eso mostraba el 4,5 % y el resto era inalcanzable.
+  const [pagina, setPagina] = useState(1);
+  const [porPagina, setPorPagina] = useState(100);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const preselRef = useRef(false);
   // Con la pestaña pedida por URL, el auto-enfoque ya está resuelto desde el primer render.
@@ -242,7 +254,7 @@ export function BandejaPage() {
     }, 300);
     return () => clearTimeout(t);
   }, [qInput, montoMinIn, montoMaxIn]);
-  const hayFiltros = !!(q || provFiltro || gastoFiltro || montoMin || montoMax || estadoFiltro || vencFiltro);
+  const hayFiltros = !!(q || provFiltro || gastoFiltro || montoMin || montoMax || estadoFiltro || vencFiltro || prioFiltro);
   function limpiarFiltros() {
     setQInput("");
     setProvFiltro("");
@@ -256,6 +268,7 @@ export function BandejaPage() {
   /** Quita el tramo de vencimiento y lo saca de la URL (para que no reaparezca al recargar). */
   function quitarVencimiento() {
     setVencFiltro("");
+    setPrioFiltro("");
     if (params.has("vencimiento")) {
       const p = new URLSearchParams(params);
       p.delete("vencimiento");
@@ -318,9 +331,10 @@ export function BandejaPage() {
     monto_min: montoMin || undefined,
     monto_max: montoMax || undefined,
     vencimiento: vencFiltro || undefined,
+    prioridad: (prioFiltro || undefined) as FiltrosDocumentos["prioridad"],
     orden: "vencimiento",
-    page: 1,
-    page_size: 200,
+    page: pagina,
+    page_size: porPagina,
   });
   const items = useMemo(() => docsQ.data?.items ?? [], [docsQ.data]);
 
@@ -335,10 +349,23 @@ export function BandejaPage() {
   const enviar = useEnviarComprobante();
   const lotesQ = useLotes();
 
+  // La selección se limpia al cambiar de filtro Y al cambiar de página.
+  //
+  // Lo de la página no es cosmético: la barra del corte suma `total_crc` de los documentos
+  // VISIBLES que están marcados. Si una marca sobreviviera a un cambio de página, el lote saldría
+  // con facturas que la barra no está sumando, y el «₡ del corte» mentiría hacia abajo justo en el
+  // paso que genera el archivo del banco. Un corte se arma en una página; si no cabe, se sube a
+  // 200 por página o se afina el filtro de prioridad.
   useEffect(() => {
     setSel(new Set());
     preselRef.current = false;
-  }, [fase, q, provFiltro, gastoFiltro, montoMin, montoMax, estadoFiltro, vencFiltro]);
+  }, [fase, q, provFiltro, gastoFiltro, montoMin, montoMax, estadoFiltro, vencFiltro, prioFiltro, pagina, porPagina]);
+
+  // Al cambiar un filtro se vuelve a la primera página: seguir en la página 7 de un filtro nuevo
+  // muestra una lista vacía que se lee como «no hay nada».
+  useEffect(() => {
+    setPagina(1);
+  }, [fase, q, provFiltro, gastoFiltro, montoMin, montoMax, estadoFiltro, vencFiltro, prioFiltro, porPagina]);
   // El filtro de estado es por pestaña: al cambiar de fase se limpia.
   useEffect(() => {
     setEstadoFiltro("");
@@ -601,6 +628,19 @@ export function BandejaPage() {
           ]}
           className="min-w-48"
         />
+        <Select
+          label="Prioridad"
+          value={prioFiltro}
+          onChange={(e) => setPrioFiltro(e.target.value)}
+          options={[
+            { value: "", label: "Todas" },
+            { value: "AA", label: "AA — sí o sí" },
+            { value: "A", label: "A — puede esperar" },
+            { value: "AA_A", label: "AA y A" },
+            { value: "sin", label: "Sin prioridad" },
+          ]}
+          className="min-w-44"
+        />
         <Input label="Monto ≥" value={montoMinIn} onChange={(e) => setMontoMinIn(e.target.value)} placeholder="0" inputMode="decimal" className="max-w-28" />
         <Input label="Monto ≤" value={montoMaxIn} onChange={(e) => setMontoMaxIn(e.target.value)} placeholder="—" inputMode="decimal" className="max-w-28" />
         {conf.estados.includes(",") && (
@@ -691,14 +731,19 @@ export function BandejaPage() {
         />
       )}
 
-      {/* Cuántas hay de verdad: la tabla trae hasta 200 y callarlo hacía que el número del
-          tablero pareciera no cuadrar con la lista. */}
+      {/* Paginado. Antes acá decía «Mostrando 200 de 4.471 — afiná los filtros para ver el resto»:
+          decía la verdad pero era un callejón sin salida, porque no existía forma de ver el resto.
+          Ahora el total sigue a la vista (para que cuadre con el tablero) y además se camina. */}
       {docsQ.data && docsQ.data.total > 0 && (
-        <p className="text-xs tabular-nums text-content-muted">
-          {docsQ.data.total > items.length
-            ? `Mostrando ${items.length} de ${docsQ.data.total.toLocaleString("es-CR")} facturas — afiná los filtros para ver el resto.`
-            : `${docsQ.data.total.toLocaleString("es-CR")} ${docsQ.data.total === 1 ? "factura" : "facturas"}`}
-        </p>
+        <Paginador
+          total={docsQ.data.total}
+          pagina={pagina}
+          porPagina={porPagina}
+          enPantalla={items.length}
+          onPagina={setPagina}
+          onPorPagina={setPorPagina}
+          etiqueta={docsQ.data.total === 1 ? "factura" : "facturas"}
+        />
       )}
 
       {docsQ.isPending ? (
@@ -744,6 +789,7 @@ export function BandejaPage() {
               : accion([id], acc, ok)
           }
           onVer={(id) => navigate(`/cxp/documentos/${id}`)}
+          onVerComprobante={setViendoComprobante}
           puedeRevisar={puedeRevisar}
           puedeRevision={puedeRevision}
           puedeAnticipos={puedeAnticipos}
@@ -761,6 +807,7 @@ export function BandejaPage() {
           onEscalar={(d) => setEscalar(d)}
           onDevolver={(d) => setDevolver({ id: d.id, titulo: `Devolver a Contabilidad — ${d.proveedor}` })}
           onVer={(id) => navigate(`/cxp/documentos/${id}`)}
+          onVerComprobante={setViendoComprobante}
           puedeValidar={puedeValidar}
           puedeEscalar={puedeEscalar}
           puedeAnticipos={puedeAnticipos}
@@ -782,6 +829,7 @@ export function BandejaPage() {
             acc === "anular" ? pedirMotivo(acc, [id], "Anular factura", ok) : accion([id], acc, ok)
           }
           onVer={(id) => navigate(`/cxp/documentos/${id}`)}
+          onVerComprobante={setViendoComprobante}
           puedeAprobar={puedeAprobar}
           puedeRevision={puedeRevision}
           puedeAnticipos={puedeAnticipos}
@@ -813,6 +861,7 @@ export function BandejaPage() {
             );
           }}
           onVer={(id) => navigate(`/cxp/documentos/${id}`)}
+          onVerComprobante={setViendoComprobante}
           puedeAprobar={puedeAprobarConta}
           puedeMarcar={puedeMarcarConta}
           pendiente={aprobarContaM.isPending || quitarMarcaM.isPending}
@@ -856,6 +905,7 @@ export function BandejaPage() {
             acc === "anular" ? pedirMotivo(acc, [id], "Anular factura", ok) : accion([id], acc, ok)
           }
           onVer={(id) => navigate(`/cxp/documentos/${id}`)}
+          onVerComprobante={setViendoComprobante}
           puedePagar={puedePagar}
           puedeRevision={puedeRevision}
           creando={crearLote.isPending}
@@ -901,13 +951,23 @@ export function BandejaPage() {
             })
           }
           onVer={(id) => navigate(`/cxp/documentos/${id}`)}
+          onVerComprobante={setViendoComprobante}
           puede={puedePagar}
           pendiente={adjuntar.isPending || enviar.isPending}
         />
       ) : fase === "abi" ? (
-        <TabCarteraAbierta items={items} hoy={HOY} onVer={(id) => navigate(`/cxp/documentos/${id}`)} />
+        <TabCarteraAbierta items={items} hoy={HOY} onVer={(id) => navigate(`/cxp/documentos/${id}`)}
+          onVerComprobante={setViendoComprobante} />
       ) : (
-        <TabArchivo items={items} onVer={(id) => navigate(`/cxp/documentos/${id}`)} />
+        <TabArchivo items={items} onVer={(id) => navigate(`/cxp/documentos/${id}`)}
+          onVerComprobante={setViendoComprobante} />
+      )}
+
+      {/* El visor de la factura. Es el MISMO componente de CxP › Recepción: una sola
+          implementación para las dos puertas, así no pueden divergir. Solo se monta cuando hay una
+          recepción elegida, para no pedir el XML de fondo. */}
+      {viendoComprobante && (
+        <VisorComprobante recepcionId={viendoComprobante} onCerrar={() => setViendoComprobante(null)} />
       )}
     </div>
   );
@@ -1146,6 +1206,7 @@ function TabRecibidas(props: {
   onBulkRevisar: () => void;
   onAccionFila: (id: string, acc: AccionMasiva, ok: string) => void;
   onVer: (id: string) => void;
+  onVerComprobante: (recepcionId: string) => void;
   puedeRevisar: boolean;
   puedeRevision: boolean;
   puedeAnticipos?: boolean;
@@ -1235,7 +1296,13 @@ function TabRecibidas(props: {
                         ...((d.tipo === "REINTEGRO" || d.tipo === "INTERNO") && props.puedeRevisar
                           ? [{ label: "🏭 Enviar a validación de área", onClick: () => props.onRevisar(d) }]
                           : []),
-                        { label: "Ver expediente", onClick: () => props.onVer(d.id) },
+                        // «Ver factura» solo aparece si la factura entró por el buzón y conserva su XML.
+                          // Las que entraron por Excel no tienen comprobante guardado en ninguna
+                          // parte, así que ofrecerlo daría una pantalla vacía.
+                          ...(d.recepcion_id
+                            ? [{ label: "Ver factura", onClick: () => props.onVerComprobante(d.recepcion_id!) }]
+                            : []),
+                          { label: "Ver expediente", onClick: () => props.onVer(d.id) },
                       ]}
                     />
                   </div>
@@ -1260,6 +1327,7 @@ function TabValidar(props: {
   onEscalar: (d: Documento) => void;
   onDevolver: (d: Documento) => void;
   onVer: (id: string) => void;
+  onVerComprobante: (recepcionId: string) => void;
   puedeValidar: boolean;
   puedeEscalar: boolean;
   puedeAnticipos?: boolean;
@@ -1344,7 +1412,13 @@ function TabValidar(props: {
                         ...(props.puedeAnticipos && d.proveedor_anticipo_disponible && props.onAplicarAnticipo
                           ? [{ label: "🔗 Aplicar anticipo", onClick: () => props.onAplicarAnticipo!(d.id) }]
                           : []),
-                        { label: "Ver expediente", onClick: () => props.onVer(d.id) },
+                        // «Ver factura» solo aparece si la factura entró por el buzón y conserva su XML.
+                          // Las que entraron por Excel no tienen comprobante guardado en ninguna
+                          // parte, así que ofrecerlo daría una pantalla vacía.
+                          ...(d.recepcion_id
+                            ? [{ label: "Ver factura", onClick: () => props.onVerComprobante(d.recepcion_id!) }]
+                            : []),
+                          { label: "Ver expediente", onClick: () => props.onVer(d.id) },
                       ]}
                     />
                   </div>
@@ -1503,6 +1577,7 @@ function TabContabilidad(props: {
   onAprobar: (id: string) => void;
   onQuitarMarca: (d: Documento) => void;
   onVer: (id: string) => void;
+  onVerComprobante: (recepcionId: string) => void;
   puedeAprobar: boolean;
   puedeMarcar: boolean;
   pendiente: boolean;
@@ -1633,6 +1708,7 @@ function TabAprobar(props: {
   onPrioridad: (d: Documento) => void;
   onAccionFila: (id: string, acc: AccionMasiva, ok: string) => void;
   onVer: (id: string) => void;
+  onVerComprobante: (recepcionId: string) => void;
   puedeAprobar: boolean;
   puedeRevision: boolean;
   puedeAnticipos?: boolean;
@@ -1706,7 +1782,13 @@ function TabAprobar(props: {
                         ...(props.puedeAnticipos && d.proveedor_anticipo_disponible && props.onAplicarAnticipo
                           ? [{ label: "🔗 Aplicar anticipo", onClick: () => props.onAplicarAnticipo!(d.id) }]
                           : []),
-                        { label: "Ver expediente", onClick: () => props.onVer(d.id) },
+                        // «Ver factura» solo aparece si la factura entró por el buzón y conserva su XML.
+                          // Las que entraron por Excel no tienen comprobante guardado en ninguna
+                          // parte, así que ofrecerlo daría una pantalla vacía.
+                          ...(d.recepcion_id
+                            ? [{ label: "Ver factura", onClick: () => props.onVerComprobante(d.recepcion_id!) }]
+                            : []),
+                          { label: "Ver expediente", onClick: () => props.onVer(d.id) },
                       ]}
                     />
                   </div>
@@ -1733,6 +1815,7 @@ function TabPagar(props: {
   onPrioridad: (d: Documento) => void;
   onAccionFila: (id: string, acc: AccionMasiva, ok: string) => void;
   onVer: (id: string) => void;
+  onVerComprobante: (recepcionId: string) => void;
   puedePagar: boolean;
   puedeRevision: boolean;
   creando: boolean;
@@ -1740,20 +1823,17 @@ function TabPagar(props: {
   const { items, sel } = props;
   const [corte, setCorte] = useState(VIERNES); // política: corrida semanal los viernes
 
-  // Pre-marcar: prioridad AA SIEMPRE (se paga sí o sí) + lo que vence hasta el corte
-  // + los ANTICIPOS (por naturaleza urgentes: el área espera el desembolso).
-  useEffect(() => {
-    if (props.preselRef.current || !items.length) return;
-    props.setSel(
-      new Set(
-        items
-          .filter((d) => d.prioridad === "AA" || d.tipo === "ANTICIPO" || (d.fecha_vencimiento ?? "9999") <= corte)
-          .map((d) => d.id),
-      ),
-    );
-    props.preselRef.current = true;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items]);
+  // ── LA PANTALLA YA NO MARCA NADA POR SU CUENTA ──────────────────────────
+  //
+  // Hasta el 11 de setiembre de 2026 acá había un efecto que pre-marcaba todo lo que fuera AA,
+  // ANTICIPO o venciera antes del corte. Medido: 4.467 de 4.471 facturas abiertas están vencidas
+  // (99,9 %), así que esa regla equivalía a «marcar todo» — y se volvía a disparar cada vez que se
+  // tocaba un filtro, porque `preselRef` se reinicia con cada cambio de filtro. El efecto era que
+  // filtrabas por un proveedor para mirarlo y la pantalla te lo marcaba entero.
+  //
+  // Decisión del Director Financiero: la lista abre DESTILDADA y la selección la hace la persona,
+  // con el filtro de prioridad y el botón «Marcar las N visibles» para armar el corte rápido.
+  // Nada entra al archivo del banco sin que alguien lo haya tildado a propósito.
 
   const grupos: [string, Documento[]][] = [
     ["Vencidas", items.filter((d) => (d.fecha_vencimiento ?? "") < HOY)],
@@ -1771,13 +1851,34 @@ function TabPagar(props: {
             antes». Acá se explica en dos pasos concretos y sin esa palabra. */}
         📅 <span>
           <b className="text-content">Pago semanal:</b> el dinero sale el viernes{" "}
-          <b className="text-content">{formatFecha(VIERNES)}</b>. Ya están marcadas las facturas
-          vencidas, las que vencen antes de ese viernes y las de prioridad AA — revisá la lista,
-          destildá lo que no quieras pagar y generá el lote.
+          <b className="text-content">{formatFecha(VIERNES)}</b>. La lista abre{" "}
+          <b className="text-content">sin nada marcado</b>: marcá lo que vas a pagar en este corte y
+          generá el lote.
           <br />
-          <b className="text-content">¿Necesitás pagar algo hoy, sin esperar al viernes?</b>{" "}
-          Destildá todo, marcá solo esa factura, poné la fecha de hoy en «Fecha de corte» y generá
-          el lote con ella sola.
+          <b className="text-content">¿Solo las urgentes?</b> Filtrá por prioridad{" "}
+          <b className="text-content">AA</b> arriba y usá «Marcar las visibles»: el lote y la macro
+          salen solo con esas.
+        </span>
+      </div>
+
+      {/* Selección explícita. Reemplaza a la premarca automática: el botón dice CUÁNTAS va a
+          marcar, así que nadie tilda 4.400 facturas sin darse cuenta. */}
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={items.length === 0}
+          onClick={() => props.setSel(new Set(items.map((d) => d.id)))}
+        >
+          Marcar las {items.length} visibles
+        </Button>
+        <Button size="sm" variant="ghost" disabled={sel.size === 0} onClick={() => props.setSel(new Set())}>
+          Desmarcar todo
+        </Button>
+        <span className="text-content-muted">
+          {sel.size === 0
+            ? "Nada marcado todavía."
+            : `${sel.size} marcada(s) de ${items.length} visible(s).`}
         </span>
       </div>
       <TableContainer>
@@ -1819,7 +1920,13 @@ function TabPagar(props: {
                           <Dots
                             items={[
                               ...(props.puedeRevision ? [{ label: "Anular", tono: "neg" as const, onClick: () => props.onAccionFila(d.id, "anular", "Anulada") }] : []),
-                              { label: "Ver expediente", onClick: () => props.onVer(d.id) },
+                              // «Ver factura» solo aparece si la factura entró por el buzón y conserva su XML.
+                          // Las que entraron por Excel no tienen comprobante guardado en ninguna
+                          // parte, así que ofrecerlo daría una pantalla vacía.
+                          ...(d.recepcion_id
+                            ? [{ label: "Ver factura", onClick: () => props.onVerComprobante(d.recepcion_id!) }]
+                            : []),
+                          { label: "Ver expediente", onClick: () => props.onVer(d.id) },
                             ]}
                           />
                         </div>
@@ -1996,6 +2103,7 @@ function TabPagadas(props: {
   onAdjuntar: (id: string, archivo: File) => void;
   onEnviar: (id: string) => void;
   onVer: (id: string) => void;
+  onVerComprobante: (recepcionId: string) => void;
   puede: boolean;
   pendiente: boolean;
 }) {
@@ -2091,6 +2199,7 @@ function TabCarteraAbierta({
   items: Documento[];
   hoy: string;
   onVer: (id: string) => void;
+  onVerComprobante: (recepcionId: string) => void;
 }) {
   return (
     <TableContainer>
@@ -2142,7 +2251,15 @@ function TabCarteraAbierta({
   );
 }
 
-function TabArchivo({ items, onVer }: { items: Documento[]; onVer: (id: string) => void }) {
+function TabArchivo({
+  items,
+  onVer,
+  onVerComprobante,
+}: {
+  items: Documento[];
+  onVer: (id: string) => void;
+  onVerComprobante: (recepcionId: string) => void;
+}) {
   return (
     <TableContainer>
       <Table>
@@ -2173,6 +2290,13 @@ function TabArchivo({ items, onVer }: { items: Documento[]; onVer: (id: string) 
               </TD>
               <CeldaMonto d={d} />
               <TD className="text-right">
+                {/* «Factura» solo si entró por el buzón y conserva su XML: las de Excel no tienen
+                    comprobante guardado y el botón daría una pantalla vacía. */}
+                {d.recepcion_id && (
+                  <Button size="sm" variant="ghost" onClick={() => onVerComprobante(d.recepcion_id!)}>
+                    Factura
+                  </Button>
+                )}
                 <Button size="sm" variant="ghost" onClick={() => onVer(d.id)}>
                   Ver
                 </Button>

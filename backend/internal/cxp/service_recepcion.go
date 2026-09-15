@@ -374,3 +374,17 @@ func (s *Service) auditarRecepcion(ctx context.Context, tok TokenMaquina, recepc
 		},
 	})
 }
+
+// ComprobanteDeRecepcion arma la vista de la factura a partir del XML que ya está guardado.
+//
+// Es de SOLO LECTURA: no escribe, no audita y no toca el camino de ingesta. El único error que
+// puede devolver es que la recepción no exista en esta empresa; que el archivo sea ilegible o que
+// ya no haya XML son MODOS de la respuesta, porque el visor se abre justamente cuando algo salió
+// raro y un 500 ahí no le dice nada a nadie.
+func (s *Service) ComprobanteDeRecepcion(ctx context.Context, empresaID, id string) (RespuestaVisor, error) {
+	xmlCrudo, err := s.repo.XMLDeRecepcion(ctx, empresaID, id)
+	if err != nil {
+		return RespuestaVisor{}, err
+	}
+	return VerComprobante(xmlCrudo), nil
+}

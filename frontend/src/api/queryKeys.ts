@@ -231,6 +231,9 @@ export const queryKeys = {
       ["cxp", "recepciones", empresaId, filtros ?? null] as const,
     recepcionesRaiz: (empresaId: string) => ["cxp", "recepciones", empresaId] as const,
     fuentes: (empresaId: string) => ["cxp", "fuentes", empresaId] as const,
+    /** El visor de un comprobante. El XML es inmutable, así que esto no caduca. */
+    comprobanteRecepcion: (empresaId: string, id: string) =>
+      ["cxp", "recepcion-comprobante", empresaId, id] as const,
     subclasificaciones: (empresaId: string, clasificacionId: string) =>
       ["cxp", "subclasificaciones", empresaId, clasificacionId] as const,
     subclasificacionesRaiz: (empresaId: string) => ["cxp", "subclasificaciones", empresaId] as const,
@@ -241,6 +244,24 @@ export const queryKeys = {
     /** Proveedores sin cuenta IBAN: la lista de quién no se puede pagar todavía. */
     sinIBAN: (empresaId: string) => ["cxp", "sin-iban", empresaId] as const,
     parametrosValidacion: (empresaId: string) => ["cxp", "parametros-validacion", empresaId] as const,
+    /**
+     * Responsabilidades mensuales (mig 0082). Como en recepciones, el filtro/período va AL FINAL
+     * para que la clave raíz invalide todas las variantes por coincidencia de prefijo: cerrar un
+     * mes tiene que refrescar la lista del mes, el resumen y «las mías» de una sola vez.
+     */
+    responsabilidades: (empresaId: string, filtros?: unknown) =>
+      ["cxp", "responsabilidades", empresaId, filtros ?? null] as const,
+    responsabilidadesRaiz: (empresaId: string) => ["cxp", "responsabilidades", empresaId] as const,
+    responsabilidad: (empresaId: string, id: string) => ["cxp", "responsabilidad", empresaId, id] as const,
+    mesResponsabilidades: (empresaId: string, periodo: string) =>
+      ["cxp", "responsabilidades-mes", empresaId, periodo] as const,
+    mesResponsabilidadesRaiz: (empresaId: string) => ["cxp", "responsabilidades-mes", empresaId] as const,
+    misResponsabilidades: (empresaId: string, periodo: string) =>
+      ["cxp", "responsabilidades-mias", empresaId, periodo] as const,
+    misResponsabilidadesRaiz: (empresaId: string) => ["cxp", "responsabilidades-mias", empresaId] as const,
+    planDelMes: (empresaId: string, periodo: string) =>
+      ["cxp", "responsabilidades-plan", empresaId, periodo] as const,
+    planDelMesRaiz: (empresaId: string) => ["cxp", "responsabilidades-plan", empresaId] as const,
   },
 
   // Nivel empresa — módulo RRHH / Nómina (Fase 3).
