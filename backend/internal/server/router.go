@@ -329,12 +329,43 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.GET("/cxp/recepciones", P("cxp.recepcion"), cxpH.Recepciones)
 			scoped.POST("/cxp/recepciones/:id/reintentar", P("cxp.recepcion"), cxpH.ReintentarRecepcion)
 			scoped.GET("/cxp/recepciones/:id/archivo", P("cxp.recepcion"), cxpH.ArchivoRecepcion)
+			// El VISOR: la factura interpretada, para poder VER qué se compró. Mismo permiso que
+			// el resto de la recepción: es la misma lectura, por otra puerta.
+			scoped.GET("/cxp/recepciones/:id/comprobante", P("cxp.recepcion"), cxpH.ComprobanteRecepcion)
 			// Buzones de recepción: crear una fuente crea una CREDENCIAL y decide de qué empresa
 			// son las facturas que entran, así que va con quien configura, no con quien opera.
 			scoped.GET("/cxp/fuentes", P("cxp.fuentes"), cxpH.Fuentes)
 			scoped.POST("/cxp/fuentes", P("cxp.fuentes"), cxpH.CrearFuente)
 			scoped.POST("/cxp/fuentes/:id/rotar", P("cxp.fuentes"), cxpH.RotarTokenFuente)
 			scoped.PATCH("/cxp/fuentes/:id", P("cxp.fuentes"), cxpH.CambiarEstadoFuente)
+
+			// ── Responsabilidades mensuales (mig 0082): lo que se ESPERA, no lo que llegó ──
+			//
+			// El alcance de lo que cada quien VE lo resuelve el service (partidas del rol +
+			// aquello de lo que es titular). Acá el permiso solo dice si puede abrir la puerta:
+			// leer pide cualquiera de los dos permisos de lectura, porque el recorte fino va
+			// adentro y no en la ruta.
+			lectura := PAlguno("cxp.responsabilidades.ver", "cxp.responsabilidades.ver_mias")
+			scoped.GET("/cxp/responsabilidades", lectura, cxpH.Responsabilidades)
+			scoped.GET("/cxp/responsabilidades/mes", lectura, cxpH.MesDeResponsabilidades)
+			// «Mis responsabilidades» no pide permiso de módulo: lo que te asignaron, lo ves.
+			// Negarle a alguien la lista de lo que él mismo tiene que cumplir no protege nada.
+			scoped.GET("/cxp/responsabilidades/mias", cxpH.MisResponsabilidades)
+			scoped.GET("/cxp/responsabilidades/:id", lectura, cxpH.ResponsabilidadPorID)
+
+			// Declarar es PERMISO CRÍTICO: define a qué se compromete la empresa todos los meses.
+			// Va separado de abrir el mes, que es rutina: juntarlos le daría a quien opera la
+			// rutina el poder de comprometer plata.
+			scoped.POST("/cxp/responsabilidades", P("cxp.responsabilidades.declarar"), cxpH.CrearResponsabilidad)
+			scoped.PUT("/cxp/responsabilidades/:id", P("cxp.responsabilidades.declarar"), cxpH.ActualizarResponsabilidad)
+			scoped.POST("/cxp/responsabilidades/:id/estado", P("cxp.responsabilidades.declarar"), cxpH.CambiarEstadoResponsabilidad)
+
+			// Abrir el mes: primero se ve el plan, después se confirma el total.
+			scoped.GET("/cxp/responsabilidades/mes/plan", P("cxp.responsabilidades.abrir_mes"), cxpH.PrevisualizarMes)
+			scoped.POST("/cxp/responsabilidades/mes/abrir", P("cxp.responsabilidades.abrir_mes"), cxpH.AbrirMes)
+
+			scoped.POST("/cxp/responsabilidades/periodos/:id/cerrar", P("cxp.responsabilidades.cerrar"), cxpH.CerrarPeriodo)
+			scoped.POST("/cxp/responsabilidades/periodos/:id/reabrir", P("cxp.responsabilidades.cerrar"), cxpH.ReabrirPeriodo)
 
 			// ── Módulo RRHH / Nómina ──
 			// Dashboard del mes (costo real, ciclo, alertas)

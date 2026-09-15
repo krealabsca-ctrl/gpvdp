@@ -110,6 +110,51 @@ type resumenXML struct {
 	TotalOtrosCargos string `xml:"TotalOtrosCargos"`
 	TotalIVADevuelto string `xml:"TotalIVADevuelto"`
 	TotalComprobante string `xml:"TotalComprobante"`
+
+	// ── SOLO PARA EL VISOR (14 de setiembre de 2026) ────────────────────────────────────────
+	//
+	// La composición de la venta: es lo que contesta «por qué esta factura paga menos IVA del que
+	// parece». Se lee para mostrar, no para calcular: el importador sigue usando TotalComprobante.
+	TotalServGravados       string `xml:"TotalServGravados"`
+	TotalServExentos        string `xml:"TotalServExentos"`
+	TotalServExonerado      string `xml:"TotalServExonerado"`
+	TotalMercanciasGravadas string `xml:"TotalMercanciasGravadas"`
+	TotalMercanciasExentas  string `xml:"TotalMercanciasExentas"`
+	TotalMercExonerada      string `xml:"TotalMercExonerada"`
+	TotalGravado            string `xml:"TotalGravado"`
+	TotalExento             string `xml:"TotalExento"`
+	TotalExonerado          string `xml:"TotalExonerado"`
+
+	// EL DESGLOSE POR TARIFA. Es REPETIBLE, y ahí está la respuesta a los «varios IVAs»: una
+	// factura con líneas al 13 % y al 1 % trae dos de estos.
+	//
+	// Medido: 414 de 3.455 facturas con IVA (12,0 %) tienen una tasa efectiva que no es ninguna
+	// tarifa legal —12,9 %, 11,2 %, 9,3 %, 7,1 %…— porque el ERP aplasta la mezcla en un solo
+	// campo `iva`. Sin este desglose esas facturas son inexplicables.
+	Desglose []desgloseImpuestoXML `xml:"TotalDesgloseImpuesto"`
+
+	// MedioPago es compuesto en 4.4 y repetible (una factura puede declarar pago mixto). Leerlo
+	// como string devuelve cadena vacía SIN error — la misma trampa que la moneda compuesta.
+	MediosPago []struct {
+		TipoMedioPago  string `xml:"TipoMedioPago"`
+		TotalMedioPago string `xml:"TotalMedioPago"`
+	} `xml:"MedioPago"`
+}
+
+// desgloseImpuestoXML es una fila del desglose de impuestos del comprobante.
+type desgloseImpuestoXML struct {
+	Codigo             string `xml:"Codigo"`
+	CodigoTarifaIVA    string `xml:"CodigoTarifaIVA"`
+	CodigoTarifa       string `xml:"CodigoTarifa"`
+	TotalMontoImpuesto string `xml:"TotalMontoImpuesto"`
+}
+
+// codigoTarifa devuelve el código con el nombre que traiga el documento (ver impuestoXML).
+func (d desgloseImpuestoXML) codigoTarifa() string {
+	if c := strings.TrimSpace(d.CodigoTarifaIVA); c != "" {
+		return c
+	}
+	return strings.TrimSpace(d.CodigoTarifa)
 }
 
 // comprobanteXML sirve para las tres versiones del esquema y para los 7 tipos de documento.
@@ -156,6 +201,74 @@ type comprobanteXML struct {
 
 	ResumenFactura     resumenXML `xml:"ResumenFactura"`
 	ResumenComprobante resumenXML `xml:"ResumenComprobante"`
+
+	// ── LO QUE SE LEE SOLO PARA EL VISOR (14 de setiembre de 2026) ──────────────────────────
+	//
+	// El detalle NO participa de la creación de la cuenta por pagar: esos números salen del
+	// resumen, igual que siempre. Se lee aparte para poder MOSTRAR la factura, porque hoy no hay
+	// dónde mirar qué se compró: `documento_cxp.descripcion` está cortada a 45 caracteres en
+	// 4.526 de 4.542 filas (99,6 %) y no existe ninguna tabla de líneas.
+	//
+	// Todo lo repetible va en slice. Declarar `LineaDetalle` como campo escalar no da error:
+	// encoding/xml se queda con la ÚLTIMA y devuelve err=nil, así que dos líneas de 1.000 y 2.000
+	// mostrarían «2000», que parece un total válido. Y los `Impuesto` anidados bajo un padre
+	// colapsado se ACUMULAN, mezclando los de una línea con los de otra.
+	Lineas []lineaXML `xml:"DetalleServicio>LineaDetalle"`
+}
+
+// lineaXML es una línea del detalle. Todos los montos son string por la misma razón que el resto
+// del archivo: `decimal.Decimal` como tipo de campo XML NO falla siempre —pasa limpio cuando el
+// valor viene pegado a las etiquetas, como en el XML real— y revienta el documento ENTERO el día
+// que un intermediario reformatee y deje el número en su propia línea. Un bug así no lo detecta
+// ninguna prueba hecha con la factura de hoy.
+type lineaXML struct {
+	NumeroLinea     string `xml:"NumeroLinea"`
+	CodigoCABYS     string `xml:"CodigoCABYS"`
+	CodigoComercial struct {
+		Tipo   string `xml:"Tipo"`
+		Codigo string `xml:"Codigo"`
+	} `xml:"CodigoComercial"`
+	Cantidad       string `xml:"Cantidad"`
+	UnidadMedida   string `xml:"UnidadMedida"`
+	Detalle        string `xml:"Detalle"`
+	PrecioUnitario string `xml:"PrecioUnitario"`
+	MontoTotal     string `xml:"MontoTotal"`
+	// Descuento es repetible: una línea puede traer varios con naturalezas distintas.
+	Descuentos []struct {
+		MontoDescuento      string `xml:"MontoDescuento"`
+		CodigoDescuento     string `xml:"CodigoDescuento"`
+		NaturalezaDescuento string `xml:"NaturalezaDescuento"`
+	} `xml:"Descuento"`
+	SubTotal      string `xml:"SubTotal"`
+	BaseImponible string `xml:"BaseImponible"`
+	// Impuesto es repetible: es la forma en que una sola línea lleva más de una tarifa.
+	Impuestos       []impuestoXML `xml:"Impuesto"`
+	ImpuestoNeto    string        `xml:"ImpuestoNeto"`
+	MontoTotalLinea string        `xml:"MontoTotalLinea"`
+}
+
+// impuestoXML es un impuesto de una línea.
+//
+// `Tarifa` es el PORCENTAJE y viene en el propio documento (13). `CodigoTarifaIVA` es el código de
+// catálogo (08) y se muestra crudo: no hay tabla oficial en el repo para traducirlo, y una
+// etiqueta equivocada se cree mientras que un código crudo se puede buscar.
+type impuestoXML struct {
+	Codigo          string `xml:"Codigo"`
+	CodigoTarifaIVA string `xml:"CodigoTarifaIVA"`
+	// CodigoTarifa sin «IVA» es como se llamaba en esquemas anteriores. Se leen los dos porque el
+	// visor parsea HACIA ATRÁS: si solo se leyera el de 4.4, la tarifa saldría vacía en silencio
+	// justo en los comprobantes viejos, que son buena parte del público de esta pantalla.
+	CodigoTarifa string `xml:"CodigoTarifa"`
+	Tarifa       string `xml:"Tarifa"`
+	Monto        string `xml:"Monto"`
+}
+
+// codigoTarifa devuelve el código de tarifa con el nombre que traiga el documento.
+func (i impuestoXML) codigoTarifa() string {
+	if c := strings.TrimSpace(i.CodigoTarifaIVA); c != "" {
+		return c
+	}
+	return strings.TrimSpace(i.CodigoTarifa)
 }
 
 // resumen devuelve el que el documento traiga: la factura usa ResumenFactura y algunos tipos

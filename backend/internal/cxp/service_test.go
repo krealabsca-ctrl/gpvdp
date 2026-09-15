@@ -49,6 +49,28 @@ type fakeRepo struct {
 	// Carga de IBAN.
 	provsPorCedula map[string]ProveedorIBAN
 	ibanGuardado   map[string]string
+	// Visor del comprobante: el XML que el repo dice tener guardado.
+	xmlRecepcion []byte
+	// Responsabilidades mensuales: lo que devuelve el repo y lo que el service le pasó.
+	respLista            []Responsabilidad
+	respActivas          []Responsabilidad
+	periodos             []PeriodoResponsabilidad
+	conFilaEnElMes       map[string]bool
+	bancoHasta           string
+	partidasDelRol       []string
+	respCreada           *ResponsabilidadInput
+	respEstado           string
+	respMotivo           string
+	capFiltrosResp       FiltrosResponsabilidad
+	capFiltrosRespSet    bool
+	capFiltrosPeriodo    FiltrosPeriodo
+	capFiltrosPeriodoSet bool
+	capAbrirMes          []PeriodoNuevo
+	capAbrirMesSet       bool
+	// abrirMesCreadas: cuántas dice el repo que creó DE VERDAD (-1 = todas las que le pasaron).
+	// Sirve para simular el segundo clic, donde el UNIQUE no deja crear nada.
+	abrirMesCreadas int
+	capCierre       *CierrePeriodo
 	// Caja chica.
 	fondo          FondoCajaChica
 	valesElegibles []string
@@ -411,6 +433,88 @@ func (f *fakeRepo) ClaveEnOtraEmpresa(context.Context, string, string) (bool, er
 func (f *fakeRepo) UsuarioTecnicoRecepcion(context.Context) (string, error) {
 	return "00000000-0000-0000-0000-000000000001", nil
 }
+
+func (f *fakeRepo) XMLDeRecepcion(_ context.Context, _, _ string) ([]byte, error) {
+	return f.xmlRecepcion, nil
+}
+
+// ── Responsabilidades mensuales (migración 0082) ────────────────────────────────────────────────
+
+func (f *fakeRepo) ListarResponsabilidades(_ context.Context, _ string, filtros FiltrosResponsabilidad) ([]Responsabilidad, error) {
+	f.capFiltrosResp = filtros
+	f.capFiltrosRespSet = true
+	return f.respLista, nil
+}
+
+func (f *fakeRepo) ResponsabilidadPorID(_ context.Context, _, id string) (Responsabilidad, error) {
+	for _, r := range f.respLista {
+		if r.ID == id {
+			return r, nil
+		}
+	}
+	return Responsabilidad{}, ErrResponsabilidadNoEncontrada
+}
+
+func (f *fakeRepo) ResponsabilidadesActivas(_ context.Context, _ string) ([]Responsabilidad, error) {
+	return f.respActivas, nil
+}
+
+func (f *fakeRepo) CrearResponsabilidad(_ context.Context, _ string, in ResponsabilidadInput, _ string) (Responsabilidad, error) {
+	f.respCreada = &in
+	return Responsabilidad{ID: "resp-1", Nombre: in.Nombre}, nil
+}
+
+func (f *fakeRepo) ActualizarResponsabilidad(_ context.Context, _, id string, in ResponsabilidadInput) (Responsabilidad, error) {
+	f.respCreada = &in
+	return Responsabilidad{ID: id, Nombre: in.Nombre}, nil
+}
+
+func (f *fakeRepo) CambiarEstadoResponsabilidad(_ context.Context, _, _, estado, motivo string) error {
+	f.respEstado, f.respMotivo = estado, motivo
+	return nil
+}
+
+func (f *fakeRepo) AbrirMes(_ context.Context, _ string, filas []PeriodoNuevo) (int, error) {
+	f.capAbrirMes = filas
+	f.capAbrirMesSet = true
+	if f.abrirMesCreadas >= 0 {
+		return f.abrirMesCreadas, nil
+	}
+	return len(filas), nil
+}
+
+func (f *fakeRepo) ListarPeriodos(_ context.Context, _ string, filtros FiltrosPeriodo) ([]PeriodoResponsabilidad, error) {
+	f.capFiltrosPeriodo = filtros
+	f.capFiltrosPeriodoSet = true
+	return f.periodos, nil
+}
+
+func (f *fakeRepo) CerrarPeriodo(_ context.Context, _, _ string, c CierrePeriodo, _ string) error {
+	f.capCierre = &c
+	return nil
+}
+
+func (f *fakeRepo) ReabrirPeriodo(_ context.Context, _, _, motivo string) error {
+	f.respMotivo = motivo
+	return nil
+}
+
+func (f *fakeRepo) IDsConFilaEnElMes(_ context.Context, _, _ string) (map[string]bool, error) {
+	if f.conFilaEnElMes == nil {
+		return map[string]bool{}, nil
+	}
+	return f.conFilaEnElMes, nil
+}
+
+func (f *fakeRepo) UltimaFechaBanco(_ context.Context, _ string) (string, error) {
+	return f.bancoHasta, nil
+}
+
+func (f *fakeRepo) PartidasDelRol(_ context.Context, _, _ string) ([]string, error) {
+	return f.partidasDelRol, nil
+}
+
+// (El verificador de permisos de prueba es `permisosFalsos`, que ya vive en masivo_test.go.)
 
 func TestCrearProveedor(t *testing.T) {
 	repo := &fakeRepo{}

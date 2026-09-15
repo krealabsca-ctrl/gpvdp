@@ -30,6 +30,6 @@ pnpm-debug.log*
 src/api/generated/*
 !src/api/generated/.gitkeep
 
-# artefactos de `tsc -b`
+# artefactos de tsc -b
 *.tsbuildinfo
 *.config.d.ts

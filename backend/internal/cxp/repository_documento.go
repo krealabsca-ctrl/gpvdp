@@ -30,7 +30,14 @@ const documentoCols = `d.id::text, d.proveedor_id::text, COALESCE(p.nombre, ''),
 	        AND (a2.total_crc - COALESCE((SELECT SUM(x.monto_crc) FROM anticipo_aplicacion x WHERE x.anticipo_id = a2.id AND x.activo), 0)) > 0),
 	` + contabilidadOrigenSQL + `, COALESCE(d.contabilidad_motivo, ''), COALESCE(d.contabilidad_marcado_por::text, ''),
 	d.requiere_validacion, COALESCE(d.validacion_motivo, ''),
-	d.bloqueado_para_pago, COALESCE(d.bloqueo_motivo, '')`
+	d.bloqueado_para_pago, COALESCE(d.bloqueo_motivo, ''),
+	-- La recepción que creó este documento, para poder VER la factura desde la Bandeja. Subquery
+	-- escalar y no JOIN: una misma factura puede tener más de una recepción (un reintento, o el
+	-- mismo correo reenviado) y un JOIN multiplicaría la fila del listado en silencio.
+	-- Solo las que conservan el XML: sin XML no hay nada que mostrar.
+	COALESCE((SELECT rc.id::text FROM cxp_recepcion rc
+	          WHERE rc.documento_id = d.id AND rc.xml_crudo IS NOT NULL
+	          ORDER BY rc.creado_en DESC LIMIT 1), '')`
 
 // contabilidadOrigenSQL resuelve la marca «de Contabilidad» en UNA expresión, y la resuelve acá
 // —en el SELECT común— para que la Bandeja, el detalle y el candado de aprobación lean todos el
@@ -79,7 +86,7 @@ func scanDocumento(row scanner) (Documento, error) {
 		&d.ValidadoDeptoPorNombre, &d.AnticiposAplicados, &d.ProveedorAnticipoDisponible,
 		&d.ContabilidadOrigen, &d.ContabilidadMotivo, &d.ContabilidadMarcadoPor,
 		&d.RequiereValidacion, &d.ValidacionMotivo,
-		&d.BloqueadoParaPago, &d.BloqueoMotivo)
+		&d.BloqueadoParaPago, &d.BloqueoMotivo, &d.RecepcionID)
 	if err == nil {
 		d.NetoCRC = netoCRC(d.TotalCRC, d.AnticiposAplicados)
 		// Derivado del origen, nunca consultado aparte: así el booleano y el «por qué» no pueden
@@ -258,6 +265,11 @@ func (r *pgRepository) ListarDocumentos(ctx context.Context, empresaID string, f
 	if fasesBandeja[f.Fase] {
 		args = append(args, f.Fase)
 		conds = append(conds, fmt.Sprintf("(%s) = $%d", faseBandejaSQL, len(args)))
+	}
+	// Prioridad de pago. La condición sale de un mapa cerrado, nunca del valor que llegó: así un
+	// filtro desconocido no entra a la consulta y tampoco recorta en silencio.
+	if cond := prioridadesFiltro[f.Prioridad]; cond != "" {
+		conds = append(conds, cond)
 	}
 	where := strings.Join(conds, " AND ")
 

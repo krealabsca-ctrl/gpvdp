@@ -319,3 +319,28 @@ func (h *Handler) RequireTokenRecepcion() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// ComprobanteRecepcion GET /v1/cxp/recepciones/:id/comprobante
+//
+// EL VISOR. Devuelve la factura ya interpretada a partir del XML que la recepción guarda, para que
+// se pueda VER qué se compró en vez de tener que descargar el XML crudo y leerlo a ojo.
+//
+// Por qué se interpreta en el servidor y no en el navegador: Hacienda emite en ISO-8859-1 y algunos
+// archivos traen BOM; un parser del navegador que asuma UTF-8 convierte «PANADERÍA SEÑOR» en basura
+// sin que nadie lo note. Además un archivo puede traer varios comprobantes pegados. El parser del
+// backend ya resuelve las tres cosas y está en producción.
+//
+// SOLO LECTURA: no escribe nada. Un archivo ilegible o una recepción sin XML no son errores, son
+// MODOS de la respuesta — el visor se abre justamente cuando algo salió raro.
+func (h *Handler) ComprobanteRecepcion(c *gin.Context) {
+	empresaID, _, ok := ctxEmpresa(c)
+	if !ok {
+		return
+	}
+	v, err := h.svc.ComprobanteDeRecepcion(c.Request.Context(), empresaID, c.Param("id"))
+	if err != nil {
+		h.responderError(c, err, "comprobante-recepcion")
+		return
+	}
+	c.JSON(http.StatusOK, v)
+}

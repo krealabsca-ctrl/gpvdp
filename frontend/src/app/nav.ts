@@ -45,7 +45,9 @@ import {
   Wallet,
   Waves,
   Mailbox,
-  KeyRound,} from "lucide-react";
+  KeyRound,
+  CalendarCheck,
+  UserCheck,} from "lucide-react";
 
 export interface NavPage {
   label: string;
@@ -141,6 +143,16 @@ export const MODULES: NavModule[] = [
       // otra sola—, y ponerlas separadas haría que nadie encuentre la automática.
       { label: "Recepción", descripcion: "Lo que llega del correo", to: "/cxp/recepcion", icon: Mailbox, permiso: "cxp.recepcion" },
       { label: "Buzones", descripcion: "Correo y credencial por empresa", to: "/cxp/fuentes", icon: KeyRound, permiso: "cxp.fuentes" },
+      // El nombre ES parte de la función: ya nos costó una vez que horas extra y vacaciones
+      // existieran y nadie las hallara porque el menú decía «Ausencias». «Compromisos» suena a
+      // contabilidad y «Obligaciones» suena a legal; «Responsabilidades» es la palabra que usa la
+      // gente, y el subtítulo dice exactamente qué hay adentro.
+      { label: "Responsabilidades", descripcion: "Lo que se paga todos los meses", to: "/cxp/responsabilidades", icon: CalendarCheck, permiso: "cxp.responsabilidades.ver" },
+      // Sin permiso a propósito: lo que te asignaron, lo ves. Es la puerta de quien NO vive en
+      // CxP, y negarle a alguien la lista de lo que él mismo tiene que cumplir no protege nada.
+      // Quien además tenga «ver solo las mías» llega a la pantalla completa desde un enlace ahí
+      // adentro: el menú admite un permiso por página, no una lista.
+      { label: "Lo mío del mes", descripcion: "Solo mis responsabilidades", to: "/cxp/mis-responsabilidades", icon: UserCheck },
       { label: "Proveedores", descripcion: "Maestro", to: "/cxp/proveedores", icon: Building2, permiso: "cxp.ver_todo" },
       { label: "Anticipos", descripcion: "Saldos a favor del proveedor", to: "/cxp/anticipos", icon: Coins, permiso: "cxp.anticipos" },
       { label: "Caja chica", descripcion: "Fondos fijos y vales", to: "/cxp/cajas", icon: PiggyBank, permiso: "cxp.caja_ver" },

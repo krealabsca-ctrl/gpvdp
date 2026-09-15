@@ -20,6 +20,10 @@ import {
   type FiltrosProveedores,
   type ProveedorInput,
   type TipoFactura,
+  type CierrePeriodo,
+  type EstadoResponsabilidad,
+  type FiltrosResponsabilidades,
+  type ResponsabilidadInput,
 } from "@/api/cxp";
 import { useEmpresaId } from "@/features/bancos/useEmpresaId";
 
@@ -992,5 +996,157 @@ export function useCambiarEstadoFuente() {
     mutationFn: (vars: { id: string; activo: boolean }) =>
       cxpApi.cambiarEstadoFuente(vars.id, vars.activo),
     onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.cxp.fuentes(empresaId) }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Responsabilidades mensuales (mig 0082)
+// ---------------------------------------------------------------------------
+//
+// Todo lo demás del módulo consulta LO QUE LLEGÓ; esto consulta LO QUE SE ESPERA.
+//
+// Una nota de invalidación que importa: cerrar o reabrir un mes cambia TRES vistas a la vez —el
+// listado del mes, el resumen del encabezado y «mis responsabilidades»—, así que se invalidan las
+// tres claves raíz. Refrescar solo la lista dejaría el encabezado diciendo «3 vencidas» debajo de
+// una tabla donde ya no hay ninguna, y ese desajuste es lo que hace que nadie le crea al tablero.
+
+/** Invalidación compartida por todo lo que toca un mes. */
+function invalidarResponsabilidades(qc: QueryClient, empresaId: string) {
+  void qc.invalidateQueries({ queryKey: queryKeys.cxp.responsabilidadesRaiz(empresaId) });
+  void qc.invalidateQueries({ queryKey: queryKeys.cxp.mesResponsabilidadesRaiz(empresaId) });
+  void qc.invalidateQueries({ queryKey: queryKeys.cxp.misResponsabilidadesRaiz(empresaId) });
+  void qc.invalidateQueries({ queryKey: queryKeys.cxp.planDelMesRaiz(empresaId) });
+}
+
+/** Los acuerdos declarados. El servidor recorta según lo que la persona pueda ver. */
+export function useResponsabilidades(filtros: FiltrosResponsabilidades = {}) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.cxp.responsabilidades(empresaId, filtros),
+    queryFn: () => cxpApi.responsabilidades(filtros),
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useResponsabilidad(id: string | undefined) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.cxp.responsabilidad(empresaId, id ?? ""),
+    queryFn: () => cxpApi.responsabilidad(id!),
+    enabled: !!id,
+  });
+}
+
+/** La pantalla «El mes»: resumen, filas con semáforo y lo que nadie abrió. */
+export function useMesDeResponsabilidades(periodo: string) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.cxp.mesResponsabilidades(empresaId, periodo),
+    queryFn: () => cxpApi.mesDeResponsabilidades(periodo),
+    placeholderData: (prev) => prev,
+  });
+}
+
+/** La lista corta de cada quien. No pide permiso: lo que te asignaron, lo ves. */
+export function useMisResponsabilidades(periodo: string) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.cxp.misResponsabilidades(empresaId, periodo),
+    queryFn: () => cxpApi.misResponsabilidades(periodo),
+  });
+}
+
+/**
+ * Qué va a hacer «Abrir el mes» antes de hacerlo.
+ *
+ * `enabled` para que el plan se pida SOLO cuando el diálogo está abierto: calcularlo de fondo en
+ * cada render haría que el número que la persona confirma pudiera ser de hace diez minutos.
+ */
+export function usePlanDelMes(periodo: string, activo: boolean) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.cxp.planDelMes(empresaId, periodo),
+    queryFn: () => cxpApi.planDelMes(periodo),
+    enabled: activo && !!periodo,
+    staleTime: 0,
+  });
+}
+
+export function useCrearResponsabilidad() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ResponsabilidadInput) => cxpApi.crearResponsabilidad(input),
+    onSuccess: () => invalidarResponsabilidades(qc, empresaId),
+  });
+}
+
+export function useActualizarResponsabilidad() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; input: ResponsabilidadInput }) =>
+      cxpApi.actualizarResponsabilidad(vars.id, vars.input),
+    onSuccess: (_d, vars) => {
+      invalidarResponsabilidades(qc, empresaId);
+      void qc.invalidateQueries({ queryKey: queryKeys.cxp.responsabilidad(empresaId, vars.id) });
+    },
+  });
+}
+
+/** Suspender saca la responsabilidad del calendario: por eso el motivo es obligatorio. */
+export function useCambiarEstadoResponsabilidad() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; estado: EstadoResponsabilidad; motivo: string }) =>
+      cxpApi.cambiarEstadoResponsabilidad(vars.id, vars.estado, vars.motivo),
+    onSuccess: () => invalidarResponsabilidades(qc, empresaId),
+  });
+}
+
+/** `esperadas` es el total que la persona vio: si el plan cambió, el servidor se detiene. */
+export function useAbrirMes() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { periodo: string; esperadas: number }) =>
+      cxpApi.abrirMes(vars.periodo, vars.esperadas),
+    onSuccess: () => invalidarResponsabilidades(qc, empresaId),
+  });
+}
+
+export function useCerrarPeriodo() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; cierre: CierrePeriodo }) =>
+      cxpApi.cerrarPeriodo(vars.id, vars.cierre),
+    onSuccess: () => invalidarResponsabilidades(qc, empresaId),
+  });
+}
+
+export function useReabrirPeriodo() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; motivo: string }) => cxpApi.reabrirPeriodo(vars.id, vars.motivo),
+    onSuccess: () => invalidarResponsabilidades(qc, empresaId),
+  });
+}
+
+/**
+ * El visor: la factura interpretada desde el XML de la recepción.
+ *
+ * `enabled` para que solo se pida cuando el visor está abierto, y `staleTime` infinito porque el
+ * XML guardado NO CAMBIA NUNCA: volver a pedirlo sería gasto puro.
+ */
+export function useComprobanteRecepcion(id: string | null) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.cxp.comprobanteRecepcion(empresaId, id ?? ""),
+    queryFn: () => cxpApi.comprobanteRecepcion(id!),
+    enabled: !!id,
+    staleTime: Infinity,
   });
 }

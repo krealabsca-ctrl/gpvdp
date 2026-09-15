@@ -39,10 +39,11 @@ import {
   type BadgeTone,
 } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { aFechaHora, formatMoneda, type Moneda } from "@/lib/format";
+import { aFechaHora, formatFechaHora, formatMonto } from "@/lib/format";
 import { mensajeError } from "@/lib/apiError";
 import { useReintentarRecepcion, useRecepciones } from "@/features/cxp/hooks";
 import { cxpApi, type EstadoRecepcion, type Recepcion } from "@/api/cxp";
+import { VisorComprobante } from "@/features/cxp/components/VisorComprobante";
 
 const TONO: Record<EstadoRecepcion, BadgeTone> = {
   PENDIENTE: "neutral",
@@ -89,6 +90,8 @@ const FILTROS: { id: string; label: string }[] = [
 export function RecepcionPage() {
   const toast = useToast();
   const [estado, setEstado] = useState("");
+  // La recepción cuyo comprobante se está mirando. null = el visor está cerrado.
+  const [viendo, setViendo] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [busqueda, setBusqueda] = useState("");
   const query = useRecepciones({ estado: estado || undefined, q: busqueda || undefined });
@@ -214,9 +217,12 @@ export function RecepcionPage() {
                     <THead>
                       <TR>
                         <TH>Estado</TH>
+                        <TH>Recibido el</TH>
                         <TH>Comprobante</TH>
                         <TH>Proveedor</TH>
-                        <TH className="text-right">Monto</TH>
+                        <TH>Moneda</TH>
+                        <TH className="text-right">Total comprobante</TH>
+                        <TH className="text-right">Total impuesto</TH>
                         <TH>Qué pasó</TH>
                         <TH>Archivos</TH>
                         <TH />
@@ -228,6 +234,7 @@ export function RecepcionPage() {
                           key={r.id}
                           r={r}
                           onReintentar={() => reintentarUna(r)}
+                          onVer={setViendo}
                           reintentando={reintentar.isPending && reintentar.variables === r.id}
                         />
                       ))}
@@ -238,6 +245,15 @@ export function RecepcionPage() {
             </CardContent>
           </Card>
         </>
+      )}
+
+      {/* El visor: se monta solo cuando hay una recepción elegida, así no pide el XML de fondo. */}
+      {viendo && (
+        <VisorComprobante
+          recepcionId={viendo}
+          tienePDF={datos?.recepciones.find((x) => x.id === viendo)?.tiene_pdf}
+          onCerrar={() => setViendo(null)}
+        />
       )}
     </div>
   );
@@ -309,10 +325,12 @@ function Fila({
   r,
   onReintentar,
   reintentando,
+  onVer,
 }: {
   r: Recepcion;
   onReintentar: () => void;
   reintentando: boolean;
+  onVer: (id: string) => void;
 }) {
   const parqueada = r.estado === "PARQUEADA";
   return (
@@ -322,6 +340,13 @@ function Fila({
         {r.intentos > 1 && (
           <span className="mt-1 block text-xs text-content-muted">{r.intentos} intentos</span>
         )}
+      </TD>
+      {/* «Recibido el»: pedido del Director. Va con formatFechaHora y NUNCA con new Date():
+          el servidor emite el desfase sin minutos («+00») y new Date() devuelve NaN, que se ve
+          como celda vacía y no como error. */}
+      <TD className="whitespace-nowrap text-xs">
+        {formatFechaHora(r.creado_en)}
+        <span className="mt-0.5 block text-content-muted">{hace(r.creado_en) ?? ""}</span>
       </TD>
       <TD className="font-mono text-xs">
         {r.consecutivo || (r.clave ? r.clave.slice(-10) : "—")}
@@ -336,15 +361,24 @@ function Fila({
         <span className="block font-medium">{r.proveedor || r.remitente || "—"}</span>
         {r.asunto && <span className="block text-xs text-content-muted">{r.asunto}</span>}
       </TD>
-      <TD className="text-right tabular-nums">
-        {r.total ? formatMoneda(r.total, (r.moneda as Moneda) || "CRC") : "—"}
-      </TD>
+      {/* Moneda en columna PROPIA: así un monto en una moneda que el formateador no conoce nunca
+          se pinta con el símbolo de colones. Por eso el total va con formatMonto, sin símbolo. */}
+      <TD className="text-xs">{r.moneda || "—"}</TD>
+      <TD className="text-right tabular-nums">{r.total ? formatMonto(r.total) : "—"}</TD>
+      <TD className="text-right tabular-nums">{r.total_impuesto ? formatMonto(r.total_impuesto) : "—"}</TD>
       <TD className="max-w-sm text-xs text-content">
         {/* El motivo tal como lo escribió el servidor: es lo que dice qué arreglar. */}
         {r.motivo || (r.estado === "PROCESADA" ? "entró sin problemas" : "—")}
       </TD>
       <TD className="text-xs">
         <div className="flex gap-2">
+          {/* VER la factura. Solo si conserva el XML: se borra a propósito cuando el comprobante
+              no era de esta empresa. */}
+          {r.tiene_xml && (
+            <Button variant="secondary" size="sm" onClick={() => onVer(r.id)}>
+              Ver
+            </Button>
+          )}
           {r.tiene_xml && <BotonArchivo id={r.id} cual="xml" nombre={nombreArchivo(r)} />}
           {r.tiene_pdf && <BotonArchivo id={r.id} cual="pdf" nombre={nombreArchivo(r)} />}
           {!r.tiene_xml && !r.tiene_pdf && (

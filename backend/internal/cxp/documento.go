@@ -175,6 +175,10 @@ type Documento struct {
 	// programarlo devolvía «transición de estado no permitida» y nadie entendía por qué.
 	BloqueadoParaPago bool   `json:"bloqueado_para_pago"`
 	BloqueoMotivo     string `json:"bloqueo_motivo"`
+	// RecepcionID es la recepción de la que salió este documento, si entró por el buzón y todavía
+	// conserva su XML. Vacío = entró por Excel o a mano, y entonces NO HAY factura que mostrar:
+	// el XML nunca llegó al ERP por ese camino. Es lo que decide si la fila ofrece «Ver».
+	RecepcionID string `json:"recepcion_id,omitempty"`
 }
 
 // Orígenes posibles de la marca «de Contabilidad».
@@ -259,9 +263,28 @@ type FiltrosDocumentos struct {
 	RequiereValidacion string
 	// Fase filtra por la cola de trabajo de la Bandeja (rec/val/apr/cnt/pag/bco/pgd/arc), con la
 	// misma expresión que cuenta el encabezado. Una fase ya no equivale a una lista de estados.
-	Fase     string
-	Page     int
-	PageSize int
+	Fase string
+	// Prioridad filtra el corte de pago: "AA" (sí o sí), "A" (puede esperar), "AA_A" (las dos
+	// priorizadas) o "sin" (las que nadie priorizó). "" = todas.
+	//
+	// Existe para poder armar un corte «solo las AA»: la prioridad era un dato que se veía y se
+	// ordenaba, pero no se podía filtrar, así que para pagar solo lo urgente había que buscarlo a
+	// ojo entre miles de filas.
+	Prioridad string
+	Page      int
+	PageSize  int
+}
+
+// prioridadesFiltro son los valores aceptados por FiltrosDocumentos.Prioridad.
+//
+// Se valida contra esta lista y no se interpola lo que llegue: un valor libre acabaría en la
+// consulta. Y un valor desconocido NO filtra nada en vez de filtrar mal —el criterio del proyecto
+// es que un filtro que no se entiende se ignora, nunca que devuelva un subconjunto silencioso—.
+var prioridadesFiltro = map[string]string{
+	"AA":   "d.prioridad = 'AA'",
+	"A":    "d.prioridad = 'A'",
+	"AA_A": "d.prioridad IN ('AA', 'A')",
+	"sin":  "COALESCE(d.prioridad, '') = ''",
 }
 
 // GastoFrecuente es una categoría usada históricamente con un proveedor.

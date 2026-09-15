@@ -30,5 +30,7 @@ export { LoadingState, ErrorState, EmptyState } from "@/components/ui/States";
 export { ToastProvider, useToast } from "@/components/ui/Toast";
 export { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 export type { ConfirmDialogProps } from "@/components/ui/ConfirmDialog";
+export { Paginador, TAMANOS_PAGINA, rangoVisible } from "@/components/ui/Paginador";
+export type { PaginadorProps } from "@/components/ui/Paginador";
 export { BuscadorMultiple } from "@/components/ui/BuscadorMultiple";
 export type { BuscadorMultipleProps, OpcionBuscador } from "@/components/ui/BuscadorMultiple";

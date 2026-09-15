@@ -20,6 +20,7 @@ import {
   Input,
   LoadingState,
   PageHeader,
+  Paginador,
   Select,
   TBody,
   TD,
@@ -117,18 +118,19 @@ const VACIO: FormState = {
   gasto: null,
 };
 
-const PAGE_SIZE = 50;
-
 export function ProveedoresPage() {
   const toast = useToast();
   const tiene = useTienePermiso();
   const [filtros, setFiltros] = useState<FiltrosProveedores>({});
   const [page, setPage] = useState(1);
+  // Era una constante de 50. Con 649 proveedores, revisar el maestro de corrido eran 13 clics;
+  // ahora el tamaño lo elige quien trabaja, igual que en la Bandeja.
+  const [porPagina, setPorPagina] = useState(50);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(VACIO);
   const [mostrarForm, setMostrarForm] = useState(false);
 
-  const proveedoresQuery = useProveedores(filtros, page, PAGE_SIZE);
+  const proveedoresQuery = useProveedores(filtros, page, porPagina);
   const departamentosQuery = useDepartamentos(true); // solo activos, para los selects
   const deptoOpts = (departamentosQuery.data ?? []).map((d) => ({ value: d.nombre, label: d.nombre }));
   const crear = useCrearProveedor();
@@ -278,7 +280,6 @@ export function ProveedoresPage() {
 
   const proveedores = proveedoresQuery.data?.items ?? [];
   const total = proveedoresQuery.data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="flex flex-col gap-6">
@@ -611,32 +612,17 @@ export function ProveedoresPage() {
       )}
 
       {!proveedoresQuery.isPending && !proveedoresQuery.isError && proveedores.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-content-muted">
-            {total} proveedor(es){" "}
-            {proveedoresQuery.isFetching && <span className="text-accent">· actualizando…</span>}
-          </p>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Anterior
-            </Button>
-            <span className="text-sm tabular-nums text-content-muted">
-              Página {page} de {totalPages}
-            </span>
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Siguiente
-            </Button>
-          </div>
+        <div className="flex flex-col gap-1">
+          <Paginador
+            total={total}
+            pagina={page}
+            porPagina={porPagina}
+            enPantalla={proveedores.length}
+            onPagina={setPage}
+            onPorPagina={setPorPagina}
+            etiqueta={total === 1 ? "proveedor" : "proveedores"}
+          />
+          {proveedoresQuery.isFetching && <span className="text-xs text-accent">Actualizando…</span>}
         </div>
       )}
     </div>
