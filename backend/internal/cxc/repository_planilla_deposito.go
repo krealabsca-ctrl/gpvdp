@@ -33,6 +33,10 @@ type MovimientoVinculado struct {
 	Monto       string `json:"monto"`
 	Cuenta      string `json:"cuenta"`
 	Banco       string `json:"banco"`
+	// Incluido = false: el movimiento se excluyó del cuadre (carga duplicada o
+	// corregida). Se sigue mostrando porque alguien lo vinculó a mano —esconderlo
+	// haría que «Depositado» bajara sin explicación—, pero NO suma en Depositado.
+	Incluido bool `json:"incluido"`
 }
 
 // CandidatoDeposito es un crédito de Bancos que PODRÍA ser el depósito de esta planilla.
@@ -68,6 +72,7 @@ var (
 	ErrPlanillaNoEncontrada   = errors.New("cxc: la planilla no existe en esta empresa")
 	ErrMovimientoAjeno        = errors.New("cxc: el movimiento bancario no existe en esta empresa")
 	ErrMovimientoNoEsCredito  = errors.New("cxc: solo se puede vincular un crédito: un débito no es un depósito recibido")
+	ErrMovimientoExcluido     = errors.New("cxc: ese movimiento está excluido del cuadre (carga duplicada o corregida): no puede darse por depositado")
 	ErrMovimientoYaVinculado  = errors.New("cxc: ese depósito ya está vinculado a otra planilla")
 	ErrAsociacionNoEncontrada = errors.New("cxc: la asociación no existe en esta empresa")
 )
@@ -119,11 +124,15 @@ func (r *pgRepository) VincularDeposito(ctx context.Context, empresaID, planilla
 	}
 
 	// El movimiento tiene que ser de ESTA empresa y ser un crédito: vincular un débito
-	// daría por recibida una plata que en realidad salió.
+	// daría por recibida una plata que en realidad salió. Y tiene que estar incluido en
+	// el cuadre: un movimiento excluido es, por definición de la marca, plata que no
+	// existe (carga duplicada o corregida), así que darlo por depositado convertiría un
+	// error de carga en un error de cobranza.
 	var credito decimal.Decimal
+	var incluido bool
 	err = tx.QueryRow(ctx,
-		`SELECT credito FROM movimiento_bancario WHERE empresa_id = $1::uuid AND id = $2::uuid`,
-		empresaID, movimientoID).Scan(&credito)
+		`SELECT credito, incluido FROM movimiento_bancario WHERE empresa_id = $1::uuid AND id = $2::uuid`,
+		empresaID, movimientoID).Scan(&credito, &incluido)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrMovimientoAjeno
 	}
@@ -132,6 +141,9 @@ func (r *pgRepository) VincularDeposito(ctx context.Context, empresaID, planilla
 	}
 	if credito.Sign() <= 0 {
 		return ErrMovimientoNoEsCredito
+	}
+	if !incluido {
+		return ErrMovimientoExcluido
 	}
 
 	_, err = tx.Exec(ctx, `
@@ -188,7 +200,7 @@ func (r *pgRepository) CandidatosDeposito(ctx context.Context, empresaID, planil
 		       COALESCE((
 		         SELECT sum(m.monto_crc) FROM cxc_planilla_movimiento pm
 		         JOIN movimiento_bancario m ON m.id = pm.movimiento_bancario_id
-		         WHERE pm.planilla_id = p.id
+		         WHERE pm.planilla_id = p.id AND m.incluido
 		       ), 0)
 		FROM cxc_planilla p
 		JOIN cxc_asociacion a ON a.id = p.asociacion_id
@@ -209,13 +221,17 @@ func (r *pgRepository) CandidatosDeposito(ctx context.Context, empresaID, planil
 		SELECT m.id::text, m.fecha::text, COALESCE(m.descripcion,''), m.monto_crc::text,
 		       COALESCE(c.alias,''), COALESCE(b.nombre,''), COALESCE(l.nombre,''),
 		       (m.monto_crc = $4::numeric) AS calza,
-		       (length((SELECT token FROM raiz)) >= 4 AND upper(COALESCE(m.descripcion,'')) LIKE '%' || (SELECT token FROM raiz) || '%') AS nombra
+		       (length((SELECT token FROM raiz)) >= 4 AND upper(COALESCE(m.descripcion,'')) LIKE '%' || (SELECT token FROM raiz) || '%') AS nombra,
+		       m.incluido
 		FROM movimiento_bancario m
 		JOIN cuenta_bancaria c ON c.id = m.cuenta_bancaria_id
 		JOIN banco b ON b.id = c.banco_id
 		LEFT JOIN clasificacion l ON l.id = m.clasificacion_id
 		WHERE m.empresa_id = $1::uuid
 		  AND m.credito > 0
+		  -- Excluido del cuadre = plata que no existe: no se ofrece como depósito. No es
+		  -- esconderle al usuario algo que él puso: esta lista la propone el sistema.
+		  AND m.incluido
 		  AND m.fecha BETWEEN (to_date(left($2,7), 'YYYY-MM'))
 		      AND (to_date(left($2,7), 'YYYY-MM') + interval '1 month' + ($5 || ' days')::interval)::date
 		  AND NOT EXISTS (SELECT 1 FROM cxc_planilla_movimiento pm WHERE pm.movimiento_bancario_id = m.id)
@@ -231,7 +247,7 @@ func (r *pgRepository) CandidatosDeposito(ctx context.Context, empresaID, planil
 		var c CandidatoDeposito
 		var monto decimal.Decimal
 		if err := rows.Scan(&c.ID, &c.Fecha, &c.Descripcion, &monto, &c.Cuenta, &c.Banco,
-			&c.Clasificacion, &c.CalzaMonto, &c.NombraLaAsociacion); err != nil {
+			&c.Clasificacion, &c.CalzaMonto, &c.NombraLaAsociacion, &c.Incluido); err != nil {
 			return nil, fmt.Errorf("cxc: scan candidato: %w", err)
 		}
 		c.Monto = monto.String()
@@ -270,11 +286,14 @@ func (r *pgRepository) PlanillaDeAsociacion(ctx context.Context, empresaID, asoc
 		           AND co.estado <> 'REVERSADO'
 		           AND to_char(COALESCE(co.fecha_bancaria, co.fecha_pago), 'YYYY-MM') = left($3, 7)
 		       ), 0),
-		       -- Depositado: la suma de los movimientos bancarios vinculados.
+		       -- Depositado: la suma de los movimientos bancarios vinculados que siguen
+		       -- contando en el cuadre. Un movimiento excluido (carga duplicada) deja de
+		       -- sumar aquí: la planilla vuelve a CON_DIFERENCIA o SIN_DEPOSITO, que es
+		       -- justo la señal que cobranza necesita para ir a buscar el depósito real.
 		       COALESCE((
 		         SELECT sum(m.monto_crc) FROM cxc_planilla_movimiento pm
 		         JOIN movimiento_bancario m ON m.id = pm.movimiento_bancario_id
-		         WHERE pm.planilla_id = p.id
+		         WHERE pm.planilla_id = p.id AND m.incluido
 		       ), 0)
 		FROM cxc_asociacion a
 		LEFT JOIN cxc_planilla p
@@ -302,9 +321,14 @@ func (r *pgRepository) PlanillaDeAsociacion(ctx context.Context, empresaID, asoc
 		return d, nil
 	}
 
+	// Ojo: esta lista NO filtra por `incluido` a propósito. Los vínculos los hizo una
+	// persona; si la fila desapareciera, el operador vería bajar «Depositado» sin nada en
+	// pantalla que lo explique y volvería a vincular otro crédito para «arreglarlo». Se
+	// muestra marcada (columna incluido) y ya no suma: el total lo calcula la consulta de
+	// arriba, que sí filtra.
 	rows, err := r.pool.Query(ctx, `
 		SELECT m.id::text, m.fecha::text, COALESCE(m.descripcion,''), m.monto_crc::text,
-		       COALESCE(c.alias,''), COALESCE(b.nombre,'')
+		       COALESCE(c.alias,''), COALESCE(b.nombre,''), m.incluido
 		FROM cxc_planilla_movimiento pm
 		JOIN movimiento_bancario m ON m.id = pm.movimiento_bancario_id
 		JOIN cuenta_bancaria c ON c.id = m.cuenta_bancaria_id
@@ -317,7 +341,7 @@ func (r *pgRepository) PlanillaDeAsociacion(ctx context.Context, empresaID, asoc
 	defer rows.Close()
 	for rows.Next() {
 		var mv MovimientoVinculado
-		if err := rows.Scan(&mv.ID, &mv.Fecha, &mv.Descripcion, &mv.Monto, &mv.Cuenta, &mv.Banco); err != nil {
+		if err := rows.Scan(&mv.ID, &mv.Fecha, &mv.Descripcion, &mv.Monto, &mv.Cuenta, &mv.Banco, &mv.Incluido); err != nil {
 			return PlanillaDetalle{}, fmt.Errorf("cxc: scan depósito: %w", err)
 		}
 		d.Movimientos = append(d.Movimientos, mv)

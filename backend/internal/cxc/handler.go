@@ -252,7 +252,7 @@ func (h *Handler) error(c *gin.Context, err error, op string) {
 		httpx.Abort(c, http.StatusForbidden, httpx.CodeSinPermiso, err.Error())
 	case errors.Is(err, ErrMovimientoYaVinculado):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
-	case errors.Is(err, ErrMovimientoNoEsCredito):
+	case errors.Is(err, ErrMovimientoNoEsCredito), errors.Is(err, ErrMovimientoExcluido):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
 	case errors.Is(err, ErrSedeDuplicada):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())

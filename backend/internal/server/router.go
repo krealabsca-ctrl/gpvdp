@@ -11,6 +11,7 @@ import (
 	"github.com/gpvdp/erp/internal/auth"
 	"github.com/gpvdp/erp/internal/bancos"
 	"github.com/gpvdp/erp/internal/config"
+	"github.com/gpvdp/erp/internal/correo"
 	"github.com/gpvdp/erp/internal/cxc"
 	"github.com/gpvdp/erp/internal/cxp"
 	"github.com/gpvdp/erp/internal/grupo"
@@ -23,7 +24,7 @@ import (
 
 // NewRouter construye el motor Gin. `perms` es el checker RBAC (permiso × rol × empresa).
 func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH *bancos.Handler, cxpH *cxp.Handler, cxcH *cxc.Handler, nominaH *nomina.Handler, rbacH *rbac.Handler, plantillasH *plantillas.Handler,
-	inventarioH *inventario.Handler, grupoH *grupo.Handler, perms tenant.PermisoChecker) *gin.Engine {
+	correoH *correo.Handler, inventarioH *inventario.Handler, grupoH *grupo.Handler, perms tenant.PermisoChecker) *gin.Engine {
 	if cfg.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -104,6 +105,9 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			// es POST porque audita cada consulta y para que el monto no viaje en la URL.
 			scoped.POST("/bancos/mi-segmento/buscar", P("bancos.ver_mi_segmento"), bancosH.BuscarFaltante)
 			scoped.POST("/bancos/mi-segmento/faltantes", P("bancos.ver_mi_segmento"), bancosH.ReportarFaltante)
+			// Los avisos del propio usuario, con su respuesta, aunque la resolución haya sacado el
+			// movimiento del alcance (22-set-2026). Persona y empresa salen del token.
+			scoped.GET("/bancos/mi-segmento/mis-avisos", P("bancos.ver_mi_segmento"), bancosH.MisAvisos)
 			// El alcance se administra desde el catálogo: quien segmenta es quien dice quién consulta.
 			scoped.GET("/bancos/catalogo/consulta", P("bancos.catalogo"), bancosH.AlcanceConsulta)
 			scoped.PUT("/bancos/catalogo/clasificaciones/:id/consulta", P("bancos.catalogo"), bancosH.GuardarConsultaDePartida)
@@ -169,6 +173,17 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.POST("/bancos/importaciones", P("bancos.importar"), bancosH.Subir)
 			scoped.GET("/bancos/importaciones/:id/preview", P("bancos.importar"), bancosH.Preview)
 			scoped.POST("/bancos/importaciones/:id/confirmar", P("bancos.importar"), bancosH.Confirmar)
+			// Cargar HISTÓRICO (mig 0087): UN archivo con varias cuentas y varios meses. Es el mismo
+			// permiso que importar —es la misma acción, cargar movimientos— y los mismos dos pasos.
+			scoped.POST("/bancos/importaciones/historico", P("bancos.importar"), bancosH.SubirHistorico)
+			scoped.GET("/bancos/importaciones/historico/:id", P("bancos.importar"), bancosH.PreviewHistorico)
+			scoped.POST("/bancos/importaciones/historico/:id/confirmar", P("bancos.importar"), bancosH.ConfirmarHistorico)
+			// Revertir una CARGA entera (mig 0085): el historial de cargas lo ve quien importa, pero
+			// sacar plata de los libros es del Admin o del Director Financiero, y por eso la reversa
+			// tiene su propio permiso.
+			scoped.GET("/bancos/importaciones", P("bancos.importar"), bancosH.Importaciones)
+			scoped.POST("/bancos/importaciones/:id/revertir", P("bancos.revertir_importacion"), bancosH.RevertirImportacion)
+			scoped.POST("/bancos/importaciones/:id/deshacer-reversa", P("bancos.revertir_importacion"), bancosH.DeshacerReversaImportacion)
 			// Clasificar
 			scoped.PATCH("/bancos/movimientos/:id/clasificacion", P("bancos.clasificar"), bancosH.Reclasificar)
 			scoped.POST("/bancos/movimientos/clasificar-masivo", P("bancos.clasificar"), bancosH.ClasificarMasivo)
@@ -246,6 +261,11 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.GET("/cxp/documentos/:id", P("cxp.ver"), cxpH.DocumentoPorID)
 			scoped.GET("/cxp/documentos/:id/historial", P("cxp.ver"), cxpH.HistorialDocumento)
 			scoped.GET("/cxp/documentos/:id/comprobante", P("cxp.ver"), cxpH.DescargarComprobante)
+			// La bitácora de envíos del comprobante NO estrena permiso: leer el historial de una
+			// factura es leer su expediente. Un permiso por botón es lo que vuelve inusable la
+			// matriz. OJO: por eso acá NO va el detalle técnico del fallo — cxp.ver lo tienen siete
+			// roles y la configuración del correo, uno.
+			scoped.GET("/cxp/documentos/:id/comprobante/envios", P("cxp.ver"), cxpH.EnviosComprobante)
 			scoped.GET("/cxp/documentos/:id/anticipos", P("cxp.ver"), cxpH.AplicacionesDocumento)
 			scoped.GET("/cxp/anticipos/disponibles", P("cxp.ver"), cxpH.AnticiposDisponibles)
 			scoped.GET("/cxp/anticipos", P("cxp.ver"), cxpH.AnticiposEmpresa)
@@ -427,6 +447,14 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.PUT("/plantillas/:clave", P("admin.plantillas"), plantillasH.Guardar)
 			scoped.DELETE("/plantillas/:clave", P("admin.plantillas"), plantillasH.Restablecer)
 			scoped.POST("/plantillas/:clave/vista-previa", P("admin.plantillas"), plantillasH.VistaPrevia)
+			// Correo saliente por empresa (mig 0084): DESDE QUÉ BUZÓN sale lo que las plantillas de
+			// arriba escriben. Va con el mismo perfil de responsabilidad que el texto —la voz de la
+			// empresa hacia afuera— y por eso el permiso nuevo se otorgó a quien ya tenía
+			// admin.plantillas. No hay DELETE: apagar (`activo:false`) devuelve la empresa al correo
+			// global sin destruir la credencial guardada.
+			scoped.GET("/correo-saliente", P("admin.correo"), correoH.Obtener)
+			scoped.PUT("/correo-saliente", P("admin.correo"), correoH.Guardar)
+			scoped.POST("/correo-saliente/probar", P("admin.correo"), correoH.Probar)
 			scoped.GET("/rbac/mis-permisos", rbacH.MisPermisos)
 
 			// ── Administración RBAC (permiso admin.roles) ──

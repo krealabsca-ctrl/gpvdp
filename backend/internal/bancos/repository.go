@@ -89,7 +89,13 @@ func (r *pgRepository) NaturalKeysExistentes(ctx context.Context, empresaID stri
 	if len(keys) == 0 {
 		return out, nil
 	}
-	const q = `SELECT natural_key FROM movimiento_bancario WHERE empresa_id = $1::uuid AND natural_key = ANY($2)`
+	// `AND NOT excluido_por_reversa`: LA REVERSA LIBERA LA LÍNEA (mig 0086, decisión del Director
+	// Financiero). Una fila revertida no se borra —nunca— pero deja de contar como «ya existe», así
+	// que corregir el archivo y volver a subirlo A LA MISMA CUENTA entra de verdad. Sin esto el
+	// re-subido insertaba CERO y la pantalla no tenía cómo explicarlo.
+	const q = `
+		SELECT natural_key FROM movimiento_bancario
+		 WHERE empresa_id = $1::uuid AND natural_key = ANY($2) AND NOT excluido_por_reversa`
 	rows, err := r.pool.Query(ctx, q, empresaID, keys)
 	if err != nil {
 		return nil, fmt.Errorf("bancos: natural keys existentes: %w", err)
@@ -122,7 +128,10 @@ func (r *pgRepository) ConfirmarConMovimientos(ctx context.Context, empresaID, c
 			 estado_clasificacion, natural_key, indice_ocurrencia)
 		VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12,
 		        'NO_IDENTIFICADO', $13, $14)
-		ON CONFLICT (empresa_id, natural_key) DO NOTHING`
+		-- El predicado va REPETIDO a propósito: desde la mig 0086 la unicidad vive en un índice
+		-- PARCIAL (ux_mov_natural_key_vigente), y Postgres no lo infiere sin él. Si se omite, el
+		-- INSERT falla con «no unique or exclusion constraint matching the ON CONFLICT».
+		ON CONFLICT (empresa_id, natural_key) WHERE NOT excluido_por_reversa DO NOTHING`
 
 	inserted := 0
 	for _, m := range movs {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -133,7 +134,11 @@ type Repository interface {
 	GuardarComprobante(ctx context.Context, empresaID, docID, filename, mime string, contenido []byte, usuarioID string) error
 	ObtenerComprobante(ctx context.Context, empresaID, docID string) (Comprobante, error)
 	ObtenerComprobanteEnvio(ctx context.Context, empresaID, docID string) (ComprobanteEnvio, error)
-	MarcarComprobanteEnviado(ctx context.Context, empresaID, docID string) error
+	// RegistrarEnvio deja la fila de bitácora del intento y, solo si salió bien, mueve la marca de
+	// enviado — las dos cosas en una transacción. Reemplazó a `MarcarComprobanteEnviado`, que
+	// escribía la mitad de eso sin dejar rastro de la otra mitad.
+	RegistrarEnvio(ctx context.Context, empresaID, docID string, reg RegistroEnvio) (reenvio bool, enviadoEn time.Time, err error)
+	ListarEnvios(ctx context.Context, empresaID, docID string) ([]EnvioComprobante, error)
 
 	// Recepción de facturas por buzón de correo (etapa 2 de la ingesta).
 	CedulasDeEmpresa(ctx context.Context, empresaID string) ([]string, error)

@@ -88,6 +88,7 @@ func condicionesMovimientos(empresaID string, f FiltrosMovimientos) (string, []a
 	// copiando las líneas de arriba— haría que un rol sin partidas asignadas viera la empresa
 	// completa: el filtro simplemente no se agregaría. Un alcance vacío tiene que cerrar, no abrir,
 	// y el servicio además corta antes de llegar acá.
+	//
 	if f.Alcance != nil {
 		if len(f.Alcance) == 0 {
 			conds = append(conds, "false")
@@ -135,6 +136,18 @@ func condicionesMovimientos(empresaID string, f FiltrosMovimientos) (string, []a
 	return strings.Join(conds, " AND "), args
 }
 
+// paginaMaxima es el tope de la página que se acepta al paginar movimientos y avisos. Una página
+// fuera de rango vuelve al defecto (la 1), igual que ya se hace con `page_size`: esa es la regla del
+// proyecto para un parámetro de paginado fuera de rango (normalizar, no rechazar con 400).
+//
+// Existe porque `(page-1)*pageSize` se DESBORDA: con `page=200000000000000000` el OFFSET salía
+// negativo y Postgres respondía «OFFSET must not be negative», un 500. Con este tope y el tamaño
+// máximo de página (500) el OFFSET no pasa de 500 millones —lejos de desbordar hasta un int de 32
+// bits— y un millón de páginas de una fila sigue siendo unas 40 veces la base local entera (24.641
+// movimientos de las tres empresas, 22-set-2026). No es una regla de negocio: es el borde técnico
+// del OFFSET.
+const paginaMaxima = 1_000_000
+
 func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, f FiltrosMovimientos) (ListaMovimientos, error) {
 	where, args := condicionesMovimientos(empresaID, f)
 	addArg := func(val any) int { args = append(args, val); return len(args) }
@@ -149,16 +162,24 @@ func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, 
 	// Y como `monto_crc` vale 0 mientras la cuenta en dólares no tenga tipo de cambio del mes,
 	// se cuenta aparte lo que quedó sin convertir: si no, el total en colones se queda corto
 	// EN SILENCIO, que es justo el defecto que se estaba arreglando.
+	//
+	// Y `incluido` va DENTRO de las sumas, no en el WHERE: un duplicado que alguien corrigió
+	// (el mismo estado de cuenta importado en dos cuentas) no puede sumar plata, pero tampoco
+	// puede desaparecer de la lista donde la tesorera acaba de marcarlo. Por eso el dinero se
+	// filtra, el COUNT(*) sigue midiendo las filas que se muestran, y los excluidos se cuentan
+	// aparte. La alerta de «sin tipo de cambio» lleva la misma marca: avisar de que el total
+	// está corto por plata que no debía entrar al total sería una alarma falsa.
 	var totDeb, totCred, usdSinConvertir decimal.Decimal
-	var total, sinTC int
-	aggQ := `SELECT COALESCE(SUM(CASE WHEN m.debito  > 0 THEN m.monto_crc ELSE 0 END), 0),
-	                COALESCE(SUM(CASE WHEN m.credito > 0 THEN m.monto_crc ELSE 0 END), 0),
+	var total, sinTC, excluidos int
+	aggQ := `SELECT COALESCE(SUM(CASE WHEN m.debito  > 0 AND m.incluido THEN m.monto_crc ELSE 0 END), 0),
+	                COALESCE(SUM(CASE WHEN m.credito > 0 AND m.incluido THEN m.monto_crc ELSE 0 END), 0),
 	                COUNT(*),
-	                COUNT(*) FILTER (WHERE m.moneda_original <> 'CRC' AND m.tc_aplicado IS NULL),
-	                COALESCE(SUM(m.monto_original) FILTER (WHERE m.moneda_original <> 'CRC' AND m.tc_aplicado IS NULL), 0)
+	                COUNT(*) FILTER (WHERE m.moneda_original <> 'CRC' AND m.tc_aplicado IS NULL AND m.incluido),
+	                COALESCE(SUM(m.monto_original) FILTER (WHERE m.moneda_original <> 'CRC' AND m.tc_aplicado IS NULL AND m.incluido), 0),
+	                COUNT(*) FILTER (WHERE NOT m.incluido)
 	         FROM movimiento_bancario m WHERE ` + where
 	if err := r.pool.QueryRow(ctx, aggQ, args...).
-		Scan(&totDeb, &totCred, &total, &sinTC, &usdSinConvertir); err != nil {
+		Scan(&totDeb, &totCred, &total, &sinTC, &usdSinConvertir, &excluidos); err != nil {
 		return ListaMovimientos{}, fmt.Errorf("bancos: totales movimientos: %w", err)
 	}
 
@@ -167,7 +188,7 @@ func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, 
 		pageSize = 100
 	}
 	page := f.Page
-	if page <= 0 {
+	if page <= 0 || page > paginaMaxima {
 		page = 1
 	}
 	limIdx := addArg(pageSize)
@@ -178,7 +199,7 @@ func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, 
 		       m.debito, m.credito, m.moneda_original, m.monto_crc,
 		       m.concepto_id::text, COALESCE(co.nombre,''),
 		       m.clasificacion_id::text, COALESCE(cl.nombre,''),
-		       m.estado_clasificacion, m.confianza, m.es_traslado,
+		       m.estado_clasificacion, m.confianza, m.es_traslado, m.incluido,
 		       COALESCE(b.nombre,''), COALESCE(cb.alias,'')
 		FROM movimiento_bancario m
 		LEFT JOIN concepto co ON co.id = m.concepto_id
@@ -206,7 +227,7 @@ func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, 
 			&deb, &cred, &row.Moneda, &mcrc,
 			&row.ConceptoID, &row.Concepto,
 			&row.ClasificacionID, &row.Clasificacion,
-			&row.Estado, &confianza, &row.EsTraslado,
+			&row.Estado, &confianza, &row.EsTraslado, &row.Incluido,
 			&row.Banco, &row.Cuenta); err != nil {
 			return ListaMovimientos{}, fmt.Errorf("bancos: scan movimiento: %w", err)
 		}
@@ -214,6 +235,9 @@ func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, 
 		row.Debito = deb.String()
 		row.Credito = cred.String()
 		row.MontoCRC = mcrc.String()
+		// Se deriva acá y no en cada pantalla: es la MISMA función que usa el exportador, así el
+		// número que el equipo cruza contra su recibo no puede depender de por dónde lo mire.
+		row.ConsecutivoLargo = ConsecutivoLargo(row.Banco, row.Descripcion)
 		if confianza.Valid {
 			s := confianza.Decimal.String()
 			row.Confianza = &s
@@ -231,6 +255,7 @@ func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, 
 			Diferencia:        totCred.Sub(totDeb).String(),
 			SinTipoCambio:     sinTC,
 			MontoSinConvertir: usdSinConvertir.String(),
+			Excluidos:         excluidos,
 		},
 		Items:    items,
 		Total:    total,
@@ -240,9 +265,14 @@ func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, 
 }
 
 func (r *pgRepository) movimientosParaClasificar(ctx context.Context, empresaID string, extraCond string, extraArgs ...any) ([]MovParaClasificar, error) {
+	// `incluido` acá SÍ va en el WHERE, al revés que en la hoja de trabajo: esto no es una lista
+	// que alguien mire, es lo que el motor va a ESCRIBIR. Clasificar un duplicado excluido no
+	// aporta nada (no entra a ningún total ni traba el cierre) y en cambio le suma un acierto
+	// falso a la regla, que es la métrica con la que el motor aprende.
 	q := `SELECT id::text, COALESCE(descripcion,''), (debito > 0)
 	      FROM movimiento_bancario
-	      WHERE empresa_id = $1::uuid AND estado_clasificacion = 'NO_IDENTIFICADO'` + extraCond
+	      WHERE empresa_id = $1::uuid AND incluido
+	        AND estado_clasificacion = 'NO_IDENTIFICADO'` + extraCond
 	args := append([]any{empresaID}, extraArgs...)
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {

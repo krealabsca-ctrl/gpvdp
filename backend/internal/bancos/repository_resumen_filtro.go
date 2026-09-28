@@ -18,6 +18,10 @@ type ResumenFiltroRow struct {
 	CreditoSum     decimal.Decimal
 	DebitoSum      decimal.Decimal
 	Movs           int
+	// Excluidos: cuántos de esos `Movs` están marcados `incluido = false` y por lo tanto
+	// NO entran en `CreditoSum`/`DebitoSum`. Es la diferencia entre lo que se ve y lo que
+	// suma; sin este número el encabezado no podría explicarla.
+	Excluidos int
 }
 
 // ResumenFiltro agrega los movimientos de la SELECCIÓN ACTIVA de la hoja de trabajo,
@@ -30,6 +34,11 @@ type ResumenFiltroRow struct {
 //     falso (hay 99 movimientos en USD). El resumen se expresa en colones.
 //   - El WHERE lo arma `condicionesMovimientos`, el MISMO que la lista. Así el
 //     encabezado y la tabla no pueden contradecirse nunca.
+//   - `incluido` NO va en el WHERE, va DENTRO de las sumas. Un duplicado excluido a mano
+//     (el mismo estado de cuenta importado en dos cuentas) no puede sumar plata, pero
+//     tampoco puede desaparecer del encabezado mientras la lista sí lo muestra: eso
+//     rompería la invariante de arriba. Por eso el dinero se filtra, el conteo no, y los
+//     excluidos se devuelven aparte para que la pantalla pueda explicar la diferencia.
 //
 // El agrupamiento cambia según el área de trabajo (ver agrupamientoResumen).
 func (r *pgRepository) ResumenFiltro(ctx context.Context, empresaID string, f FiltrosMovimientos, agrupar string) ([]ResumenFiltroRow, error) {
@@ -39,9 +48,10 @@ func (r *pgRepository) ResumenFiltro(ctx context.Context, empresaID string, f Fi
 	q := `
 		SELECT ` + sel.padreID + `, ` + sel.padreNombre + `,
 		       ` + sel.hijoID + `, ` + sel.hijoNombre + `,
-		       COALESCE(SUM(CASE WHEN m.credito > 0 THEN m.monto_crc ELSE 0 END), 0),
-		       COALESCE(SUM(CASE WHEN m.debito  > 0 THEN m.monto_crc ELSE 0 END), 0),
-		       COUNT(*)
+		       COALESCE(SUM(CASE WHEN m.credito > 0 AND m.incluido THEN m.monto_crc ELSE 0 END), 0),
+		       COALESCE(SUM(CASE WHEN m.debito  > 0 AND m.incluido THEN m.monto_crc ELSE 0 END), 0),
+		       COUNT(*),
+		       COUNT(*) FILTER (WHERE NOT m.incluido)
 		FROM movimiento_bancario m
 		LEFT JOIN concepto co ON co.id = m.concepto_id
 		LEFT JOIN clasificacion cl ON cl.id = m.clasificacion_id
@@ -60,7 +70,7 @@ func (r *pgRepository) ResumenFiltro(ctx context.Context, empresaID string, f Fi
 	for rows.Next() {
 		var row ResumenFiltroRow
 		if err := rows.Scan(&row.PadreID, &row.Padre, &row.HijoID, &row.Hijo,
-			&row.CreditoSum, &row.DebitoSum, &row.Movs); err != nil {
+			&row.CreditoSum, &row.DebitoSum, &row.Movs, &row.Excluidos); err != nil {
 			return nil, fmt.Errorf("bancos: scan resumen de la selección: %w", err)
 		}
 		out = append(out, row)

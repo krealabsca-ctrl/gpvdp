@@ -39,6 +39,16 @@ services:
       JWT_SECRET: fFTjEuBcM6XaKDPR2hN7rzyG_gRpQXU1mmjAoCdFxPk3unp0I3g2uq9GDuSWcIzU
       ACCESS_TTL: 15m
       REFRESH_TTL: 720h
+      # Cifra la contraseña del buzón de correo de cada empresa (pantalla Correo saliente).
+      #
+      # Valor de DESARROLLO escrito acá, igual que JWT_SECRET: en esta máquina el único correo que
+      # sale es al MailHog de abajo, que no pide contraseña. En el servidor la genera al azar el
+      # instalador y va en el .env (NUNCA un valor de fábrica).
+      #
+      # Si se cambia este valor, lo que ya se haya guardado en la base local deja de descifrar y hay
+      # que volver a escribir la contraseña en la pantalla. Es el comportamiento correcto: la clave
+      # vive fuera de la base a propósito.
+      CIFRADO_SECRET: 7hQ2vLpR9sXmA4dKe1TwZyNc6BgJuF3oVrHiSlQxPtM8bYnE5kCaGjDfUzWoIvR
       # Con el proxy del frontend el navegador nunca habla directo con la API, así que CORS ya no
       # interviene en el uso normal. Queda solo para llamar la API a mano desde esta máquina
       # (Postman, curl con Origin). Ya NO hay que tocarlo cuando cambia la IP.

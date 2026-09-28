@@ -34,10 +34,13 @@ const permisoAprobar = "cxp.aprobar"
 
 // Service orquesta la lógica de CxP (por ahora, maestro de proveedores).
 type Service struct {
-	repo   Repository
-	audit  *shared.Audit
-	log    *zap.Logger
-	mailer *Mailer        // opcional; si es nil, el envío de comprobantes falla con error claro
+	repo  Repository
+	audit *shared.Audit
+	log   *zap.Logger
+	// mailer: opcional; si es nil, el envío de comprobantes falla con error claro. Es una interfaz
+	// (no *Mailer) para poder probar el camino del envío FALLIDO sin un servidor de correo: que un
+	// envío que falla quede en la bitácora es justamente lo que antes no pasaba.
+	mailer EnviadorComprobante
 	perms  PermisoChecker // opcional; si es nil, no hay scoping por área (ve todo)
 	// plantillas: opcional; si es nil, las notificaciones salen con el texto de fábrica.
 	plantillas Plantillero
@@ -49,7 +52,7 @@ func NewService(repo Repository, audit *shared.Audit, log *zap.Logger) *Service 
 }
 
 // SetMailer inyecta el mailer para el envío de comprobantes (se configura en el arranque).
-func (s *Service) SetMailer(m *Mailer) { s.mailer = m }
+func (s *Service) SetMailer(m EnviadorComprobante) { s.mailer = m }
 
 // SetPermisos inyecta el verificador RBAC para el scoping por área (se configura en el arranque).
 func (s *Service) SetPermisos(p PermisoChecker) { s.perms = p }

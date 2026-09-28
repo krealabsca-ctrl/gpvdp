@@ -662,12 +662,35 @@ export function useAdjuntarComprobante() {
   });
 }
 
+/**
+ * Envía (o REENVÍA: es la misma llamada) el comprobante al proveedor.
+ *
+ * Invalida con `onSettled` y no con `onSuccess` a propósito: cuando el servidor de correo falla,
+ * el usuario recibe un 422 **y** queda una fila `ERROR` en la bitácora. Invalidando solo en el
+ * éxito, esa fila —que es justo la que hay que leer— no aparecía hasta recargar la pantalla.
+ */
 export function useEnviarComprobante() {
   const empresaId = useEmpresaId();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => cxpApi.enviarComprobante(id),
-    onSuccess: (_d, id) => invalidarDocumento(qc, empresaId, id),
+    onSettled: (_d, _e, id) => invalidarDocumento(qc, empresaId, id),
+  });
+}
+
+/**
+ * La bitácora de envíos de un documento: a quién se mandó, con copia a quién, cuándo y si salió.
+ *
+ * Su clave cuelga del prefijo del documento, así que adjuntar, reemplazar o enviar ya la refrescan
+ * sin acordarse de nada. Lista vacía = nunca se intentó (los envíos anteriores a la migración 0084
+ * no se rellenaron: decir a qué dirección se mandaron sería inventarlo).
+ */
+export function useEnviosComprobante(id: string | undefined, habilitado = true) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.cxp.enviosComprobante(empresaId, id ?? ""),
+    queryFn: () => cxpApi.enviosComprobante(id!),
+    enabled: !!id && habilitado,
   });
 }
 

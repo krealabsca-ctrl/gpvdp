@@ -23,6 +23,11 @@ type ResumenSeleccion struct {
 	TotalCredito string               `json:"total_credito"`
 	Neto         string               `json:"neto"`
 	Conceptos    []CuadreConceptoNodo `json:"conceptos"`
+	// Excluidos: cuántos de esos `Movs` están marcados como no incluidos (un duplicado que
+	// alguien corrigió) y por eso NO entran en los totales. `Movs` los sigue contando porque
+	// la lista los sigue mostrando; este número es lo que le permite a la pantalla decir
+	// «N movimientos · X excluidos que no suman» en vez de dejar una resta sin explicar.
+	Excluidos int `json:"excluidos"`
 }
 
 // ResumenFiltro arma el resumen de la selección activa. El filtro es el MISMO que el de
@@ -37,8 +42,12 @@ func (s *Service) ResumenFiltro(ctx context.Context, empresaID string, f Filtros
 		return ResumenSeleccion{}, err
 	}
 	b := newCuadreBuilder()
+	// Los excluidos se suman acá y NO dentro del builder: `cuadreBuilder` lo comparte el árbol
+	// del Cuadre y meterle un campo cambiaría ese JSON, que no es de esta corrección.
+	excluidos := 0
 	for _, r := range filas {
 		b.add(r.PadreID, r.Padre, r.HijoID, r.Hijo, r.DebitoSum, r.CreditoSum, r.Movs)
+		excluidos += r.Excluidos
 	}
 	arbol := b.build("")
 	return ResumenSeleccion{
@@ -50,5 +59,6 @@ func (s *Service) ResumenFiltro(ctx context.Context, empresaID string, f Filtros
 		// Cuadre (entra menos sale).
 		Neto:      b.totalCred.Sub(b.totalDeb).String(),
 		Conceptos: arbol.Conceptos,
+		Excluidos: excluidos,
 	}, nil
 }

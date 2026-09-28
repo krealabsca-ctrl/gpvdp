@@ -9,7 +9,6 @@ package bancos
 import (
 	"context"
 	"strings"
-	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -24,14 +23,32 @@ func (s *Service) auditarSegmento(ctx context.Context, empresaID, entidad, entid
 	})
 }
 
-// MiSegmento devuelve los créditos de las partidas que el rol del usuario consulta.
+// normalizarVista traduce la vista pedida. Vacía es la única que hay; cualquier otra cosa es un
+// error y no la principal «por las dudas» (ver ErrVistaInvalida).
+//
+// `sin_clasificar` se rechaza EXPLÍCITAMENTE con el resto: existió un día, y un cliente que quedó
+// viejo tiene que enterarse de que ya no está en vez de recibir la partida con otro nombre.
+func normalizarVista(vista string) (string, error) {
+	switch strings.TrimSpace(strings.ToLower(vista)) {
+	case "", VistaPartida:
+		return VistaPartida, nil
+	default:
+		return "", ErrVistaInvalida
+	}
+}
+
+// MiSegmento devuelve los créditos que el equipo ve en «Mi partida».
 //
 // Dos cosas se fuerzan y no se piden:
 //   - `Tipo = CREDITO`: la pantalla contesta «¿entró el dinero?». Los débitos son gasto de la
 //     empresa y no son de este permiso (decisión del usuario, 2026-09-04).
 //   - `Alcance`: sale del rol. Si el cliente manda clasificaciones, se intersecan con el alcance
 //     porque las condiciones se suman con AND; nunca lo reemplazan.
-func (s *Service) MiSegmento(ctx context.Context, empresaID, usuarioID string, f FiltrosMovimientos) (MiSegmento, error) {
+func (s *Service) MiSegmento(ctx context.Context, empresaID, usuarioID, vista string, f FiltrosMovimientos) (MiSegmento, error) {
+	vista, err := normalizarVista(vista)
+	if err != nil {
+		return MiSegmento{}, err
+	}
 	alcance, err := s.repo.AlcanceDeUsuario(ctx, empresaID, usuarioID)
 	if err != nil {
 		return MiSegmento{}, err
@@ -40,9 +57,11 @@ func (s *Service) MiSegmento(ctx context.Context, empresaID, usuarioID string, f
 	// cierra (condición imposible), pero esto lo deja explícito y le ahorra el viaje a la base.
 	if len(alcance) == 0 {
 		return MiSegmento{
-			Partidas:    []PartidaDelSegmento{},
-			Cuentas:     []CuentaDelSegmento{},
-			Movimientos: ListaMovimientos{Items: []MovimientoRow{}, Page: 1, PageSize: 0},
+			Vista:          vista,
+			Partidas:       []PartidaDelSegmento{},
+			Cuentas:        []CuentaDelSegmento{},
+			CargaPorCuenta: []CuentaCargadaHasta{},
+			Movimientos:    ListaMovimientos{Items: []MovimientoRow{}, Page: 1, PageSize: 0},
 		}, ErrSinAlcance
 	}
 
@@ -54,51 +73,148 @@ func (s *Service) MiSegmento(ctx context.Context, empresaID, usuarioID string, f
 	if err != nil {
 		return MiSegmento{}, err
 	}
-	// Sin recortar por alcance a propósito (ver CargadoHasta en los tipos).
-	cargadoHasta, err := s.repo.UltimaFechaCargada(ctx, empresaID)
+	// La cuenta del segmento más atrasada (ver CargadoHasta en los tipos). La misma cuenta que usa
+	// BuscarFaltante, para que el encabezado y el diálogo no se contradigan.
+	carga, err := s.repo.CargaDeCuentasDelSegmento(ctx, empresaID, alcance)
 	if err != nil {
 		return MiSegmento{}, err
 	}
+	cargadoHasta, masAtrasada := cuentaMasAtrasada(carga)
 
 	f.Alcance = alcance
 	f.Tipo = "CREDITO"
-	// El estado de clasificación no se filtra: todo lo que está en el alcance TIENE clasificación
-	// por definición —el alcance ES una lista de clasificaciones—.
+	// El estado de clasificación no se filtra: todo lo que sale TIENE clasificación por definición,
+	// porque el alcance ES una lista de clasificaciones.
 	lista, err := s.repo.ListarMovimientos(ctx, empresaID, f)
 	if err != nil {
 		return MiSegmento{}, err
 	}
 
-	// Los avisos ya abiertos de estos movimientos: la fila muestra el motivo escrito en vez de
-	// ofrecer avisar otra vez. Es lo que evita tres reportes idénticos del mismo movimiento.
-	ids := make([]string, 0, len(lista.Items))
-	for _, m := range lista.Items {
-		ids = append(ids, m.ID)
-	}
-	reportados, err := s.repo.ReportesDeMovimientos(ctx, empresaID, ids)
-	if err != nil {
+	if err := s.anotarAvisos(ctx, empresaID, usuarioID, lista.Items); err != nil {
 		return MiSegmento{}, err
-	}
-	for i := range lista.Items {
-		if motivo, ok := reportados[lista.Items[i].ID]; ok {
-			lista.Items[i].ReporteAbierto = motivo
-		}
 	}
 
 	return MiSegmento{
-		Partidas:     partidas,
-		Cuentas:      cuentas,
-		Movimientos:  lista,
-		CargadoHasta: cargadoHasta,
+		Vista:             vista,
+		Partidas:          partidas,
+		Cuentas:           cuentas,
+		Movimientos:       lista,
+		CargadoHasta:      cargadoHasta,
+		CuentaMasAtrasada: masAtrasada,
+		CargaPorCuenta:    carga,
 	}, nil
+}
+
+// anotarAvisos le pone a cada fila lo que el equipo puede saber de sus avisos.
+//
+//   - El ABIERTO, sea de quien sea: la fila muestra que está en revisión en vez de ofrecer avisar
+//     otra vez (el índice de un aviso abierto por movimiento respondería 409). El motivo solo si es
+//     de quien pregunta y no es un faltante; si no, TextoAvisoAbiertoDeOtro, y
+//     ReporteAbiertoPropio dice cuál de los dos es.
+//   - El RESUELTO, solo si no hay uno abierto, y solo el de quien pregunta: la respuesta y cuándo,
+//     al lado del botón.
+//
+// Es la MISMA anotación en la lista y en «Falta un movimiento»: las filas que devuelve la búsqueda
+// son las mismas que el usuario ve en su lista, y no pueden decir otra cosa.
+func (s *Service) anotarAvisos(ctx context.Context, empresaID, usuarioID string, items []MovimientoRow) error {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(items))
+	for _, m := range items {
+		ids = append(ids, m.ID)
+	}
+	reportados, err := s.repo.ReportesDeMovimientos(ctx, empresaID, usuarioID, ids)
+	if err != nil {
+		return err
+	}
+	resueltos, err := s.repo.AvisosResueltosDeMovimientos(ctx, empresaID, usuarioID, ids)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		if ab, abierto := reportados[items[i].ID]; abierto {
+			propio := ab.Propio && ab.Motivo != ""
+			items[i].ReporteAbierto = TextoAvisoAbiertoDeOtro
+			if propio {
+				items[i].ReporteAbierto = ab.Motivo
+			}
+			items[i].ReporteAbiertoPropio = &propio
+			continue
+		}
+		if a, ok := resueltos[items[i].ID]; ok {
+			items[i].AvisoResuelto = &a
+		}
+	}
+	return nil
+}
+
+// cuentaMasAtrasada es el «cargado hasta» de la pantalla: de las fechas de carga de cada cuenta del
+// segmento, la MÍNIMA, con la cuenta que la tiene (decisión del Director Financiero, 22-set-2026).
+//
+// No confía en el orden del repositorio: lo recalcula. Las fechas son ISO (YYYY-MM-DD), así que
+// compararlas como texto es compararlas en el calendario. En un empate gana la primera de la lista
+// (el repositorio las ordena por banco y cuenta). Sin cuentas devuelve "" y nil: no hay nada que
+// afirmar, y la pantalla no puede inventar una fecha.
+func cuentaMasAtrasada(cargas []CuentaCargadaHasta) (string, *CuentaCargadaHasta) {
+	var peor *CuentaCargadaHasta
+	for i := range cargas {
+		if cargas[i].CargadoHasta == "" {
+			continue
+		}
+		if peor == nil || cargas[i].CargadoHasta < peor.CargadoHasta {
+			peor = &cargas[i]
+		}
+	}
+	if peor == nil {
+		return "", nil
+	}
+	c := *peor
+	return c.CargadoHasta, &c
+}
+
+// normalizarPaginaAvisos aplica la regla del paginado de «Mis avisos»: 50 por página por defecto y
+// 200 como máximo (los tamaños que ofrece el paginador de la pantalla).
+//
+// La página fuera de rango se trata igual que el tamaño fuera de rango: vuelve al defecto (ver
+// paginaMaxima). Sin ese tope, `page=200000000000000000` desbordaba `(page-1)*pageSize` a un OFFSET
+// negativo y Postgres respondía con un 500.
+func normalizarPaginaAvisos(page, pageSize int) (int, int) {
+	if pageSize <= 0 || pageSize > 200 {
+		pageSize = 50
+	}
+	if page <= 0 || page > paginaMaxima {
+		page = 1
+	}
+	return page, pageSize
+}
+
+// MisAvisos devuelve los avisos que hizo el usuario (abiertos y resueltos), aunque el movimiento ya
+// no esté en su alcance.
+//
+// El alcance NO recorta la lista —ese es el punto: el aviso resuelto reclasificando sale del
+// alcance justo cuando tiene respuesta—, pero SÍ abre la puerta: un rol sin partidas asignadas no
+// consulta nada por segmento, y eso incluye esto. Un alcance vacío cierra, nunca abre.
+func (s *Service) MisAvisos(ctx context.Context, empresaID, usuarioID string, page, pageSize int) (ListaMisAvisos, error) {
+	page, pageSize = normalizarPaginaAvisos(page, pageSize)
+	alcance, err := s.repo.AlcanceDeUsuario(ctx, empresaID, usuarioID)
+	if err != nil {
+		return ListaMisAvisos{}, err
+	}
+	if len(alcance) == 0 {
+		return ListaMisAvisos{Items: []MiAviso{}, Page: page, PageSize: pageSize, SinAlcance: true}, ErrSinAlcance
+	}
+	return s.repo.MisAvisos(ctx, empresaID, usuarioID, page, pageSize)
 }
 
 // ReportarSegmentacion registra el aviso «este movimiento no es de mi partida».
 //
-// Se verifica que el movimiento esté EN EL ALCANCE del usuario antes de crear el aviso. Sin esa
+// Se verifica que el movimiento esté EN EL ALCANCE del usuario antes de crear el aviso: que sea un
+// crédito de una partida suya, o sea, una fila que ya está viendo (ver MovimientoEnAlcance). Sin esa
 // guarda, alguien podría reportar —y por lo tanto descubrir la existencia de— cualquier movimiento
 // de la empresa mandando ids a mano: el permiso diría «solo mi partida» y el endpoint permitiría
-// otra cosa.
+// otra cosa. Para lo que NO ve —incluido lo que nadie clasificó— el camino es «Falta un movimiento»,
+// que avisa sin mostrar nada.
 func (s *Service) ReportarSegmentacion(ctx context.Context, empresaID, usuarioID, movID, motivo string) error {
 	motivo = strings.TrimSpace(motivo)
 	if motivo == "" {
@@ -130,14 +246,21 @@ func (s *Service) ReportarSegmentacion(ctx context.Context, empresaID, usuarioID
 
 // BuscarFaltante contesta si existe un crédito de esa fecha y ese monto exactos (mig 0078).
 //
-// Los tres veredictos y por qué son tres y no dos:
+// Los tres veredictos, en este orden de precedencia (si hay coincidencias de más de un grupo, gana
+// el primero):
 //
 //   - EN_MI_PARTIDA — existe y es suyo: lo tapaba un filtro o el mes activo. Se devuelve completo,
 //     porque ya tenía derecho a verlo.
-//   - FUERA_DE_MI_PARTIDA — existe en la empresa, en otra partida o sin clasificar. Se devuelve el
-//     veredicto y NADA más. Es el único caso que hay que corregir, y por eso el aviso sirve.
+//   - FUERA_DE_MI_PARTIDA — existe en la empresa y el usuario no lo ve: en otra partida, o todavía
+//     sin partida. Se devuelve el veredicto y NADA más. Es el caso que hay que corregir, y por eso
+//     el aviso sirve.
 //   - NO_EXISTE — no hay ninguno. Va con `CargadoHasta`, porque sin esa fecha «no hay ninguno» no
 //     distingue «no entró» de «no lo han importado», que es la mitad de la pregunta.
+//
+// Lo que NADIE clasificó cae en FUERA_DE_MI_PARTIDA desde el 23-set-2026. Tuvo veredicto propio un
+// día —devolvía el movimiento completo, porque el usuario lo veía en «Todavía sin partida»—; al
+// quitarse esa pestaña se quitó también, porque sin ella el usuario no lo ve en ningún lado y
+// mostrarlo acá sería la misma divulgación por otra puerta.
 //
 // Toda consulta queda en auditoría con la fecha, el monto y el veredicto: es una búsqueda que roza
 // datos que el usuario no puede ver, así que tiene que dejar rastro incluso cuando no encuentra nada.
@@ -168,11 +291,19 @@ func (s *Service) BuscarFaltante(ctx context.Context, empresaID, usuarioID, fech
 		res.Veredicto = FaltanteFueraDeMiPartida
 	default:
 		res.Veredicto = FaltanteNoExiste
-		cargado, err := s.repo.UltimaFechaCargada(ctx, empresaID)
+		// La cuenta del segmento más atrasada, igual que el encabezado de «Mi partida»: es la fecha
+		// con la que la pantalla dice «conviene esperar antes de avisar», y si acá fuera otra el
+		// diálogo y el encabezado se contradirían.
+		carga, err := s.repo.CargaDeCuentasDelSegmento(ctx, empresaID, alcance)
 		if err != nil {
 			return ResultadoFaltante{}, err
 		}
-		res.CargadoHasta = cargado
+		res.CargadoHasta, res.CargadoHastaCuenta = cuentaMasAtrasada(carga)
+	}
+	// Las filas devueltas dicen lo mismo que en la lista: si ya hay un aviso abierto sobre una de
+	// ellas, el diálogo lo muestra en vez de dejar que el equipo vuelva a avisar de lo mismo.
+	if err := s.anotarAvisos(ctx, empresaID, usuarioID, res.Movimientos); err != nil {
+		return ResultadoFaltante{}, err
 	}
 
 	s.auditarSegmento(ctx, empresaID, "movimiento_bancario", "", "BUSCAR_FALTANTE", usuarioID,
@@ -219,7 +350,9 @@ func (s *Service) ReportarFaltante(ctx context.Context, empresaID, usuarioID, fe
 // `numeric`: sin esto un dato mal escrito llega al cast de Postgres y vuelve como 500.
 func validarFechaYMonto(fecha, monto string) (string, decimal.Decimal, error) {
 	fecha = strings.TrimSpace(fecha)
-	if _, err := time.Parse("2006-01-02", fecha); err != nil {
+	// El mismo validador que los filtros: con un time.Parse suelto, «0000-09-01» pasaba y Postgres lo
+	// rechazaba con 500 al guardar el aviso de «falta un movimiento».
+	if !fechaISOValida(fecha) {
 		return "", decimal.Zero, ErrFechaInvalida
 	}
 	// Se acepta lo que la gente escribe de verdad: «4 950,50», «4.950,50» y «4950.50» son el mismo

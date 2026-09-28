@@ -175,6 +175,16 @@ export function puedeAccion(tienePermiso: (permiso: string) => boolean, accion: 
   return tienePermiso(PERMISO_POR_ACCION[accion]);
 }
 
+/**
+ * Adjuntar, enviar y REENVIAR el comprobante de pago — espejo de `cxp.comprobante` en router.go.
+ *
+ * NO es una acción del flujo (no mueve el documento de estado), por eso no está en la matriz de
+ * arriba. Y no es `cxp.tesoreria`: las dos pantallas gateaban estos botones con el permiso de
+ * pagar, así que a un rol con `cxp.comprobante` y sin tesorería —justo el que existe para esto—
+ * los botones ni le aparecían, mientras que a tesorería sí, y le respondían 403 al apretarlos.
+ */
+export const PERMISO_COMPROBANTE = "cxp.comprobante";
+
 /** Acción de transición disponible desde un estado (null si es final o no aplica). */
 export function accionSiguiente(
   estado: EstadoDocumento,

@@ -75,9 +75,32 @@ func (f *fakeRepo) ResolverReporteSegmentacion(_ context.Context, _, reporteID, 
 	return nil
 }
 
-func (f *fakeRepo) ReportesDeMovimientos(context.Context, string, []string) (map[string]string, error) {
+func (f *fakeRepo) ReportesDeMovimientos(_ context.Context, _, usuarioID string, _ []string) (map[string]AvisoAbiertoDeFila, error) {
+	f.avisosPedidosPor = usuarioID
 	if f.reportesAbiertos == nil {
-		return map[string]string{}, nil
+		return map[string]AvisoAbiertoDeFila{}, nil
 	}
 	return f.reportesAbiertos, nil
+}
+
+func (f *fakeRepo) AvisosResueltosDeMovimientos(_ context.Context, _, usuarioID string, _ []string) (map[string]AvisoResuelto, error) {
+	f.resueltosPedidosPor = usuarioID
+	if f.avisosResueltos == nil {
+		return map[string]AvisoResuelto{}, nil
+	}
+	return f.avisosResueltos, nil
+}
+
+func (f *fakeRepo) MisAvisos(_ context.Context, _, _ string, page, pageSize int) (ListaMisAvisos, error) {
+	f.misAvisosPedidos = true
+	f.misAvisosPagina = [2]int{page, pageSize}
+	return f.misAvisos, nil
+}
+
+func (f *fakeRepo) CargaDeCuentasDelSegmento(context.Context, string, []string) ([]CuentaCargadaHasta, error) {
+	f.cargaCuentasPedida = true
+	if f.cargaCuentas == nil {
+		return []CuentaCargadaHasta{}, nil
+	}
+	return f.cargaCuentas, nil
 }

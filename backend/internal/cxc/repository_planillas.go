@@ -128,7 +128,11 @@ func (r *pgRepository) PanoramaAsociaciones(ctx context.Context, empresaID, peri
 			       count(m.id)::int AS depositos
 			FROM cxc_planilla p
 			LEFT JOIN cxc_planilla_movimiento pm ON pm.planilla_id = p.id
-			LEFT JOIN movimiento_bancario m ON m.id = pm.movimiento_bancario_id
+			-- m.incluido va en el ON y NO en el WHERE: un movimiento excluido (carga
+			-- duplicada) tiene que dejar de sumar, pero la planilla debe SOBREVIVIR con
+			-- depositado = 0. Puesta en el WHERE, la fila se pierde entera y la asociación
+			-- con el problema sería la única invisible del panorama.
+			LEFT JOIN movimiento_bancario m ON m.id = pm.movimiento_bancario_id AND m.incluido
 			WHERE p.empresa_id = $1::uuid AND left(p.periodo, 7) = $2
 			GROUP BY p.asociacion_id, p.id, p.referencia
 		)

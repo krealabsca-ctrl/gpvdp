@@ -546,10 +546,15 @@ func (r *pgRepository) PartidasDelRol(ctx context.Context, empresaID, usuarioID 
 
 // UltimaFechaBanco dice hasta cuándo alcanzan los movimientos importados. Es lo que permite
 // distinguir «esto está vencido» de «todavía no puedo saberlo». Devuelve "" si no hay ninguno.
+//
+// Solo cuenta lo INCLUIDO, igual que su gemela bancos.UltimaFechaCargada: una fecha sostenida
+// únicamente por una importación que después se excluyó entera afirmaría «el banco llega hasta el
+// 14» sobre datos que el sistema ya declaró que no cuentan, y el semáforo daría por VENCIDA una
+// responsabilidad que en realidad todavía no se puede juzgar.
 func (r *pgRepository) UltimaFechaBanco(ctx context.Context, empresaID string) (string, error) {
 	var fecha *string
 	err := r.pool.QueryRow(ctx,
-		"SELECT to_char(MAX(fecha),'YYYY-MM-DD') FROM movimiento_bancario WHERE empresa_id=$1::uuid",
+		"SELECT to_char(MAX(fecha),'YYYY-MM-DD') FROM movimiento_bancario WHERE empresa_id=$1::uuid AND incluido",
 		empresaID).Scan(&fecha)
 	if err != nil {
 		return "", fmt.Errorf("cxp: última fecha de banco: %w", err)

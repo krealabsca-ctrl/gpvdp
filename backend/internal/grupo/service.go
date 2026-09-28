@@ -103,7 +103,10 @@ func (s *Service) Resumen(ctx context.Context, usuarioID, rol, periodo string) (
 		fi := aDecimal(f.IngresosCRC)
 		fg := aDecimal(f.GastosCRC)
 		f.EbitdaCRC = fi.Sub(fg).StringFixed(2)
-		f.SinDatos = f.Movimientos == 0
+		// Sin datos = ni un movimiento que CUENTE. Un mes cuya única importación fue la duplicada
+		// queda con movimientos pero sin plata: si eso pasara por confiable, la fila saldría verde
+		// al 100 % (pctClasificado da 100 con total cero) respaldando un cero que nada sostiene.
+		f.SinDatos = f.Movimientos-f.Excluidos == 0
 		f.Confiable = !f.SinDatos && esConfiable(f.PctClasificado)
 
 		ingresos = ingresos.Add(fi)
@@ -162,9 +165,15 @@ func avisoDelGrupo(r ResumenGrupo) string {
 
 	// Una empresa sin un solo movimiento en el período no es una empresa «mal clasificada»: es que
 	// no hay datos, y decir «0 %» haría pensar que alguien no clasificó. Va en su propia frase.
-	var vacias, flojas []string
+	//
+	// «Vacía» y «todo excluido» se separan a propósito. Las dos aportan cero, pero la acción que
+	// piden es opuesta: la vacía hay que cargarla; la excluida ya se corrigió y decirle «no tiene
+	// ningún movimiento» mandaría a re-importar justo el archivo duplicado que se acaba de revertir.
+	var vacias, todoExcluido, flojas []string
 	for _, f := range r.Empresas {
 		switch {
+		case f.SinDatos && f.Excluidos > 0:
+			todoExcluido = append(todoExcluido, f.Empresa)
 		case f.SinDatos:
 			vacias = append(vacias, f.Empresa)
 		case !f.Confiable:
@@ -180,9 +189,25 @@ func avisoDelGrupo(r ResumenGrupo) string {
 		partes = append(partes, fmt.Sprintf("%s no tiene%s ningún movimiento en el período, así que aporta%s cero al total",
 			enumerar(vacias), plural(len(vacias)), plural(len(vacias))))
 	}
+	if len(todoExcluido) > 0 {
+		partes = append(partes, fmt.Sprintf("en %s todo lo cargado en el período está excluido del cuadre, así que aporta%s cero: no hay nada que volver a importar",
+			enumerar(todoExcluido), plural(len(todoExcluido))))
+	}
 	if len(flojas) > 0 {
 		partes = append(partes, fmt.Sprintf("%s no llega%s al 90 %% clasificado, así que su aporte al total es parcial",
 			enumerar(flojas), plural(len(flojas))))
+	}
+
+	// El caso corriente: la empresa sigue teniendo datos buenos y además algo excluido. El número
+	// baja respecto del mes anterior y hay que decir por qué, o se lee como que la corrección falló.
+	var conExcluidos int
+	for _, f := range r.Empresas {
+		if f.Excluidos > 0 && !f.SinDatos {
+			conExcluidos++
+		}
+	}
+	if conExcluidos > 0 {
+		partes = append(partes, fmt.Sprintf("hay movimientos excluidos del cuadre en %d empresa(s): se cuentan pero no suman", conExcluidos))
 	}
 
 	if len(partes) == 0 {

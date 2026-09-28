@@ -3,6 +3,7 @@ package cxp
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 	"go.uber.org/zap"
@@ -76,6 +77,15 @@ type fakeRepo struct {
 	valesElegibles []string
 	valesTotal     decimal.Decimal
 	valeCreado     bool
+	// Comprobante: lo que el repo dice tener adjunto y lo que el service le mandó escribir en la
+	// bitácora. `envios` es la lista de filas registradas — la prueba de que un envío FALLIDO
+	// también deja constancia, que es justo lo que antes no pasaba.
+	compEnvio    ComprobanteEnvio
+	errCompEnvio error
+	envios       []RegistroEnvio
+	errRegistrar error
+	reenvio      bool
+	listaEnvios  []EnvioComprobante
 }
 
 func (f *fakeRepo) Crear(_ context.Context, _ string, p ProveedorInput) (Proveedor, error) {
@@ -376,11 +386,18 @@ func (f *fakeRepo) GuardarComprobante(context.Context, string, string, string, s
 func (f *fakeRepo) ObtenerComprobante(context.Context, string, string) (Comprobante, error) {
 	return Comprobante{}, nil
 }
+
+// Comprobante: envío y bitácora. Lo que el fake captura se usa en comprobante_envio_test.go —
+// ahí está el detalle de por qué cada campo importa.
 func (f *fakeRepo) ObtenerComprobanteEnvio(context.Context, string, string) (ComprobanteEnvio, error) {
-	return ComprobanteEnvio{}, nil
+	return f.compEnvio, f.errCompEnvio
 }
-func (f *fakeRepo) MarcarComprobanteEnviado(context.Context, string, string) error {
-	return nil
+func (f *fakeRepo) RegistrarEnvio(_ context.Context, _, _ string, reg RegistroEnvio) (bool, time.Time, error) {
+	f.envios = append(f.envios, reg)
+	return f.reenvio, time.Date(2026, 9, 17, 11, 4, 0, 0, time.UTC), f.errRegistrar
+}
+func (f *fakeRepo) ListarEnvios(context.Context, string, string) ([]EnvioComprobante, error) {
+	return f.listaEnvios, nil
 }
 
 // ── Recepción de facturas por buzón de correo (migración 0081) ──────────────

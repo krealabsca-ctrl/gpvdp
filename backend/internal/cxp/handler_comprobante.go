@@ -61,15 +61,41 @@ func (h *Handler) DescargarComprobante(c *gin.Context) {
 	c.Data(http.StatusOK, comp.Mime, comp.Contenido)
 }
 
-// EnviarComprobante POST /v1/cxp/documentos/:id/comprobante/enviar — envía el comprobante al proveedor.
+// EnviarComprobante POST /v1/cxp/documentos/:id/comprobante/enviar — envía el comprobante al
+// proveedor, con copia oculta al aprobador. Reenviar es esta misma llamada.
+//
+// La respuesta dice A QUIÉN se le mandó: sin eso la pantalla solo puede decir «listo», que es
+// justamente lo que no se puede auditar después.
 func (h *Handler) EnviarComprobante(c *gin.Context) {
 	empresaID, usuarioID, ok := ctxEmpresa(c)
 	if !ok {
 		return
 	}
-	if err := h.svc.EnviarComprobante(c.Request.Context(), empresaID, c.Param("id"), usuarioID); err != nil {
+	res, err := h.svc.EnviarComprobante(c.Request.Context(), empresaID, c.Param("id"), usuarioID)
+	if err != nil {
 		h.responderError(c, err, "enviar-comprobante")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	c.JSON(http.StatusOK, gin.H{
+		"ok": true, "destinatario": res.Destinatario, "copia": res.Copia,
+		"origen": res.Origen, "reenvio": res.Reenvio, "enviado_en": res.EnviadoEn,
+	})
+}
+
+// EnviosComprobante GET /v1/cxp/documentos/:id/comprobante/envios — la bitácora de ese documento.
+//
+// Lista vacía = nunca se intentó. No se hizo backfill de los documentos que ya figuraban como
+// enviados antes de la migración 0084: no se sabe a qué dirección se les mandó ni con qué archivo,
+// y una bitácora que inventa es peor que una que arranca vacía.
+func (h *Handler) EnviosComprobante(c *gin.Context) {
+	empresaID, _, ok := ctxEmpresa(c)
+	if !ok {
+		return
+	}
+	envios, err := h.svc.EnviosComprobante(c.Request.Context(), empresaID, c.Param("id"))
+	if err != nil {
+		h.responderError(c, err, "envios-comprobante")
+		return
+	}
+	c.JSON(http.StatusOK, envios)
 }

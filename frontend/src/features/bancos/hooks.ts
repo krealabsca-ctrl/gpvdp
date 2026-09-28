@@ -20,6 +20,7 @@ import {
   type CotizacionInput,
   type CuentaInput,
   type AgruparResumen,
+  type FiltrosImportaciones,
   type FiltrosMovimientos,
   type MetodoProyeccion,
   type ReglaClasificacionInput,
@@ -282,6 +283,22 @@ export function useMiSegmento(filtros: FiltrosMovimientos) {
   return useQuery({
     queryKey: queryKeys.bancos.miSegmento(empresaId, filtros),
     queryFn: () => bancosApi.miSegmento(filtros),
+    // Sin parpadeo al paginar o filtrar: todas las respuestas de esta pantalla son la misma lista
+    // —los créditos de la partida— con otro recorte, así que la anterior sirve de relleno.
+    placeholderData: (prev) => prev,
+    retry: false,
+  });
+}
+
+/**
+ * Los avisos que hizo el usuario («Mis avisos»). Mismo criterio que useMiSegmento: un rol sin
+ * alcance responde 200 con `sin_alcance`, así que un error acá es real y no se reintenta.
+ */
+export function useMisAvisos(page: number, pageSize: number) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.bancos.misAvisos(empresaId, page, pageSize),
+    queryFn: () => bancosApi.misAvisos(page, pageSize),
     placeholderData: (prev) => prev,
     retry: false,
   });
@@ -320,6 +337,8 @@ export function useReportarFaltante() {
       bancosApi.reportarFaltante(vars.fecha, vars.monto, vars.referencia, vars.motivo),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.bancos.reportesSegmentacionRaiz(empresaId) });
+      // «Mis avisos» cuelga de la raíz de su pantalla: el faltante recién enviado tiene que aparecer.
+      void qc.invalidateQueries({ queryKey: queryKeys.bancos.miSegmentoRaiz(empresaId) });
     },
   });
 }
@@ -509,7 +528,61 @@ export function useConfirmarImportacion() {
       void qc.invalidateQueries({ queryKey: queryKeys.bancos.movimientosRaiz(empresaId) });
       void qc.invalidateQueries({ queryKey: ["bancos", "cuadre", empresaId] });
       void qc.invalidateQueries({ queryKey: ["bancos", "dashboard", empresaId] });
+      // Y «Cargas hechas», que está en la misma pantalla: la carga recién confirmada tiene que
+      // aparecer ahí, que es donde se revierte si resultó ser la cuenta equivocada.
+      void qc.invalidateQueries({ queryKey: queryKeys.bancos.importacionesRaiz(empresaId) });
     },
+  });
+}
+
+// --- Cargas hechas y reversa de una carga (mig 0085) ---
+
+/** El historial de cargas. `placeholderData` para paginar y filtrar sin parpadeo. */
+export function useImportaciones(filtros: FiltrosImportaciones) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.bancos.importaciones(empresaId, filtros),
+    queryFn: () => bancosApi.importaciones(filtros),
+    placeholderData: (prev) => prev,
+  });
+}
+
+/**
+ * Revertir y deshacer mueven LA MISMA plata en sentidos opuestos, así que refrescan lo mismo.
+ *
+ * Sacar (o devolver) movimientos de los libros cambia el saldo de todas las pantallas que suman:
+ * la hoja de trabajo y su resumen, el cuadre, el tablero, la tesorería (saldo diario y checklist),
+ * la conciliación del mes, lo que falta clasificar y «Mi partida». Dejar cualquiera de esas con el
+ * número viejo hace creer que la corrección no se aplicó.
+ */
+function invalidarTrasReversa(qc: QueryClient, empresaId: string): void {
+  void qc.invalidateQueries({ queryKey: queryKeys.bancos.importacionesRaiz(empresaId) });
+  void qc.invalidateQueries({ queryKey: queryKeys.bancos.movimientosRaiz(empresaId) });
+  void qc.invalidateQueries({ queryKey: ["bancos", "cuadre", empresaId] });
+  void qc.invalidateQueries({ queryKey: ["bancos", "dashboard", empresaId] });
+  void qc.invalidateQueries({ queryKey: queryKeys.bancos.tesoreriaRaiz(empresaId) });
+  void qc.invalidateQueries({ queryKey: queryKeys.bancos.conciliacionRaiz(empresaId) });
+  void qc.invalidateQueries({ queryKey: queryKeys.bancos.resumenClasifRaiz(empresaId) });
+  void qc.invalidateQueries({ queryKey: queryKeys.bancos.miSegmentoRaiz(empresaId) });
+}
+
+export function useRevertirImportacion() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { importacionId: string; motivo: string }) =>
+      bancosApi.revertirImportacion(vars.importacionId, vars.motivo),
+    onSuccess: () => invalidarTrasReversa(qc, empresaId),
+  });
+}
+
+export function useDeshacerReversaImportacion() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { importacionId: string; motivo: string }) =>
+      bancosApi.deshacerReversaImportacion(vars.importacionId, vars.motivo),
+    onSuccess: () => invalidarTrasReversa(qc, empresaId),
   });
 }
 

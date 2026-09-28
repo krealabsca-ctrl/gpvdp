@@ -58,9 +58,12 @@ type Plantillero interface {
 	Armar(ctx context.Context, empresaID, clave string, valores map[string]string) (string, string, error)
 }
 
-// Correo envía un mensaje de texto.
+// Correo envía un mensaje de texto desde el buzón de la empresa.
+//
+// `empresaID` no es decorativo: es lo que hace que la boleta de un empleado de Coopeprofa salga
+// del correo de Coopeprofa y no del de Valle de Paz. Lo implementa *Mailer (ver mailer.go).
 type Correo interface {
-	Enviar(to, asunto, cuerpo string) error
+	Enviar(ctx context.Context, empresaID, to, asunto, cuerpo string) error
 }
 
 // SetNotificaciones conecta el armado de texto y el envío. Sin esto, los endpoints de envío
@@ -111,7 +114,7 @@ func (s *Service) EnviarBoletas(ctx context.Context, empresaID, corridaID, usuar
 		if err != nil {
 			return ResultadoEnvio{}, err
 		}
-		if err := s.correo.Enviar(para, asunto, cuerpo); err != nil {
+		if err := s.correo.Enviar(ctx, empresaID, para, asunto, cuerpo); err != nil {
 			s.log.Warn("no se pudo enviar la boleta",
 				zap.String("empleado", l.Nombre), zap.Error(err))
 			res.Fallidos = append(res.Fallidos, l.Nombre)
@@ -180,7 +183,10 @@ func (s *Service) EnviarAvisoVacaciones(ctx context.Context, empresaID, vacacion
 	if err != nil {
 		return err
 	}
-	if err := s.correo.Enviar(av.Email, asunto, cuerpo); err != nil {
+	if err := s.correo.Enviar(ctx, empresaID, av.Email, asunto, cuerpo); err != nil {
+		// Se envuelve con %w y no con %v: el error ya viene clasificado y sin el texto crudo del
+		// servidor, y la cadena tiene que sobrevivir para que el handler lo reconozca con errors.As
+		// y responda 422 con el motivo en vez de un 500 «error interno».
 		return fmt.Errorf("nomina: enviar aviso de vacaciones: %w", err)
 	}
 	s.audit.Registrar(ctx, shared.Evento{

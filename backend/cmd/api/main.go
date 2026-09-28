@@ -7,9 +7,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/gpvdp/erp/internal/auth"
 	"github.com/gpvdp/erp/internal/bancos"
 	"github.com/gpvdp/erp/internal/config"
+	"github.com/gpvdp/erp/internal/correo"
 	"github.com/gpvdp/erp/internal/cxc"
 	"github.com/gpvdp/erp/internal/cxp"
 	"github.com/gpvdp/erp/internal/database"
@@ -109,8 +112,40 @@ func run(migrateOnly bool) error {
 		logger.Info("BCCR sin credenciales; tipo de cambio 100% manual")
 	}
 	bancosH := bancos.NewHandler(bancosSvc, logger)
+
+	// ── Correo saliente POR EMPRESA (mig 0084) ──────────────────────────────────────────
+	//
+	// Antes el mailer se armaba UNA vez acá con las cuatro SMTP_* del proceso, así que las tres
+	// empresas le escribían a sus proveedores desde el mismo buzón. Ahora acá solo se arma el
+	// RESOLVER: el servidor y las credenciales se leen en cada envío, de la fila de esa empresa.
+	//
+	// El cifrador puede quedar en nil y el servidor ARRANCA IGUAL. Es deliberado: hay instalaciones
+	// corriendo sin CIFRADO_SECRET —el instalador conserva los .env que ya existen— y hacer fatal la
+	// variable convertiría una mejora del correo en la caída del ERP entero. El fallo se cobra donde
+	// se puede leer y arreglar: 422 nombrando la variable al guardar una contraseña, y 422 también
+	// al enviar por una empresa que ya tiene una guardada. Nunca se guarda en claro y nunca se cae
+	// en silencio al correo global.
+	cifrador, err := shared.NewCifrador(cfg.CifradoSecret)
+	if err != nil {
+		cifrador = nil
+		logger.Warn("correo por empresa deshabilitado: no se pudo construir el cifrador; "+
+			"el correo sigue saliendo por el SMTP global y guardar la contraseña de una empresa va a responder 422",
+			zap.Error(err))
+	}
+	smtpGlobal := shared.SMTP{
+		Host: hostDe(cfg.SMTPAddr), Puerto: puertoDe(cfg.SMTPAddr),
+		Seguridad: shared.SeguridadSTARTTLS, Usuario: cfg.SMTPUser,
+		Password: shared.Secreto(cfg.SMTPPass), Remitente: cfg.SMTPFrom,
+	}
+	if cfg.SMTPUser == "" {
+		// Sin credenciales es MailHog: exigirle STARTTLS lo haría fallar siempre.
+		smtpGlobal.Seguridad = shared.SeguridadNinguno
+	}
+	correoSvc := correo.NewService(correo.NewRepository(pool), audit, logger, cifrador, smtpGlobal, cfg.IsProduction())
+	correoH := correo.NewHandler(correoSvc, logger)
+
 	cxpSvc := cxp.NewService(cxp.NewRepository(pool), audit, logger)
-	cxpSvc.SetMailer(cxp.NewMailer(cfg.SMTPAddr, cfg.SMTPFrom, cfg.SMTPUser, cfg.SMTPPass, logger))
+	cxpSvc.SetMailer(cxp.NewMailer(correoSvc, smtpGlobal, logger))
 	cxpSvc.SetPermisos(rbacSvc) // scoping por área: sin cxp.ver_todo, el validador solo ve su departamento
 	// Siembra el set base de departamentos por empresa (idempotente, cada arranque).
 	if err := cxpSvc.EnsureDepartamentos(ctx); err != nil {
@@ -135,7 +170,9 @@ func run(migrateOnly bool) error {
 		logger.Error("nomina: no se pudieron sembrar los conceptos base (se continúa)", zap.Error(err))
 	}
 	// RRHH notifica boletas y vacaciones por correo (antes no enviaba nada).
-	nominaSvc.SetNotificaciones(plantillasSvc, shared.NewMailer(cfg.SMTPAddr, cfg.SMTPFrom, cfg.SMTPUser, cfg.SMTPPass, logger))
+	// Nómina manda por el MISMO resolver que CxP: la boleta de un empleado de Coopeprofa sale del
+	// buzón de Coopeprofa. Antes salía del correo global —en la práctica, el de Valle de Paz—.
+	nominaSvc.SetNotificaciones(plantillasSvc, nomina.NewMailer(correoSvc, smtpGlobal))
 	// ── Cuentas por cobrar. El scoping por sede se resuelve con la misma matriz RBAC.
 	cxcSvc := cxc.NewService(cxc.NewRepository(pool), audit, logger)
 	cxcSvc.SetPermisos(rbacSvc)
@@ -155,7 +192,7 @@ func run(migrateOnly bool) error {
 	// desde las membresías del usuario, así que no otorga acceso nuevo ni depende de ningún módulo.
 	grupoH := grupo.NewHandler(grupo.NewService(grupo.NewRepository(pool), logger), logger)
 
-	router := server.NewRouter(cfg, logger, authH, bancosH, cxpH, cxcH, nominaH, rbacH, plantillasH, inventarioH, grupoH, rbacSvc)
+	router := server.NewRouter(cfg, logger, authH, bancosH, cxpH, cxcH, nominaH, rbacH, plantillasH, correoH, inventarioH, grupoH, rbacSvc)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -218,6 +255,30 @@ func correrSchedulerBCCR(ctx context.Context, svc *bancos.Service, logger *zap.L
 			revisar()
 		}
 	}
+}
+
+// hostDe / puertoDe parten el `SMTP_ADDR` ("host:puerto") del correo global, que es la caída para
+// las empresas que todavía no configuraron el suyo. Un valor vacío o mal formado deja el host
+// vacío, y entonces `shared.SMTP.Configurado()` da false y el envío responde «falta configurar el
+// correo» en vez de intentar contra la nada.
+func hostDe(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return ""
+	}
+	return host
+}
+
+func puertoDe(addr string) int {
+	_, puerto, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(puerto)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // connectWithRetry espera a que PostgreSQL esté listo (útil con docker compose).

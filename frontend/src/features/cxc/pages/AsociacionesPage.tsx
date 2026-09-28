@@ -409,11 +409,30 @@ function PanelConciliacion({
                       {ficha.movimientos.map((m) => (
                         <TR key={m.id}>
                           <TD className="whitespace-nowrap text-xs">{formatFecha(m.fecha)}</TD>
-                          <TD className="max-w-[26rem] truncate text-xs">{m.descripcion || "—"}</TD>
+                          <TD className="max-w-[26rem] truncate text-xs">
+                            {m.descripcion || "—"}
+                            {!m.incluido && (
+                              // El vínculo sigue ahí (lo hizo una persona) pero el monto ya no suma.
+                              // Sin este cartel, «Depositado» baja y la fila se queda en pantalla sin
+                              // explicación: el operador vincularía otro crédito para cuadrarlo y
+                              // recrearía el duplicado que se acaba de corregir.
+                              <Badge tone="pendiente" className="ml-2">
+                                excluido del cuadre · no suma
+                              </Badge>
+                            )}
+                          </TD>
                           <TD className="text-xs text-content-muted">
                             {m.banco} · {m.cuenta}
                           </TD>
-                          <TD className="text-right font-medium tabular-nums">{formatMoneda(m.monto)}</TD>
+                          <TD
+                            className={
+                              m.incluido
+                                ? "text-right font-medium tabular-nums"
+                                : "text-right font-medium tabular-nums text-content-muted line-through"
+                            }
+                          >
+                            {formatMoneda(m.monto)}
+                          </TD>
                           {puedeConciliar && (
                             <TD className="text-right">
                               <Button

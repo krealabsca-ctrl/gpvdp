@@ -1,85 +1,97 @@
 package cxp
 
+// El envío de correo de CxP. Es una envoltura fina: resuelve CON QUÉ BUZÓN manda esta empresa y le
+// pasa el sobre al transporte compartido (internal/shared/smtp.go), que es el único lugar del
+// proyecto que habla SMTP.
+//
+// Lo que cambió con la migración 0084: antes este mailer guardaba el servidor y las credenciales
+// que se leyeron UNA vez en el arranque, así que las tres empresas mandaban desde el mismo buzón.
+// Ahora no guarda ninguna credencial: las pide en cada envío.
+
 import (
-	"bytes"
-	"encoding/base64"
-	"fmt"
-	"net/smtp"
-	"strings"
+	"context"
+	"errors"
 
 	"go.uber.org/zap"
+
+	"github.com/gpvdp/erp/internal/shared"
 )
 
-// Mailer envía correos por SMTP (en dev, MailHog en mailhog:1025, sin autenticación).
-type Mailer struct {
-	addr string
-	from string
-	user string
-	pass string
-	log  *zap.Logger
-}
-
-// NewMailer construye el mailer con la dirección SMTP (host:puerto), el remitente y las
-// credenciales.
+// ResolverSMTP devuelve el correo saliente de una empresa en el momento del envío, y de dónde
+// salió la configuración (EMPRESA o GLOBAL).
 //
-// `user` y `pass` vacíos = sin autenticación (MailHog). Contra un servidor real hacen falta: sin
-// ellas el envío falla, y así estuvo producción hasta el 9 de setiembre de 2026 —«error interno» al
-// mandarle el comprobante al proveedor, porque `SMTP_ADDR` seguía apuntando al MailHog de
-// desarrollo, que en el servidor no existe—.
-func NewMailer(addr, from, user, pass string, log *zap.Logger) *Mailer {
-	return &Mailer{addr: addr, from: from, user: user, pass: pass, log: log}
+// Es un puerto: lo satisface correo.Service. CxP no importa ese paquete para no acoplarse a él —y
+// para poder probar el envío sin base de datos—.
+type ResolverSMTP interface {
+	SMTPDe(ctx context.Context, empresaID string) (shared.SMTP, string, error)
 }
 
-// EnviarConAdjunto manda un correo multipart con un archivo adjunto (base64).
-func (m *Mailer) EnviarConAdjunto(to, asunto, cuerpo, filename, mime string, adjunto []byte) error {
-	if m == nil || m.addr == "" || m.from == "" {
-		// Centinela, no un error genérico: el handler lo traduce a un mensaje que dice qué falta.
-		// Antes esto salía como «error interno» y mandaba a revisar el sistema por una variable
-		// de entorno sin poner.
+// EnviadorComprobante es el puerto que usa el servicio para mandar el correo. Lo implementa
+// *Mailer; en los tests se sustituye por un doble que falla a pedido.
+type EnviadorComprobante interface {
+	// EnviarConAdjunto manda el sobre resolviendo el buzón de esa empresa. Devuelve el origen y el
+	// remitente SIEMPRE que se hayan podido resolver, incluso si después el envío falló: la
+	// bitácora tiene que poder decir contra qué se intentó.
+	EnviarConAdjunto(ctx context.Context, empresaID string, sobre shared.Sobre) (origen, remitente string, err error)
+}
+
+// Mailer manda los correos de CxP.
+type Mailer struct {
+	resolver ResolverSMTP
+	// global es la caída cuando no hay resolver conectado (o el resolver no resuelve nada).
+	global shared.SMTP
+	log    *zap.Logger
+}
+
+// NewMailer construye el mailer. `resolver` puede ser nil: sin él se manda por el correo global,
+// que es exactamente lo que hacía el sistema antes de la migración 0084.
+func NewMailer(resolver ResolverSMTP, global shared.SMTP, log *zap.Logger) *Mailer {
+	return &Mailer{resolver: resolver, global: global, log: log}
+}
+
+// EnviarConAdjunto resuelve el buzón de la empresa y manda el correo.
+func (m *Mailer) EnviarConAdjunto(ctx context.Context, empresaID string, sobre shared.Sobre) (string, string, error) {
+	if m == nil {
+		return "", "", ErrCorreoNoConfigurado
+	}
+	cfg := m.global
+	origen := "GLOBAL"
+	if m.resolver != nil {
+		resuelto, org, err := m.resolver.SMTPDe(ctx, empresaID)
+		origen = org
+		if err != nil {
+			return origen, "", traducirCorreo(err)
+		}
+		cfg = resuelto
+	}
+	if !cfg.Configurado() {
+		return origen, "", ErrCorreoNoConfigurado
+	}
+	if err := shared.Enviar(ctx, cfg, sobre); err != nil {
+		// El error del transporte viaja TAL CUAL (es un *shared.ErrorSMTP ya clasificado y sin el
+		// texto crudo del servidor): el handler lo traduce a 422 y el service lo guarda en la
+		// bitácora con su categoría. Envolverlo con fmt.Errorf acá rompería el errors.As de los dos.
+		return origen, cfg.Remitente, err
+	}
+	return origen, cfg.Remitente, nil
+}
+
+// traducirCorreo pasa los fallos de la resolución al vocabulario de CxP.
+//
+// Sin esta traducción, un «falta CIFRADO_SECRET» llega al switch de responderError, que no lo
+// reconoce, y sale como 500 «error interno»: el usuario no puede distinguir «falta una variable en
+// el servidor» de «el sistema se cayó», así que reintenta lo mismo. Es la misma clase de defecto
+// con la que este proyecto ya se quemó varias veces.
+func traducirCorreo(err error) error {
+	switch {
+	case errors.Is(err, shared.ErrSMTPNoConfigurado):
 		return ErrCorreoNoConfigurado
+	case errors.Is(err, shared.ErrClaveAusente), errors.Is(err, shared.ErrClaveCorta),
+		errors.Is(err, shared.ErrClaveDebil):
+		return ErrCifradoNoDisponible
+	case errors.Is(err, shared.ErrNoDescifra), errors.Is(err, shared.ErrFormato):
+		return ErrSecretoCorreoIlegible
+	default:
+		return err
 	}
-	const boundary = "GPVDPB0UNDARY7f3a"
-	var b bytes.Buffer
-	fmt.Fprintf(&b, "From: %s\r\n", m.from)
-	fmt.Fprintf(&b, "To: %s\r\n", to)
-	fmt.Fprintf(&b, "Subject: %s\r\n", asunto)
-	b.WriteString("MIME-Version: 1.0\r\n")
-	fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=%s\r\n\r\n", boundary)
-
-	fmt.Fprintf(&b, "--%s\r\n", boundary)
-	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
-	b.WriteString(cuerpo)
-	b.WriteString("\r\n")
-
-	fmt.Fprintf(&b, "--%s\r\n", boundary)
-	fmt.Fprintf(&b, "Content-Type: %s\r\n", mime)
-	b.WriteString("Content-Transfer-Encoding: base64\r\n")
-	fmt.Fprintf(&b, "Content-Disposition: attachment; filename=%q\r\n\r\n", filename)
-	enc := base64.StdEncoding.EncodeToString(adjunto)
-	for i := 0; i < len(enc); i += 76 {
-		end := i + 76
-		if end > len(enc) {
-			end = len(enc)
-		}
-		b.WriteString(enc[i:end])
-		b.WriteString("\r\n")
-	}
-	fmt.Fprintf(&b, "--%s--\r\n", boundary)
-
-	// Con credenciales se autentica (STARTTLS lo negocia `SendMail`); sin ellas va sin auth, que es
-	// el modo de MailHog. El puerto soportado es el 587; el 465 exige TLS implícito.
-	var auth smtp.Auth
-	if m.user != "" {
-		host := m.addr
-		if i := strings.LastIndex(host, ":"); i > 0 {
-			host = host[:i]
-		}
-		auth = smtp.PlainAuth("", m.user, m.pass, host)
-	}
-	if err := smtp.SendMail(m.addr, auth, m.from, []string{to}, b.Bytes()); err != nil {
-		// Envuelto con el destino y el servidor: el error crudo del paquete `smtp` no dice a quién
-		// ni por dónde se intentó, y sin eso el diagnóstico es adivinar.
-		return fmt.Errorf("cxp: enviar comprobante a %s por %s: %w", to, m.addr, err)
-	}
-	return nil
 }

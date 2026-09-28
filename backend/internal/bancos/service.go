@@ -132,6 +132,23 @@ type Repository interface {
 	ConfirmarConMovimientos(ctx context.Context, empresaID, cuentaID, importacionID, moneda string, movs []MovimientoParaInsertar) (int, error)
 	SetCuentaIBANSiVacio(ctx context.Context, empresaID, cuentaID, iban string) error
 
+	// Revertir una CARGA entera (mig 0085). La unidad es la importación, no la fecha: es la única
+	// forma de sacar de los libros lo que se cargó mal el 21 sin tocar lo que quedó bien el 20.
+	// `EstadoDeReversa` devuelve ErrImportacionNoEncontrada para una carga de otra empresa.
+	// Cargar HISTÓRICO (mig 0087): un archivo con VARIAS cuentas y VARIOS meses que crea los
+	// movimientos con su partida puesta. `ConfirmarCargaHistorica` escribe una importación POR
+	// CUENTA en UNA transacción, así cada cuenta se puede revertir sola.
+	CuentasHistorico(ctx context.Context, empresaID string) ([]CuentaHistorica, error)
+	CrearCargaHistorica(ctx context.Context, empresaID, nombre, hash string, archivo []byte, usuarioID string) (string, error)
+	CargaHistorica(ctx context.Context, empresaID, cargaID string) (CargaHistoricaRow, error)
+	BloqueosDeCargaHistorica(ctx context.Context, empresaID string, cuentas []string, anios, meses []int) (periodosCerrados, actasFirmadas []string, err error)
+	ConfirmarCargaHistorica(ctx context.Context, empresaID, cargaID, nombreArchivo, hash, usuarioID string, lotes []LoteHistoricoCuenta) ([]ResultadoLoteHistorico, error)
+
+	ListarImportaciones(ctx context.Context, empresaID string, f FiltrosImportaciones) (ListaImportaciones, error)
+	EstadoDeReversa(ctx context.Context, empresaID, importacionID string) (EstadoDeReversa, error)
+	RevertirImportacion(ctx context.Context, empresaID, importacionID, usuarioID, motivo string) (CambioDeReversa, error)
+	DeshacerReversaImportacion(ctx context.Context, empresaID, importacionID string) (CambioDeReversa, error)
+
 	// Administración de bancos y cuentas (catálogo)
 	ListarBancos(ctx context.Context, empresaID string, incluirInactivos bool) ([]BancoItem, error)
 	CrearBanco(ctx context.Context, empresaID, nombre string) (BancoItem, error)
@@ -191,13 +208,22 @@ type Repository interface {
 	MovimientoEnAlcance(ctx context.Context, empresaID, movID string, alcance []string) (bool, error)
 	CrearReporteSegmentacion(ctx context.Context, empresaID, movID, usuarioID, motivo string) (string, error)
 	// Buscar y avisar de un movimiento que NO aparece (mig 0078). `BuscarPorFechaYMonto` devuelve
-	// los del alcance completos y solo CUENTA los de afuera: la existencia es todo lo que divulga.
-	BuscarPorFechaYMonto(ctx context.Context, empresaID, fecha string, monto decimal.Decimal, alcance []string) ([]MovimientoRow, int, error)
+	// completos los de la partida (lo que el usuario ya ve) y solo CUENTA los demás: la existencia es
+	// todo lo que divulga.
+	BuscarPorFechaYMonto(ctx context.Context, empresaID, fecha string, monto decimal.Decimal, alcance []string) (mios []MovimientoRow, fuera int, err error)
 	EngancharFaltante(ctx context.Context, empresaID, fecha string, monto decimal.Decimal) (string, error)
 	CrearReporteFaltante(ctx context.Context, empresaID, usuarioID, fecha string, monto decimal.Decimal, referencia, motivo, movimientoID string) (string, error)
 	ListarReportesSegmentacion(ctx context.Context, empresaID string, soloPendientes bool) ([]ReporteSegmentacion, error)
 	ResolverReporteSegmentacion(ctx context.Context, empresaID, reporteID, usuarioID, resolucion, respuesta string) error
-	ReportesDeMovimientos(ctx context.Context, empresaID string, movIDs []string) (map[string]string, error)
+	// El aviso abierto de cada movimiento; el motivo solo si es de `usuarioID` y no es un faltante.
+	ReportesDeMovimientos(ctx context.Context, empresaID, usuarioID string, movIDs []string) (map[string]AvisoAbiertoDeFila, error)
+	// «Mi partida» después del 22-set-2026: la respuesta de un aviso resuelto en la fila (solo los de
+	// `usuarioID`, sin faltantes), los avisos del propio usuario aunque el movimiento ya no esté en su
+	// alcance, y hasta cuándo está cargada cada cuenta del segmento (la más atrasada es el «cargado
+	// hasta»).
+	AvisosResueltosDeMovimientos(ctx context.Context, empresaID, usuarioID string, movIDs []string) (map[string]AvisoResuelto, error)
+	MisAvisos(ctx context.Context, empresaID, usuarioID string, page, pageSize int) (ListaMisAvisos, error)
+	CargaDeCuentasDelSegmento(ctx context.Context, empresaID string, alcance []string) ([]CuentaCargadaHasta, error)
 	// CambiarNaturaleza declara si el concepto es INGRESO, GASTO o NEUTRO y devuelve el valor viejo.
 	CambiarNaturaleza(ctx context.Context, empresaID, conceptoID, naturaleza string) (anterior string, err error)
 	EliminarConcepto(ctx context.Context, empresaID, conceptoID string) error
@@ -408,6 +434,18 @@ func (s *Service) PreviewExistente(ctx context.Context, empresaID, importacionID
 
 // Confirmar persiste los movimientos no excluidos y no reimportados; marca la importación confirmada.
 func (s *Service) Confirmar(ctx context.Context, empresaID, importacionID string, excluir []string, usuarioID string) (int, error) {
+	// Una carga REVERTIDA no se vuelve a confirmar: el UPDATE de estado chocaría contra el CHECK de
+	// coherencia de la reversa (mig 0085) y el usuario vería un 500. Se avisa antes, y con el
+	// camino correcto escrito.
+	//
+	// El error de esta consulta se IGNORA a propósito: si la carga no existe o es de otra empresa,
+	// el `ImportacionArchivo` de la línea siguiente ya devuelve el 404 de siempre, y este freno no
+	// tiene por qué cambiarle el modo de falla a nada que ya funcionaba.
+	if est, err := s.repo.EstadoDeReversa(ctx, empresaID, importacionID); err == nil &&
+		est.Estado == EstadoImportacionRevertida {
+		return 0, ErrImportacionRevertidaNoSeConfirma
+	}
+
 	cuentaID, archivo, err := s.repo.ImportacionArchivo(ctx, empresaID, importacionID)
 	if err != nil {
 		return 0, err

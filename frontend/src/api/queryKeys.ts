@@ -44,9 +44,24 @@ export const queryKeys = {
     // marcar quién consulta una partida es editar el catálogo, y así una invalidación del catálogo
     // refresca las dos cosas sin tener que acordarse.
     alcanceConsulta: (empresaId: string) => ["bancos", "catalogo-consulta", empresaId] as const,
+    /**
+     * La familia de «Mi partida» lleva la empresa SEGUNDA (`["bancos", empresaId, "mi-segmento", …]`,
+     * la regla del proyecto): así `raiz` la invalida por prefijo, y `miSegmentoRaiz` sigue siendo
+     * prefijo de la vista y de «Mis avisos». Se movieron las tres juntas a propósito: si solo
+     * «Mis avisos» cambiara de orden, dejaría de colgar de `miSegmentoRaiz` y avisar ya no la
+     * refrescaría.
+     *
+     * `filtros` lleva la vista, la página y el tamaño: cada combinación es otra consulta.
+     */
     miSegmento: (empresaId: string, filtros?: unknown) =>
-      ["bancos", "mi-segmento", empresaId, filtros ?? null] as const,
-    miSegmentoRaiz: (empresaId: string) => ["bancos", "mi-segmento", empresaId] as const,
+      ["bancos", empresaId, "mi-segmento", filtros ?? null] as const,
+    /**
+     * «Mis avisos» cuelga de la MISMA raíz a propósito: avisar (o que resuelvan un aviso) ya
+     * invalida `miSegmentoRaiz`, y así la lista de avisos se refresca junto con la fila.
+     */
+    misAvisos: (empresaId: string, page: number, pageSize: number) =>
+      ["bancos", empresaId, "mi-segmento", "mis-avisos", page, pageSize] as const,
+    miSegmentoRaiz: (empresaId: string) => ["bancos", empresaId, "mi-segmento"] as const,
     reportesSegmentacion: (empresaId: string, soloPendientes: boolean) =>
       ["bancos", "reportes-segmentacion", empresaId, soloPendientes] as const,
     reportesSegmentacionRaiz: (empresaId: string) =>
@@ -147,6 +162,16 @@ export const queryKeys = {
     preview: (empresaId: string, importacionId: string) =>
       ["bancos", "preview", empresaId, importacionId] as const,
 
+    /**
+     * «Cargas hechas» (mig 0085). La empresa va SEGUNDA, como en «Mi partida»: así
+     * `importacionesRaiz` invalida el listado con CUALQUIER filtro y página por coincidencia de
+     * prefijo, que es lo que hace falta después de revertir o de deshacer —la fila cambia de estado
+     * y el botón cambia de sentido, y dejarla con el estado viejo invita a apretar dos veces—.
+     */
+    importaciones: (empresaId: string, filtros?: unknown) =>
+      ["bancos", empresaId, "importaciones", filtros ?? null] as const,
+    importacionesRaiz: (empresaId: string) => ["bancos", empresaId, "importaciones"] as const,
+
     // Fase D
     parametros: (empresaId: string) => ["bancos", "parametros", empresaId] as const,
     ultimoSync: (empresaId: string) => ["bancos", "ultimo-sync", empresaId] as const,
@@ -214,6 +239,14 @@ export const queryKeys = {
     documentosRaiz: (empresaId: string) => ["cxp", "documentos", empresaId] as const,
     documento: (empresaId: string, id: string) =>
       ["cxp", "documento", empresaId, id] as const,
+    /**
+     * Bitácora de envíos del comprobante (mig 0084). Cuelga del prefijo del DOCUMENTO a propósito:
+     * adjuntar, reemplazar o enviar ya invalidan `documento`, y con esta clave debajo la bitácora
+     * se refresca sola. Sin eso, después de un envío fallido la pantalla seguiría mostrando la
+     * lista vieja —sin la fila del error, que es justo la que hay que leer—.
+     */
+    enviosComprobante: (empresaId: string, id: string) =>
+      ["cxp", "documento", empresaId, id, "comprobante-envios"] as const,
     historial: (empresaId: string, id: string) =>
       ["cxp", "historial", empresaId, id] as const,
     /** El período va en la clave: cambiar el selector global refetchea el tablero. */
@@ -262,6 +295,18 @@ export const queryKeys = {
     planDelMes: (empresaId: string, periodo: string) =>
       ["cxp", "responsabilidades-plan", empresaId, periodo] as const,
     planDelMesRaiz: (empresaId: string) => ["cxp", "responsabilidades-plan", empresaId] as const,
+  },
+
+  /**
+   * Configuración administrativa de la empresa (módulo Configuración).
+   *
+   * La empresa va SEGUNDA: `configRaiz` invalida por prefijo todo lo del módulo, que es lo que hace
+   * falta cuando una pantalla de acá cambia algo que otra muestra.
+   */
+  config: {
+    raiz: (empresaId: string) => ["config", empresaId] as const,
+    /** Desde qué buzón manda esta empresa (mig 0084). */
+    correoSaliente: (empresaId: string) => ["config", empresaId, "correo-saliente"] as const,
   },
 
   // Nivel empresa — módulo RRHH / Nómina (Fase 3).

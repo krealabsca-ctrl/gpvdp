@@ -34,6 +34,7 @@ import {
   PhoneCall,
   PiggyBank,
   Receipt,
+  Send,
   Settings,
   ShieldCheck,
   SlidersHorizontal,
@@ -282,6 +283,17 @@ export const MODULES: NavModule[] = [
         to: "/notificaciones",
         icon: Mail,
         permiso: "admin.plantillas",
+      },
+      // El SOBRE, no la carta: desde qué buzón sale el correo de esta empresa. Va pegado a
+      // Notificaciones porque es la otra mitad de lo mismo, pero con permiso propio y mucho más
+      // angosto (`admin.correo`, hoy solo Dirección Financiera): acá se guarda una CREDENCIAL del
+      // correo corporativo, mientras que en Notificaciones se edita texto.
+      {
+        label: "Correo saliente",
+        descripcion: "Desde qué buzón manda esta empresa",
+        to: "/correo-saliente",
+        icon: Send,
+        permiso: "admin.correo",
       },
     ],
   },

@@ -129,8 +129,35 @@ con los movimientos bancarios reales) y cualquier `.env`.
 2. **Crear un usuario por persona** en Configuración → Usuarios. No compartir la cuenta de
    administrador: si todos usan la misma, se pierde el rastro de quién hizo qué.
 3. **Guardar una copia de `.env`** en un gestor de contraseñas. Si se pierde `JWT_SECRET`, todos
-   tienen que volver a ingresar; si se pierde `POSTGRES_PASSWORD`, el sistema no puede abrir la base.
+   tienen que volver a ingresar; si se pierde `POSTGRES_PASSWORD`, el sistema no puede abrir la base;
+   si se pierde **`CIFRADO_SECRET`**, las contraseñas de los buzones de correo son **irrecuperables**
+   (ver abajo).
 4. **Probar una restauración.** Un respaldo que nunca se restauró no se sabe si sirve. Ver abajo.
+
+---
+
+## El correo de cada empresa, y la clave que lo protege
+
+Cada empresa manda sus correos —el comprobante de pago al proveedor, las boletas de RRHH— **desde su
+propio buzón**. Eso se configura en la pantalla **Configuración → Correo saliente**, una vez por
+empresa: servidor, puerto, remitente y la contraseña del buzón. Antes había un solo buzón para todo
+el grupo, así que Coopeprofa le escribía a sus proveedores desde el correo de Valle de Paz.
+
+**La contraseña del buzón se guarda cifrada.** La clave con la que se cifra es `CIFRADO_SECRET`, y
+vive en el `.env` del servidor, **no** en la base de datos. Eso es a propósito: si alguien se lleva
+un respaldo de Postgres, se lleva texto inútil.
+
+De ahí salen tres consecuencias que conviene saber **antes** de que pasen:
+
+| Qué pasa | Qué se rompe | Cómo se arregla |
+|---|---|---|
+| **Se pierde `CIFRADO_SECRET`** (servidor reinstalado sin copia del `.env`) | Las contraseñas guardadas son **irrecuperables**. No hay puerta de atrás. | Pedirle a cada empresa su contraseña de aplicación y escribirla de nuevo en la pantalla. |
+| **Se cambia `CIFRADO_SECRET`** sin volver a escribir las contraseñas | Cada empresa que tenga contraseña guardada responde «no se puede descifrar» al enviar. **No manda nada por el buzón equivocado**: falla a la vista. | Escribir de nuevo la contraseña de cada empresa. |
+| **Falta `CIFRADO_SECRET`** (servidor instalado antes de esta versión) | El sistema **arranca y funciona igual**; el correo sigue saliendo por la configuración global. Lo único que no se puede es *guardar* la contraseña de una empresa: la pantalla lo dice nombrando la variable. | Volver a correr `instalar-vps.sh`: detecta que falta y la agrega sin tocar ningún otro secreto. Después, `docker compose ... up -d` para que el backend la lea. |
+
+> **Al actualizar un servidor ya instalado:** correr el instalador otra vez es el paso que agrega
+> `CIFRADO_SECRET`. El resto del `.env` se conserva intacto —no se rota ningún secreto—, pero sin ese
+> paso la pantalla de Correo saliente no va a poder guardar nada.
 
 ---
 

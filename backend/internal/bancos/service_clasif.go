@@ -74,31 +74,58 @@ type Totales struct {
 	SinTipoCambio int `json:"sin_tipo_cambio"`
 	// MontoSinConvertir es ese monto en su moneda original (no se puede sumar al total).
 	MontoSinConvertir string `json:"monto_sin_convertir"`
+	// Excluidos: cuántos movimientos del filtro están marcados `incluido = false` (un duplicado
+	// que alguien corrigió). Siguen contados en `Total` y siguen en la lista —esconderlos le
+	// quitaría a quien corrigió la forma de verificar qué marcó—, pero NO suman en los totales.
+	// Este número es lo que hace legible esa diferencia.
+	Excluidos int `json:"excluidos"`
 }
 
 // MovimientoRow es una fila de la hoja de trabajo.
 type MovimientoRow struct {
-	ID              string  `json:"id"`
-	Fecha           string  `json:"fecha"`
-	Documento       string  `json:"documento"`
-	Descripcion     string  `json:"descripcion"`
-	Banco           string  `json:"banco"`
-	Cuenta          string  `json:"cuenta"`
-	Debito          string  `json:"debito"`
-	Credito         string  `json:"credito"`
-	Moneda          string  `json:"moneda"`
-	MontoCRC        string  `json:"monto_crc"`
-	ConceptoID      *string `json:"concepto_id"`
-	Concepto        string  `json:"concepto"`
-	ClasificacionID *string `json:"clasificacion_id"`
-	Clasificacion   string  `json:"clasificacion"`
-	Estado          string  `json:"estado_clasificacion"`
-	Confianza       *string `json:"confianza"`
-	EsTraslado      bool    `json:"es_traslado"`
-	// ReporteAbierto: el motivo del aviso «está mal segmentado» que ya está sin resolver para este
-	// movimiento (vacío = ninguno). Lo llena solo la consulta por segmento (mig 0077); la hoja de
-	// trabajo no lo pide y no paga el costo de buscarlo.
+	ID          string `json:"id"`
+	Fecha       string `json:"fecha"`
+	Documento   string `json:"documento"`
+	Descripcion string `json:"descripcion"`
+	// ConsecutivoLargo es la referencia larga que Davivienda esconde DENTRO de la descripción
+	// (la del SINPE). No es una columna de la base: se DERIVA con la misma función que usa el
+	// exportador (ver ConsecutivoLargo en export.go), para que el número que el equipo cruza
+	// contra su recibo sea el mismo en el .xlsx y en la pantalla.
+	//
+	// Viene VACÍO en todo lo que no es Davivienda —BN, BAC, BCR, Banco Popular, Promerica no
+	// publican esa referencia—, así que la pantalla que lo muestre tiene que explicar el blanco
+	// en vez de dejarlo parecer una falla.
+	ConsecutivoLargo string  `json:"consecutivo_largo"`
+	Banco            string  `json:"banco"`
+	Cuenta           string  `json:"cuenta"`
+	Debito           string  `json:"debito"`
+	Credito          string  `json:"credito"`
+	Moneda           string  `json:"moneda"`
+	MontoCRC         string  `json:"monto_crc"`
+	ConceptoID       *string `json:"concepto_id"`
+	Concepto         string  `json:"concepto"`
+	ClasificacionID  *string `json:"clasificacion_id"`
+	Clasificacion    string  `json:"clasificacion"`
+	Estado           string  `json:"estado_clasificacion"`
+	Confianza        *string `json:"confianza"`
+	EsTraslado       bool    `json:"es_traslado"`
+	// Incluido = false: el movimiento está excluido (p. ej. el mismo estado de cuenta importado
+	// en dos cuentas y corregido después). La fila se sigue mostrando —una fila que se evapora no
+	// explica por qué bajó un total—, pero NO suma. Sin `omitempty` a propósito: `false` es
+	// justamente el valor que la pantalla tiene que pintar.
+	Incluido bool `json:"incluido"`
+	// ReporteAbierto: no vacío = este movimiento tiene un aviso sin resolver (vacío = ninguno). Lo
+	// llena solo la consulta por segmento (mig 0077); la hoja de trabajo no lo pide y no paga el costo
+	// de buscarlo. Lleva el MOTIVO solo si el aviso es de quien pregunta y no es un faltante; si no,
+	// TextoAvisoAbiertoDeOtro (ver AvisoAbiertoDeFila).
 	ReporteAbierto string `json:"reporte_abierto,omitempty"`
+	// ReporteAbiertoPropio distingue los dos casos de ReporteAbierto sin texto mágico: true = es el
+	// motivo que escribió quien pregunta; false = es el texto genérico. Nil (ausente) sin aviso abierto.
+	ReporteAbiertoPropio *bool `json:"reporte_abierto_propio,omitempty"`
+	// AvisoResuelto: el último aviso RESUELTO del movimiento hecho por QUIEN PREGUNTA (no faltante),
+	// con su respuesta y cuándo. Solo viene cuando NO hay uno abierto (el abierto es lo vigente). Lo
+	// llena solo la consulta por segmento.
+	AvisoResuelto *AvisoResuelto `json:"aviso_resuelto,omitempty"`
 }
 
 // ListaMovimientos es la respuesta paginada con totales.

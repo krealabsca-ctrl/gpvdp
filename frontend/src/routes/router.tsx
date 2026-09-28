@@ -22,6 +22,7 @@ import { AjustesPage } from "@/features/bancos/pages/AjustesPage";
 import { SeguridadPage } from "@/features/bancos/pages/SeguridadPage";
 import { UsuariosPage } from "@/features/bancos/pages/UsuariosPage";
 import { NotificacionesPage } from "@/features/config/pages/NotificacionesPage";
+import { CorreoSalientePage } from "@/features/config/pages/CorreoSalientePage";
 import { ChangePasswordPage } from "@/features/auth/ChangePasswordPage";
 // Módulo CxP (Fase 2) — la Bandeja es la superficie de trabajo única.
 import { BandejaPage } from "@/features/cxp/pages/BandejaPage";
@@ -119,6 +120,7 @@ export const router = createBrowserRouter([
           { path: "seguridad", element: <SeguridadPage /> },
           { path: "usuarios", element: <UsuariosPage /> },
           { path: "notificaciones", element: <NotificacionesPage /> },
+          { path: "correo-saliente", element: <CorreoSalientePage /> },
           // Módulo CxP (Fase 2) — Bandeja única + páginas de apoyo.
           { path: "cxp/bandeja", element: <BandejaPage /> },
           { path: "cxp/dashboard", element: <DashboardCxpPage /> },

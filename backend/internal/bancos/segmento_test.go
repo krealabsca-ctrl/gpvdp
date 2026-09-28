@@ -27,7 +27,7 @@ func TestMiSegmentoSinAlcanceNoDevuelveNada(t *testing.T) {
 	}
 	svc := servicioSegmento(repo)
 
-	res, err := svc.MiSegmento(context.Background(), "emp-1", "usr-1", FiltrosMovimientos{})
+	res, err := svc.MiSegmento(context.Background(), "emp-1", "usr-1", VistaPartida, FiltrosMovimientos{})
 
 	if !errors.Is(err, ErrSinAlcance) {
 		t.Fatalf("esperaba ErrSinAlcance, obtuve %v", err)
@@ -46,7 +46,7 @@ func TestMiSegmentoFuerzaAlcanceYSoloCreditos(t *testing.T) {
 	svc := servicioSegmento(repo)
 
 	// El cliente intenta mirar otra partida y también los débitos.
-	_, err := svc.MiSegmento(context.Background(), "emp-1", "usr-1", FiltrosMovimientos{
+	_, err := svc.MiSegmento(context.Background(), "emp-1", "usr-1", VistaPartida, FiltrosMovimientos{
 		ClasificacionIDs: []string{"clasif-ajena"},
 		Tipo:             "DEBITO",
 	})
@@ -74,19 +74,67 @@ func TestMiSegmentoMarcaLosYaReportados(t *testing.T) {
 		listaMovs: ListaMovimientos{Items: []MovimientoRow{
 			{ID: "mov-1"}, {ID: "mov-2"},
 		}},
-		reportesAbiertos: map[string]string{"mov-2": "esto es de Emergencias"},
+		reportesAbiertos: map[string]AvisoAbiertoDeFila{"mov-2": {Propio: true, Motivo: "esto es de Emergencias"}},
 	}
 	svc := servicioSegmento(repo)
 
-	res, err := svc.MiSegmento(context.Background(), "emp-1", "usr-1", FiltrosMovimientos{})
+	res, err := svc.MiSegmento(context.Background(), "emp-1", "usr-1", VistaPartida, FiltrosMovimientos{})
 	if err != nil {
 		t.Fatalf("no esperaba error: %v", err)
 	}
-	if res.Movimientos.Items[0].ReporteAbierto != "" {
+	if res.Movimientos.Items[0].ReporteAbierto != "" || res.Movimientos.Items[0].ReporteAbiertoPropio != nil {
 		t.Fatal("mov-1 no está reportado")
 	}
 	if res.Movimientos.Items[1].ReporteAbierto != "esto es de Emergencias" {
 		t.Fatalf("mov-2 debía traer el motivo del aviso, trajo %q", res.Movimientos.Items[1].ReporteAbierto)
+	}
+	// El recorte del motivo depende de QUIÉN pregunta: el usuario tiene que llegar al repositorio.
+	if repo.avisosPedidosPor != "usr-1" || repo.resueltosPedidosPor != "usr-1" {
+		t.Fatalf("los avisos se pidieron por %q / %q, se esperaba el usuario del token",
+			repo.avisosPedidosPor, repo.resueltosPedidosPor)
+	}
+}
+
+// La página que pide la pantalla llega tal cual al repositorio, y el TOTAL del conjunto vuelve
+// intacto aunque la página traiga una sola fila. Es lo que le permite a la pantalla decir «1-50 de
+// 2.108» en vez de mostrar 200 filas y callarse las otras 1.908.
+func TestMiSegmentoPaginaSinPerderElTotal(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{
+		alcance: []string{"clasif-1"},
+		listaMovs: ListaMovimientos{
+			Items: []MovimientoRow{{
+				ID: "mov-1", Documento: "81364960", Clasificacion: "Deposito de Clientes",
+			}},
+			Total: 2108, Page: 3, PageSize: 50,
+		},
+	}
+	svc := servicioSegmento(repo)
+
+	res, err := svc.MiSegmento(context.Background(), "emp-1", "usr-1", VistaPartida,
+		FiltrosMovimientos{Page: 3, PageSize: 50})
+	if err != nil {
+		t.Fatalf("no esperaba error: %v", err)
+	}
+	if repo.filtroMovs.Page != 3 || repo.filtroMovs.PageSize != 50 {
+		t.Fatalf("la página pedida no llegó al repositorio: page=%d page_size=%d",
+			repo.filtroMovs.Page, repo.filtroMovs.PageSize)
+	}
+	if res.Movimientos.Total != 2108 {
+		t.Fatalf("total = %d, se esperaban 2108: el total mide el conjunto, no la página",
+			res.Movimientos.Total)
+	}
+	if res.Movimientos.Page != 3 || res.Movimientos.PageSize != 50 {
+		t.Fatalf("la respuesta no repite la página: page=%d page_size=%d",
+			res.Movimientos.Page, res.Movimientos.PageSize)
+	}
+	// Las dos columnas que la pantalla tiene que pintar: la referencia bancaria y el segmento
+	// contra el que quedó marcado el movimiento.
+	if res.Movimientos.Items[0].Documento != "81364960" {
+		t.Errorf("la referencia bancaria no llegó a la fila: %q", res.Movimientos.Items[0].Documento)
+	}
+	if res.Movimientos.Items[0].Clasificacion != "Deposito de Clientes" {
+		t.Errorf("el segmento no llegó a la fila: %q", res.Movimientos.Items[0].Clasificacion)
 	}
 }
 
@@ -311,7 +359,14 @@ func TestBuscarFaltanteInexistenteDiceHastaCuandoEstaCargado(t *testing.T) {
 	t.Parallel()
 	// Sin esa fecha, «no hay ninguno» no distingue «no entró» de «no lo han importado», que es la
 	// mitad de la pregunta que la pantalla existe para contestar.
-	repo := &fakeRepo{alcance: []string{"clasif-1"}, cargadoHasta: "2026-09-07"}
+	//
+	// Desde el 22-set-2026 la fecha es la de la cuenta del segmento MÁS ATRASADA, no la última de la
+	// empresa: con Davivienda al 11 y el BN al 7, un depósito del 9 en el BN «no existe» porque el BN
+	// no se cargó, y es lo que decide «conviene esperar antes de avisar».
+	repo := &fakeRepo{alcance: []string{"clasif-1"}, cargaCuentas: []CuentaCargadaHasta{
+		{ID: "cta-davi", Banco: "Davivienda", Cuenta: "Davivienda Colones", CargadoHasta: "2026-09-11"},
+		{ID: "cta-bn", Banco: "BN", Cuenta: "BN Privado de Cartago", CargadoHasta: "2026-09-07"},
+	}}
 	svc := servicioSegmento(repo)
 
 	res, err := svc.BuscarFaltante(context.Background(), "emp-1", "usr-1", "2026-09-09", "4950")
@@ -319,7 +374,10 @@ func TestBuscarFaltanteInexistenteDiceHastaCuandoEstaCargado(t *testing.T) {
 		t.Fatalf("no esperaba error: %v", err)
 	}
 	if res.Veredicto != FaltanteNoExiste || res.CargadoHasta != "2026-09-07" {
-		t.Fatalf("esperaba NO_EXISTE con cargado_hasta, obtuve %q / %q", res.Veredicto, res.CargadoHasta)
+		t.Fatalf("esperaba NO_EXISTE con cargado_hasta 2026-09-07, obtuve %q / %q", res.Veredicto, res.CargadoHasta)
+	}
+	if res.CargadoHastaCuenta == nil || res.CargadoHastaCuenta.ID != "cta-bn" {
+		t.Fatalf("la fecha tiene que venir con la cuenta que la pone (el BN), vino %+v", res.CargadoHastaCuenta)
 	}
 }
 

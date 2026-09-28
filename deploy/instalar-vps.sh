@@ -147,19 +147,45 @@ fi
 
 titulo "4. Secretos"
 # Cada instalación genera los suyos. Nunca van escritos en el repositorio ni en este script.
+secreto() { openssl rand -base64 "${1:-48}" | tr -d '\n=+/' | cut -c1-"${2:-40}"; }
 if [[ -f "$ENV_FILE" ]]; then
 	verde "  Ya existe .env: se conservan los secretos actuales (no se rota nada)."
 	ama "  Si querés secretos nuevos, borrá $ENV_FILE y volvé a correr esto."
 	# Solo se refresca lo que depende del dominio.
 	sed -i "s|^DOMINIO=.*|DOMINIO=${DOMINIO}|" "$ENV_FILE"
 	sed -i "s|^CORS_ORIGINS=.*|CORS_ORIGINS=${CORS_ORIGINS}|" "$ENV_FILE"
+	# CIFRADO_SECRET se AGREGA si falta, aunque el .env sea viejo.
+	#
+	# Es la única excepción a «no se rota nada», y no es un capricho: esta variable nació después
+	# que los servidores instalados, y como este bloque conserva el archivo, jamás aparecería sola.
+	# Sin ella, guardar la contraseña del correo de una empresa responde 422 y la función se ve
+	# «rota» el día de la entrega. Agregarla no rota nada —no había nada cifrado antes— y no toca
+	# ningún secreto existente.
+	# Se exige que tenga VALOR, no solo que la línea exista: un `CIFRADO_SECRET=` a secas (quedó de
+	# una edición a mano, o de un .env de plantilla) pasa un `grep '^CIFRADO_SECRET='` y entonces
+	# nunca se corrige, con la pantalla respondiendo 422 para siempre y sin decir por qué.
+	if ! grep -qE '^CIFRADO_SECRET=.+' "$ENV_FILE"; then
+		# Si la línea existe pero está vacía, se quita antes de agregar la buena: dos líneas con la
+		# misma variable hacen que gane la última al cargar, y eso depende del orden, no del valor.
+		sed -i '/^CIFRADO_SECRET=[[:space:]]*$/d' "$ENV_FILE"
+		cat >> "$ENV_FILE" <<EOF
+
+# AGREGADA POR EL INSTALADOR EL $(date -u +%Y-%m-%dT%H:%M:%SZ) (faltaba en este .env).
+# Cifra las contraseñas de los buzones de correo de cada empresa.
+# ⚠ SI SE PIERDE, ESAS CONTRASEÑAS SON IRRECUPERABLES: hay que volver a escribirlas.
+CIFRADO_SECRET=$(secreto 64 64)
+EOF
+		verde "  Se agregó CIFRADO_SECRET (faltaba): ya se pueden guardar las contraseñas del correo."
+	fi
 	# shellcheck disable=SC1090
 	set -a; . "$ENV_FILE"; set +a
 	ADMIN_PASS_NUEVA=""
 else
-	secreto() { openssl rand -base64 "${1:-48}" | tr -d '\n=+/' | cut -c1-"${2:-40}"; }
 	POSTGRES_PASSWORD="$(secreto 48 32)"
 	JWT_SECRET="$(secreto 64 64)"
+	# La clave con la que se cifran las contraseñas de los buzones de correo de cada empresa.
+	# 64 caracteres al azar, igual que JWT_SECRET: la genera la máquina, nadie la escribe a mano.
+	CIFRADO_SECRET="$(secreto 64 64)"
 	ADMIN_PASS_NUEVA="$(secreto 24 16)"
 	SEED_ADMIN_EMAIL_DEF="admin@${DOMINIO#:*}"
 	[[ "$DOMINIO" == ":80" ]] && SEED_ADMIN_EMAIL_DEF="admin@gpvdp.local"
@@ -171,7 +197,8 @@ else
 # ⚠ ESTE ARCHIVO CONTIENE LAS CLAVES DEL SISTEMA.
 #   · No se comparte, no se sube a ningún repositorio, no se manda por correo.
 #   · Guardá una copia en un gestor de contraseñas: si se pierde JWT_SECRET todos tienen que
-#     volver a ingresar; si se pierde POSTGRES_PASSWORD, el backend no puede abrir la base.
+#     volver a ingresar; si se pierde POSTGRES_PASSWORD, el backend no puede abrir la base;
+#     si se pierde CIFRADO_SECRET, LAS CONTRASEÑAS DE LOS BUZONES DE CORREO SON IRRECUPERABLES.
 #   · Permisos 600 (solo root puede leerlo).
 
 DOMINIO=${DOMINIO}
@@ -185,6 +212,20 @@ JWT_SECRET=${JWT_SECRET}
 ACCESS_TTL=15m
 # 7 días: si alguien pierde la computadora, la sesión caduca en una semana.
 REFRESH_TTL=168h
+
+# Cifra los secretos que el sistema tiene que volver a USAR: hoy, la contraseña del buzón de
+# correo de cada empresa (pantalla Configuración → Correo saliente). Vive acá y NO en la base, así
+# que un respaldo de Postgres robado trae texto inútil.
+#
+# ⚠ SI ESTA CLAVE SE PIERDE, LAS CONTRASEÑAS GUARDADAS SON IRRECUPERABLES.
+#   No hay puerta de atrás —ese es el punto del diseño—. Hay que pedirle otra vez a cada empresa su
+#   contraseña de aplicación y escribirla de nuevo en la pantalla. Son 3 empresas, pero hay que
+#   conseguir 3 contraseñas.
+# ⚠ SI SE CAMBIA sin volver a escribir las contraseñas, el envío de cada empresa que tenga una
+#   guardada responde «no se puede descifrar» hasta que se escriba de nuevo. No se manda nada por
+#   el buzón equivocado: falla a la vista, no en silencio.
+# → Guardá una copia en el mismo gestor de contraseñas donde guardás este archivo.
+CIFRADO_SECRET=${CIFRADO_SECRET}
 
 SEED_ADMIN_EMAIL=${SEED_ADMIN_EMAIL_DEF}
 SEED_ADMIN_PASSWORD=${ADMIN_PASS_NUEVA}
