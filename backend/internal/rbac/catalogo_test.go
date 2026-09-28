@@ -55,8 +55,18 @@ func TestCatalogoSinDuplicados(t *testing.T) {
 	// bandeja de lo que llega por correo y la cola de errores, y `cxp.fuentes` da de alta los
 	// buzones. `cxp.fuentes` es SENSIBLE porque crear una fuente crea una credencial y decide de
 	// qué empresa son las facturas que entran.
-	if len(Catalogo) != 78 {
-		t.Errorf("catálogo tiene %d permisos, se esperaban 78", len(Catalogo))
+	// → 79 con el correo saliente por empresa (mig 0084): `admin.correo` configura desde qué buzón
+	// envía cada empresa. Es SENSIBLE porque guarda la contraseña de ese buzón, así que nace solo
+	// con quien ya decide el texto de esos correos (`admin.plantillas` = Director Financiero).
+	// Reenviar el comprobante y leer la bitácora de envíos NO estrenan permiso: reenviar es el mismo
+	// acto que enviar (`cxp.comprobante`) y la bitácora es el expediente de la factura (`cxp.ver`).
+	// → 80 con la reversa de una carga de banco (mig 0085): `bancos.revertir_importacion` saca de
+	// los libros TODOS los movimientos que trajo una importación equivocada. Va aparte de
+	// `bancos.importar` porque importar es el trabajo diario de la auxiliar y sacar millones de los
+	// libros no lo es: decisión del Director Financiero, «solo el Admin o el Financiero». Listar las
+	// cargas NO estrena permiso —es el historial de lo que ya se puede hacer con `bancos.importar`—.
+	if len(Catalogo) != 80 {
+		t.Errorf("catálogo tiene %d permisos, se esperaban 80", len(Catalogo))
 	}
 }
 

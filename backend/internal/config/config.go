@@ -34,6 +34,28 @@ type Config struct {
 	SMTPFrom string
 	SMTPUser string
 	SMTPPass string
+	// CifradoSecret es la clave con la que se cifran los secretos que el sistema tiene que volver a
+	// USAR —hoy, la contraseña del correo saliente de cada empresa (mig 0084)—. Vive acá, en el
+	// proceso, y NO en la base: un respaldo de Postgres que alguien se lleve trae texto inútil.
+	//
+	// SIN VALOR POR DEFECTO, igual que JWT_SECRET: una clave de fábrica en el código no cifraría
+	// nada.
+	//
+	// Pero, a diferencia de JWT_SECRET, NO es obligatoria y `Load` no aborta si falta. Hay
+	// instalaciones corriendo hoy sin esta variable, y hacerla obligatoria convertiría una mejora
+	// del correo en la caída del ERP entero: el instalador conserva los `.env` que ya existen. Sin
+	// ella, el correo sigue saliendo por el SMTP global (las cuatro SMTP_* de arriba) y lo único
+	// que no se puede es guardar la contraseña de una empresa.
+	//
+	// La VALIDACIÓN del contenido (largo mínimo, que no sea una frase repetida) vive en un solo
+	// lugar, `shared.NewCifrador`, que es quien la usa; acá solo se lee. El fallo se cobra donde se
+	// puede leer y arreglar —422 nombrando CIFRADO_SECRET al guardar una contraseña— y nunca como
+	// un error interno ni un panic al arrancar. `CifradoConfigurado` dice si al menos viene algo.
+	//
+	// ⚠ SI SE PIERDE, LAS CONTRASEÑAS GUARDADAS SON IRRECUPERABLES: hay que volver a escribir la de
+	// cada empresa. El aviso está en el `.env` que genera deploy/instalar-vps.sh y en
+	// deploy/LEEME-VPS.md.
+	CifradoSecret string
 	// BCCR: auto-sync del tipo de cambio (§22/§23). Desactivado por defecto: sin
 	// credenciales (correo+token registrados en el BCCR) el sync no funciona y el
 	// motor sigue siendo 100% manual. El indicador por defecto es 318 (venta) —
@@ -64,6 +86,7 @@ func Load() (Config, error) {
 		SMTPFrom:         getenv("SMTP_FROM", "cxp@valledepazcr.com"),
 		SMTPUser:         os.Getenv("SMTP_USER"),
 		SMTPPass:         os.Getenv("SMTP_PASS"),
+		CifradoSecret:    strings.TrimSpace(os.Getenv("CIFRADO_SECRET")),
 		BCCRSyncEnabled:  getbool("BCCR_SYNC_ENABLED", false),
 		BCCRWSURL:        getenv("BCCR_WS_URL", "https://gee.bccr.fi.cr/Indicadores/Suministro/SW/wsindicadoreseconomicos.asmx/ObtenerIndicadoresEconomicosXML"),
 		BCCREmail:        os.Getenv("BCCR_EMAIL"),
@@ -98,6 +121,13 @@ func Load() (Config, error) {
 
 // IsProduction indica si el servicio corre en modo producción.
 func (c Config) IsProduction() bool { return c.Env == "production" }
+
+// CifradoConfigurado dice si la instalación trae CIFRADO_SECRET.
+//
+// Sirve para que el arranque avise —con un WARN, nunca abortando— que el correo por empresa queda
+// deshabilitado, y para que quien lea el log sepa por qué guardar una contraseña va a responder
+// 422. Que el valor además SIRVA lo decide `shared.NewCifrador`.
+func (c Config) CifradoConfigurado() bool { return c.CifradoSecret != "" }
 
 func getenv(key, def string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {

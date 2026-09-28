@@ -12,6 +12,7 @@ import (
 
 	"github.com/gpvdp/erp/internal/auth"
 	"github.com/gpvdp/erp/internal/httpx"
+	"github.com/gpvdp/erp/internal/shared"
 )
 
 // Handler expone los endpoints de CxP (bajo RequireEmpresa).
@@ -189,7 +190,13 @@ func bindProveedor(c *gin.Context) (ProveedorInput, bool) {
 }
 
 func (h *Handler) responderError(c *gin.Context, err error, op string) {
+	// El servidor de correo rechazó el envío. Ya viene clasificado y SIN el texto crudo del
+	// servidor (internal/shared/smtp.go); acá solo se le pone el estado. Sin este caso, todo fallo
+	// de SMTP saldría por el `default` como 500 «error interno» y el usuario no leería el motivo.
+	var errSMTP *shared.ErrorSMTP
 	switch {
+	case errors.As(err, &errSMTP):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, errSMTP.Error())
 	case errors.Is(err, ErrProveedorNoEncontrado), errors.Is(err, ErrDocumentoNoEncontrado), errors.Is(err, ErrComprobanteNoEncontrado), errors.Is(err, ErrDepartamentoNoEncontrado), errors.Is(err, ErrAplicacionNoEncontrada),
 		errors.Is(err, ErrFondoNoEncontrado), errors.Is(err, ErrValeNoEncontrado):
 		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, err.Error())
@@ -211,7 +218,10 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
 	case errors.Is(err, ErrDocNoPagado):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
-	case errors.Is(err, ErrProveedorSinEmail):
+	// ErrSinDestinatario lo devuelve el transporte cuando la dirección queda vacía al limpiarla
+	// (un correo de proveedor de solo espacios pasa el `!= ""` del service). Sin este caso saldría
+	// como 500 «error interno» sobre algo que sí se puede explicar.
+	case errors.Is(err, ErrProveedorSinEmail), errors.Is(err, shared.ErrSinDestinatario):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
 	case errors.Is(err, ErrProveedorDuplicado), errors.Is(err, ErrDocumentoDuplicado), errors.Is(err, ErrDepartamentoDuplicado):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
@@ -236,7 +246,11 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 		errors.Is(err, ErrNoEsDeContabilidad), errors.Is(err, ErrParametroInvalido),
 		// Falta configurar el correo saliente. Es 422 y no 500 a propósito: el sistema está bien,
 		// falta un dato del servidor, y el mensaje dice cuál.
-		errors.Is(err, ErrCorreoNoConfigurado):
+		errors.Is(err, ErrCorreoNoConfigurado),
+		// Correo por empresa (mig 0084): la contraseña del buzón está guardada y no se puede leer.
+		// Los dos son 422 y los dos dicen qué hacer; ninguno cae silenciosamente al correo global,
+		// que sería mandarle a los proveedores de una empresa desde el buzón de otra.
+		errors.Is(err, ErrCifradoNoDisponible), errors.Is(err, ErrSecretoCorreoIlegible):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
 	case errors.Is(err, ErrNoEsAnticipo), errors.Is(err, ErrAnticipoNoPagado), errors.Is(err, ErrProveedorDistinto),
 		errors.Is(err, ErrMonedaNoNeteable), errors.Is(err, ErrFacturaNoNeteable), errors.Is(err, ErrMontoAplicacionInvalido),

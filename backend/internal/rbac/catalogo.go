@@ -43,6 +43,15 @@ var Catalogo = []PermisoDef{
 	// pantalla; el alcance (rol × clasificación, mig 0077) dice cuáles filas.
 	{"bancos.ver_mi_segmento", "Bancos", "Consultar mi segmento de bancos", "Ver SOLO los créditos de las partidas asignadas al rol, y avisar cuando alguno quedó mal segmentado. No abre ninguna otra pantalla de Bancos", false},
 	{"bancos.importar", "Bancos", "Importar estados de cuenta", "Subir, previsualizar y confirmar archivos del banco", false},
+	// Revertir una CARGA entera (mig 0085). Aparte de `bancos.importar` a propósito: importar es el
+	// trabajo diario de la auxiliar, sacar millones de los libros no lo es. Decisión del Director
+	// Financiero: la reversa la pueden hacer «solo el Admin o el Financiero».
+	//
+	// Va acá además de en la migración porque `EnsureDefaults` no reparte permisos nuevos a una
+	// empresa que ya tiene matriz configurada: la migración lo da a las empresas que YA existen y
+	// este catálogo es lo que hace que una empresa NUEVA nazca con él (DIRECTOR_FINANCIERO lo hereda
+	// porque su matriz es `codigos()`; ADMIN, por el bypass).
+	{"bancos.revertir_importacion", "Bancos", "Revertir una carga del banco", "Sacar de los libros TODOS los movimientos que trajo una importación equivocada (y volver a ponerlos), con motivo. No borra nada", true},
 	{"bancos.clasificar", "Bancos", "Clasificar movimientos", "Clasificar y reclasificar (individual y masivo)", false},
 	{"bancos.reglas", "Bancos", "Gestionar reglas del motor", "Crear, editar, pausar y eliminar reglas", false},
 	{"bancos.catalogo", "Bancos", "Gestionar catálogo", "Conceptos, clasificaciones, bancos, cuentas y visibilidad CxP", false},
@@ -142,6 +151,16 @@ var Catalogo = []PermisoDef{
 	// Administración
 	{"admin.roles", "Administración", "Roles y permisos", "Configurar esta matriz y asignar roles a usuarios", true},
 	{"admin.plantillas", "Administración", "Plantillas de notificaciones", "Editar el texto de los correos que el sistema envía (comprobante al proveedor, boleta de pago, vacaciones)", false},
+	// El SERVIDOR desde el que sale cada correo, al lado de quien decide el TEXTO de esos correos:
+	// es la misma responsabilidad —la voz de la empresa hacia afuera— y hoy la tiene el Director
+	// Financiero. `critico`: guarda la contraseña del buzón corporativo, no es tarea de operación,
+	// así que no se le da a Tesorería ni al Auxiliar.
+	//
+	// Va acá y no solo en la migración 0084 porque `EnsureDefaults` no reparte permisos nuevos a una
+	// empresa que ya tiene matriz configurada: la migración lo da a las empresas que YA existen, y
+	// este catálogo es lo que hace que una empresa NUEVA nazca con él (DIRECTOR_FINANCIERO lo hereda
+	// porque su matriz es `codigos()`).
+	{"admin.correo", "Administración", "Correo saliente", "Configurar el servidor de correo desde el que cada empresa envía (servidor, remitente y contraseña) y probar la conexión", true},
 }
 
 // codigos devuelve todos los códigos de permiso del catálogo.

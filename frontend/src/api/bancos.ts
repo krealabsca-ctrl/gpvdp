@@ -146,11 +146,136 @@ export interface ConfirmarResult {
   insertados: number;
 }
 
+// --- Reversa de una CARGA entera (mig 0085) ---
+//
+// La unidad que se revierte es la importación, no la fecha: es la regla textual del Director
+// Financiero («del día 20 hacia atrás todo está bien y el 21 agregué mal los bancos»). Revertir es
+// `incluido = false` en los movimientos que trajo ESE archivo; nunca un borrado.
+
+export type EstadoImportacion =
+  | "CARGADA"
+  | "PREVISUALIZADA"
+  | "CONFIRMADA"
+  | "CERRADA"
+  | "REVERTIDA";
+
+/**
+ * Lo que YA se apoya en los movimientos de una carga y por eso impide sacarla de los libros.
+ *
+ * La pantalla NO re-deriva nada de acá: el servidor manda `razon_no_revertir` ya redactado con la
+ * MISMA regla que aplica al revertir. Los conteos se muestran solo como detalle.
+ */
+export interface BloqueosReversa {
+  cobros_cxc: number;
+  planillas_cxc: number;
+  avisos_sin_resolver: number;
+  responsabilidades: number;
+  /**
+   * Movimientos que son el PAGO de una factura de CxP ya conciliada. No estaba en el contrato
+   * original: lo agregó la revisión del backend al encontrar que revertir dejaba la factura
+   * CONCILIADA contra plata que ya no estaba en los libros.
+   */
+  facturas_cxp: number;
+  traslados_emparejados: number;
+  /** Meses «YYYY-MM» ya cerrados donde cae algún movimiento de la carga. */
+  periodos_cerrados: string[];
+  /** Meses «YYYY-MM» con acta de conciliación FIRMADA de esa cuenta. */
+  actas_firmadas: string[];
+}
+
+/** Una carga en el listado, con todo lo que hace falta para decidir sin abrir otra pantalla. */
+export interface ImportacionItem {
+  id: string;
+  cuenta_bancaria_id: string;
+  banco: string;
+  /** "" si la cuenta no tiene alias. */
+  cuenta_alias: string;
+  /** Moneda de la CUENTA: los totales de abajo están en ella. */
+  moneda: Moneda;
+  nombre_archivo: string;
+  estado: EstadoImportacion;
+  creado_por: string;
+  creado_por_nombre: string;
+  creado_en: string;
+  /** Cuántas filas trajo la carga (0 también se lista). */
+  movimientos: number;
+  /** Cuántas de esas NO suman hoy (por esta reversa o por cualquier otra corrección). */
+  excluidos: number;
+  clasificados: number;
+  /** Suma de TODO lo que trajo el archivo, incluido lo ya excluido. Decimal-string. */
+  total_debitos: string;
+  total_creditos: string;
+  /** Rango de fechas de sus movimientos; "" si la carga no trajo ninguno. */
+  fecha_desde: string;
+  fecha_hasta: string;
+  revertida: boolean;
+  revertida_en: string;
+  revertida_por: string;
+  revertida_por_nombre: string;
+  motivo_reversa: string;
+  bloqueos: BloqueosReversa;
+  puede_revertir: boolean;
+  /**
+   * Falso incluso en una carga revertida cuando el mes se cerró o se firmó el acta DESPUÉS de la
+   * reversa: devolver esa plata rompería el cierre. En ese caso `razon_no_revertir` explica el
+   * bloqueo del DESHACER, no el de revertir.
+   */
+  puede_deshacer_reversa: boolean;
+  /** Ya redactado por el servidor; "" cuando se puede revertir. Se muestra tal cual. */
+  razon_no_revertir: string;
+}
+
+export interface ListaImportaciones {
+  items: ImportacionItem[];
+  /** Total REAL de la empresa (o de la cuenta filtrada), no el de la página. */
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface FiltrosImportaciones {
+  /** Vacío/ausente = todas las cuentas de la empresa. */
+  cuenta_bancaria_id?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export interface ResultadoReversa {
+  importacion_id: string;
+  estado: EstadoImportacion;
+  /** Cuántos movimientos salieron de los libros AHORA. */
+  excluidos: number;
+  total_debitos: string;
+  total_creditos: string;
+  moneda: Moneda;
+  motivo: string;
+  revertida_en: string;
+}
+
+export interface ResultadoDeshacerReversa {
+  importacion_id: string;
+  estado: EstadoImportacion;
+  /** Cuántos movimientos volvieron a los libros. */
+  reincluidos: number;
+  total_debitos: string;
+  total_creditos: string;
+  moneda: Moneda;
+}
+
 export interface MovimientoRow {
   id: string;
   fecha: string;
   documento: string;
   descripcion: string;
+  /**
+   * La referencia larga de Davivienda (la del SINPE), que el banco esconde DENTRO de la
+   * descripción. La deriva el servidor con la misma función que el exportador, así el número que
+   * el equipo cruza contra su recibo es el mismo en el .xlsx y en la pantalla.
+   *
+   * VACÍO en todo lo que no es Davivienda: BN, BAC, BCR, Banco Popular y Promerica no publican esa
+   * referencia. Quien la muestre tiene que explicar el blanco, no dejarlo parecer una falla.
+   */
+  consecutivo_largo: string;
   banco: string;
   cuenta: string;
   debito: string;
@@ -165,10 +290,41 @@ export interface MovimientoRow {
   confianza: string | null;
   es_traslado: boolean;
   /**
-   * Motivo del aviso «está mal segmentado» que ya está sin resolver para este movimiento.
-   * Solo lo llena la consulta por segmento; en la hoja de trabajo llega vacío.
+   * Falso cuando el movimiento quedó excluido del cuadre (típicamente una importación duplicada que
+   * se revirtió). La fila SE SIGUE MOSTRANDO —es la convención del proyecto: el dinero filtra, las
+   * filas se muestran y se marcan— pero su monto ya no suma. Hay que pintarlo en la fila: si solo se
+   * avisa en general («N no suman»), nadie sabe CUÁL es y el monto se lee como plata que entró.
+   */
+  incluido: boolean;
+  /**
+   * No vacío = este movimiento tiene un aviso sin resolver (de quien sea: avisar otra vez daría
+   * 409). Solo lo llena la consulta por segmento; en la hoja de trabajo llega vacío.
+   *
+   * Es el MOTIVO solo si `reporte_abierto_propio` es true (el aviso es de esta persona y no es un
+   * faltante). Si es false, es un texto genérico del servidor: el motivo de otra persona no viaja.
    */
   reporte_abierto?: string;
+  /** Distingue los dos casos de `reporte_abierto`. Ausente cuando no hay aviso abierto. */
+  reporte_abierto_propio?: boolean;
+  /**
+   * El último aviso RESUELTO que hizo ESTA persona sobre el movimiento, sin contar faltantes (solo en
+   * la consulta por segmento). Viene SOLO cuando no hay `reporte_abierto`: el abierto es lo vigente y
+   * manda.
+   */
+  aviso_resuelto?: AvisoResuelto;
+}
+
+/** Cómo se cerró un aviso: la partida se corrigió, o estaba bien y se explica por qué. */
+export type ResolucionAviso = "RECLASIFICADO" | "SIN_CAMBIO";
+
+/** El último aviso resuelto de un movimiento, tal como lo ve la fila de «Mi partida». */
+export interface AvisoResuelto {
+  motivo: string;
+  resolucion: ResolucionAviso;
+  /** Puede venir vacía con RECLASIFICADO: la corrección se ve en la partida. */
+  respuesta: string;
+  /** RFC3339. */
+  resuelto_en: string;
 }
 
 // --- Consulta por segmento (mig 0077) ---
@@ -187,22 +343,96 @@ export interface CuentaDelSegmento {
   cuenta: string;
 }
 
+/** Hasta qué día está importada UNA cuenta del segmento (último día con movimientos incluidos). */
+export interface CuentaCargadaHasta {
+  id: string;
+  banco: string;
+  cuenta: string;
+  /** YYYY-MM-DD. */
+  cargado_hasta: string;
+}
+
 /**
- * Lo que ve el equipo de una partida.
+ * Lo que ve el equipo de una partida: SOLO los créditos clasificados en las partidas de su alcance.
+ *
+ * Entre el 22 y el 23-set-2026 el endpoint tuvo una segunda vista, `sin_clasificar`, con los
+ * créditos todavía sin partida de las cuentas del segmento («Todavía sin partida»). El Director
+ * Financiero la mandó quitar, el servidor ahora la responde con un 400, y por eso este cliente no
+ * manda `vista`: la única que hay es la de la partida.
  *
  * `sin_alcance` no es un error: es el estado de todo rol al que todavía no le marcaron partidas en
  * el catálogo, y la pantalla lo explica en vez de mostrar «algo falló».
  *
- * `cargado_hasta` es la última fecha importada DE LA EMPRESA (no de su segmento): es lo que separa
- * «todavía no entró» de «entró y no es mío».
+ * `cargado_hasta` es la fecha de la cuenta del segmento MÁS ATRASADA (22-set-2026): por cada cuenta,
+ * el último día con movimientos incluidos; de esas fechas, la mínima. Hay que nombrar la cuenta
+ * (`cargado_hasta_cuenta`): «BN Privado de Cartago está cargada hasta el 09/09». Es la MISMA fecha
+ * que acompaña a NO_EXISTE en «Falta un movimiento», así el encabezado y el diálogo no se
+ * contradicen. Vacío = el segmento no tiene ninguna cuenta.
  */
 export interface MiSegmento {
   partidas: PartidaDelSegmento[];
   cuentas: CuentaDelSegmento[];
   movimientos: ListaMovimientos;
   cargado_hasta: string;
+  /** La cuenta cuya fecha es `cargado_hasta` (null sin cuentas). */
+  cargado_hasta_cuenta: CuentaCargadaHasta | null;
+  /**
+   * Todas las cuentas del segmento, de la más atrasada a la más al día.
+   *
+   * NO se lista en la pantalla: el desplegable «hasta cuándo está cargada cada una de tus cuentas»
+   * se quitó el 23-set-2026 («no es un tema de interés a los consultores»). Se usa solo para
+   * redactar la línea de arriba de la tabla: con todas las cuentas al mismo día se dice «tus 8
+   * cuentas», y solo si alguna atrasa se nombra a esa (ver miSegmentoTextos.ts).
+   */
+  carga_por_cuenta: CuentaCargadaHasta[];
   sin_alcance: boolean;
+  /** Solo viene cuando `sin_alcance` es true. */
   aviso?: string;
+}
+
+/**
+ * Un aviso que hizo ESTE usuario, tal como lo vio al avisar («Mis avisos»).
+ *
+ * Nunca trae la partida actual, ni la descripción, ni el id del movimiento: si lo reclasificaron a
+ * otra partida, ya no es de su segmento y lo único que le toca saber es la respuesta.
+ *
+ *  · es_faltante=false: fecha, documento, monto (en la moneda de la cuenta), moneda, banco y cuenta
+ *    son los del movimiento que vio; `referencia` viene "".
+ *  · es_faltante=true: fecha y monto son lo que escribió y `referencia` la que escribió;
+ *    documento, banco, cuenta y moneda vienen SIEMPRE "".
+ */
+export interface MiAviso {
+  id: string;
+  es_faltante: boolean;
+  motivo: string;
+  /** RFC3339. */
+  creado_en: string;
+  fecha: string;
+  documento: string;
+  monto: string;
+  moneda: string;
+  banco: string;
+  cuenta: string;
+  referencia: string;
+  estado: "EN_REVISION" | "RESUELTO";
+  resolucion: "" | ResolucionAviso;
+  respuesta: string;
+  /** RFC3339, o "" si sigue en revisión. */
+  resuelto_en: string;
+}
+
+/**
+ * Una página de «Mis avisos», con el total REAL. Orden: primero los EN_REVISION (el más nuevo
+ * arriba), después los RESUELTO (el último respondido arriba).
+ */
+export interface ListaMisAvisos {
+  items: MiAviso[];
+  total: number;
+  abiertos: number;
+  resueltos: number;
+  page: number;
+  page_size: number;
+  sin_alcance: boolean;
 }
 
 /** Un rol que puede consultar por segmento (los que ofrece la columna del catálogo). */
@@ -257,17 +487,30 @@ export interface ReporteSegmentacion {
 /**
  * Veredicto de buscar un movimiento que no aparece.
  *
- * Divulgación mínima: `movimientos` viene con datos SOLO cuando el veredicto es EN_MI_PARTIDA. Con
- * FUERA_DE_MI_PARTIDA la respuesta es que existe y nada más — ni descripción, ni cuenta, ni de
- * quién es.
+ * Divulgación mínima: `movimientos` viene con datos SOLO con EN_MI_PARTIDA, que es lo que el usuario
+ * ya ve en su lista. Con FUERA_DE_MI_PARTIDA —otra partida, o todavía sin partida— la respuesta es
+ * que existe y nada más: ni descripción, ni cuenta, ni de quién es.
+ *
+ * Hubo un cuarto veredicto, TODAVIA_SIN_PARTIDA, que devolvía el movimiento completo cuando nadie lo
+ * había clasificado en una cuenta del segmento: existió mientras existió la pestaña «Todavía sin
+ * partida», y se quitó con ella el 23-set-2026.
+ *
+ * Precedencia si hay varios de esa fecha y ese monto: EN_MI_PARTIDA, FUERA_DE_MI_PARTIDA; NO_EXISTE
+ * si no hay ninguno.
  */
 export type VeredictoFaltante = "EN_MI_PARTIDA" | "FUERA_DE_MI_PARTIDA" | "NO_EXISTE";
 
 export interface ResultadoFaltante {
   veredicto: VeredictoFaltante;
+  /** Con datos SOLO en EN_MI_PARTIDA; vacío en los otros dos. */
   movimientos: MovimientoRow[];
-  /** Acompaña a NO_EXISTE: sin esto, «no hay ninguno» no distingue «no entró» de «no lo cargaron». */
+  /**
+   * Acompaña a NO_EXISTE: sin esto, «no hay ninguno» no distingue «no entró» de «no lo cargaron».
+   * Es la MISMA fecha que `MiSegmento.cargado_hasta` (la cuenta del segmento más atrasada).
+   */
   cargado_hasta: string;
+  /** La cuenta de esa fecha. Solo con NO_EXISTE; en los otros veredictos viene null. */
+  cargado_hasta_cuenta?: CuentaCargadaHasta | null;
 }
 
 /** Totales del filtro, EN COLONES (salen de `monto_crc`, no de débito/crédito). */
@@ -279,6 +522,12 @@ export interface TotalesMovimientos {
   sin_tipo_cambio: number;
   /** Ese monto en su moneda original (no se puede sumar al total en colones). */
   monto_sin_convertir: string;
+  /**
+   * Cuántas filas del filtro están marcadas `incluido = false` (la reversa de una importación
+   * duplicada). Las sumas de dinero NO las cuentan, pero `total` —el número del paginador— SÍ.
+   * Sin mostrarlo, los dos números se contradicen en silencio.
+   */
+  excluidos: number;
 }
 
 export interface ListaMovimientos {
@@ -1046,6 +1295,37 @@ export const bancosApi = {
     });
   },
 
+  // --- Cargas hechas y reversa de una carga (mig 0085) ---
+  /** El historial de cargas de la empresa, la más reciente primero. */
+  importaciones(filtros: FiltrosImportaciones): Promise<ListaImportaciones> {
+    return apiFetch<ListaImportaciones>("/bancos/importaciones", {
+      method: "GET",
+      // Una cuenta vacía se omite: «sin filtro» es no mandar el parámetro, no mandarlo en blanco.
+      query: {
+        cuenta_bancaria_id: filtros.cuenta_bancaria_id || undefined,
+        page: filtros.page,
+        page_size: filtros.page_size,
+      },
+    });
+  },
+  /** Saca de los libros TODOS los movimientos de una carga. El motivo es obligatorio. */
+  revertirImportacion(importacionId: string, motivo: string): Promise<ResultadoReversa> {
+    return apiFetch<ResultadoReversa>(`/bancos/importaciones/${importacionId}/revertir`, {
+      method: "POST",
+      json: { motivo },
+    });
+  },
+  /** Vuelve a poner en los libros lo que ESA reversa excluyó. El motivo queda en auditoría. */
+  deshacerReversaImportacion(
+    importacionId: string,
+    motivo: string,
+  ): Promise<ResultadoDeshacerReversa> {
+    return apiFetch<ResultadoDeshacerReversa>(
+      `/bancos/importaciones/${importacionId}/deshacer-reversa`,
+      { method: "POST", json: { motivo } },
+    );
+  },
+
   // --- Movimientos ---
   /** Resumen (cuántos y cuánto) de la selección activa: mismos filtros que la lista. */
   resumenSeleccion(filtros: FiltrosMovimientos, agrupar: AgruparResumen): Promise<ResumenSeleccion> {
@@ -1074,7 +1354,20 @@ export const bancosApi = {
       query: { ...filtros },
     });
   },
-  /** Avisa que un movimiento quedó mal segmentado. El motivo es obligatorio. */
+  /**
+   * Los avisos que hizo QUIEN PREGUNTA (usuario y empresa salen del token), abiertos y resueltos,
+   * aunque el movimiento ya no esté en su alcance.
+   */
+  misAvisos(page: number, pageSize: number): Promise<ListaMisAvisos> {
+    return apiFetch<ListaMisAvisos>("/bancos/mi-segmento/mis-avisos", {
+      method: "GET",
+      query: { page, page_size: pageSize },
+    });
+  },
+  /**
+   * Avisa que un movimiento quedó mal segmentado —o, desde el bloque «todavía sin partida», que sí
+   * es de la partida—. El motivo es obligatorio.
+   */
   reportarSegmentacion(movimientoId: string, motivo: string): Promise<void> {
     return apiFetch<void>("/bancos/mi-segmento/reportes", {
       method: "POST",

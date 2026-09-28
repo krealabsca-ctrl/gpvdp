@@ -82,10 +82,23 @@ type fakeRepo struct {
 	busquedaFuera    int
 	enganche         string
 	faltanteCreado   [6]string // usuario, fecha, monto, referencia, motivo, movimiento enganchado
-	reportesAbiertos map[string]string
+	reportesAbiertos map[string]AvisoAbiertoDeFila
 	reporteCreado    [3]string // movimiento, usuario, motivo
 	reportes         []ReporteSegmentacion
 	reporteResuelto  [4]string // reporte, usuario, resolución, respuesta
+	// Lo sin partida de una cuenta del segmento (también se devuelve completo), y con qué usuario
+	// se pidieron los avisos de las filas: el recorte del motivo depende de él.
+	busquedaSinPartida  []MovimientoRow
+	avisosPedidosPor    string
+	resueltosPedidosPor string
+	// «Mi partida» del 22-set-2026: avisos resueltos por movimiento, «Mis avisos» (con la marca de
+	// si se consultó, para probar que un alcance vacío ni llega a la base) y la carga por cuenta.
+	avisosResueltos    map[string]AvisoResuelto
+	misAvisos          ListaMisAvisos
+	misAvisosPedidos   bool
+	misAvisosPagina    [2]int
+	cargaCuentas       []CuentaCargadaHasta
+	cargaCuentasPedida bool
 	// Tesorería (saldos diarios y checklist de carga)
 	saldosDia       []SaldoDelDia
 	serieSaldos     []PuntoSaldo

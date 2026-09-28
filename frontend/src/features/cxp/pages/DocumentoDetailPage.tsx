@@ -15,6 +15,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  ConfirmDialog,
   ErrorState,
   Input,
   LoadingState,
@@ -38,12 +39,15 @@ import { useTienePermiso } from "@/features/auth/permisos";
 import {
   ETIQUETA_ESTADO,
   FLUJO_ESTADOS,
+  PERMISO_COMPROBANTE,
   TONO_ESTADO,
   accionSiguiente,
   etiquetaAccion,
   puedeAccion,
   textoRequisitoAprobacion,
 } from "@/features/cxp/dominio";
+import { fraseEnvioOK } from "@/features/cxp/comprobanteDominio";
+import { HistorialEnvios } from "@/features/cxp/components/HistorialEnvios";
 import {
   useAdjuntarComprobante,
   useAnticiposDisponibles,
@@ -694,7 +698,11 @@ function ComprobanteCard({ doc }: { doc: Documento }) {
   const enviar = useEnviarComprobante();
   const fileRef = useRef<HTMLInputElement>(null);
   const [descargando, setDescargando] = useState(false);
-  const puede = puedeAccion(tiene, "pagar"); // adjuntar/enviar: nivel Tesorería/Dirección
+  const [confirmando, setConfirmando] = useState(false);
+  // El permiso del BACKEND para adjuntar/enviar/reenviar es `cxp.comprobante`, no el de pagar.
+  // Con `pagar` (cxp.tesoreria), al Auxiliar Financiero —que sí tiene cxp.comprobante— no le
+  // aparecían los botones, y a quien solo tiene tesorería le aparecían y le devolvían 403.
+  const puede = tiene(PERMISO_COMPROBANTE);
 
   function onFile(e: ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -702,7 +710,12 @@ function ComprobanteCard({ doc }: { doc: Documento }) {
     adjuntar.mutate(
       { id: doc.id, archivo: f },
       {
-        onSuccess: () => toast.success("Comprobante adjuntado."),
+        onSuccess: () =>
+          toast.success(
+            doc.comprobante_enviado_en
+              ? "Comprobante reemplazado. La factura vuelve a quedar como no enviada: el proveedor todavía no tiene este PDF."
+              : "Comprobante adjuntado.",
+          ),
         onError: (err) => toast.error(mensajeError(err)),
       },
     );
@@ -729,11 +742,14 @@ function ComprobanteCard({ doc }: { doc: Documento }) {
   }
 
   function enviarAlProveedor() {
+    setConfirmando(false);
     enviar.mutate(doc.id, {
-      onSuccess: () => toast.success("Comprobante enviado al proveedor."),
+      onSuccess: (r) => toast.success(fraseEnvioOK(r)),
       onError: (err) => toast.error(mensajeError(err)),
     });
   }
+
+  const yaEnviado = !!doc.comprobante_enviado_en;
 
   return (
     <Card>
@@ -747,11 +763,16 @@ function ComprobanteCard({ doc }: { doc: Documento }) {
           ) : (
             <Badge tone="pendiente">Sin comprobante</Badge>
           )}
-          {doc.comprobante_enviado_en && (
+          {yaEnviado ? (
+            // Fecha Y HORA, y de la zona local: cortando el ISO a diez caracteres, un envío de las
+            // 9 de la noche se mostraba con la fecha del día siguiente (el timestamp viene en UTC)
+            // y no coincidía con la hora de su propia fila en la bitácora, justo debajo.
             <span className="text-sm text-content-muted">
-              Enviado al proveedor el {formatFecha(doc.comprobante_enviado_en.slice(0, 10))}
+              Enviado al proveedor el {formatFechaHora(doc.comprobante_enviado_en)}
             </span>
-          )}
+          ) : doc.tiene_comprobante ? (
+            <span className="text-sm text-content-muted">Todavía no se le mandó al proveedor.</span>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -780,16 +801,44 @@ function ComprobanteCard({ doc }: { doc: Documento }) {
               Descargar
             </Button>
           )}
+          {/* Reenviar es la MISMA llamada que enviar. El botón ya no desaparece al enviar: cuando
+              el correo rebota o el proveedor dice que no le llegó, hay que poder reintentar desde
+              acá en vez de reemplazar el PDF para que reaparezca el botón. */}
           {doc.tiene_comprobante && puede && (
-            <Button size="sm" onClick={enviarAlProveedor} loading={enviar.isPending}>
-              Enviar al proveedor
+            <Button
+              size="sm"
+              variant={yaEnviado ? "secondary" : "primary"}
+              onClick={() => (yaEnviado ? setConfirmando(true) : enviarAlProveedor())}
+              loading={enviar.isPending}
+            >
+              {yaEnviado ? "Reenviar al proveedor" : "Enviar al proveedor"}
             </Button>
           )}
         </div>
         {!puede && (
-          <p className="text-xs text-content-muted">Adjuntar/enviar el comprobante lo hace Tesorería/Dirección.</p>
+          <p className="text-xs text-content-muted">
+            Adjuntar y enviar el comprobante necesita el permiso «Gestionar comprobantes».
+          </p>
         )}
+
+        {/* La bitácora: a quién se mandó, con copia a quién, cuándo y si salió. La ve cualquiera
+            que pueda leer CxP — es el expediente de la factura, no una pantalla de administración. */}
+        <div className="border-t border-border pt-3">
+          <p className="mb-2 text-xs uppercase tracking-wide text-content-muted">Envíos</p>
+          <HistorialEnvios documentoId={doc.id} />
+        </div>
       </CardContent>
+
+      {confirmando && (
+        <ConfirmDialog
+          titulo="Reenviar el comprobante al proveedor"
+          descripcion={`Se le vuelve a mandar el mismo PDF al correo del proveedor, con copia oculta a quien aprobó el pago. Último envío: ${formatFechaHora(doc.comprobante_enviado_en)}`}
+          textoConfirmar="Reenviar"
+          pendiente={enviar.isPending}
+          onConfirmar={enviarAlProveedor}
+          onCancelar={() => setConfirmando(false)}
+        />
+      )}
     </Card>
   );
 }

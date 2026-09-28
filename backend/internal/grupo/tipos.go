@@ -24,6 +24,11 @@ type FilaEmpresa struct {
 	// plata.
 	NeutroCRC   string `json:"neutro_crc"`
 	Movimientos int    `json:"movimientos"`
+	// Excluidos son los movimientos marcados «no contar» (típicamente una importación duplicada que
+	// ya se revirtió). Están DENTRO de Movimientos y FUERA de todos los montos. Se publican porque
+	// si no, el consolidado baja sin que nada en pantalla lo explique y quien lo mira concluye que
+	// la corrección falló — o peor, que falta cargar el banco.
+	Excluidos int `json:"excluidos"`
 	// SinClasificar es la medida de confianza de la fila. Un EBITDA con un tercio del dinero sin
 	// partida al lado no es un resultado: es una foto parcial, y la pantalla tiene que decirlo.
 	SinClasificar    int    `json:"sin_clasificar"`

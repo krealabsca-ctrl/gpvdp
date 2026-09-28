@@ -132,6 +132,8 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 	var enUso *CatalogoEnUsoError
 	var noPermitido *CambioNoPermitidoError
 	var fechasIlegibles *FechasIlegiblesError
+	var reversaBloqueada *ReversaBloqueadaError
+	var historicoBloqueado *HistoricoBloqueadoError
 	switch {
 	case errors.Is(err, ErrCuentaNoEncontrada), errors.Is(err, ErrImportacionNoEncontrada),
 		errors.Is(err, ErrMovimientoNoEncontrado), errors.Is(err, ErrConceptoNoEncontrado),
@@ -162,7 +164,8 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 		errors.Is(err, ErrRolDeConsultaNoEncontrado):
 		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, sinPrefijoPaquete(err))
 	case errors.Is(err, ErrMotivoRequerido), errors.Is(err, ErrResolucionInvalida),
-		errors.Is(err, ErrRespuestaRequerida), errors.Is(err, ErrMontoInvalido):
+		errors.Is(err, ErrRespuestaRequerida), errors.Is(err, ErrMontoInvalido),
+		errors.Is(err, ErrVistaInvalida):
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, sinPrefijoPaquete(err))
 	case errors.Is(err, ErrReporteYaAbierto), errors.Is(err, ErrFaltanteYaAvisado):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoPaquete(err))
@@ -182,6 +185,37 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoPaquete(err))
 	// Lo mismo para el diccionario del catálogo: sus dos centinelas tampoco estaban mapeados.
 	case errors.Is(err, ErrDiccionarioVacio), errors.Is(err, ErrDiccionarioSinEncabezado):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoPaquete(err))
+	// Reversa de una carga (mig 0085). Los tres centinelas y el error tipado van juntos acá porque
+	// el modo de falla clásico de este paquete es justo el contrario: un centinela nuevo que el
+	// switch no conoce sale como 500 «error interno», y el usuario no puede distinguir un rechazo
+	// con explicación de una caída del servidor.
+	case errors.Is(err, ErrMotivoReversaRequerido):
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrImportacionYaRevertida), errors.Is(err, ErrImportacionNoRevertida),
+		errors.Is(err, ErrImportacionRevertidaNoSeConfirma):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoPaquete(err))
+	case errors.As(err, &reversaBloqueada):
+		// El mensaje ya viene redactado con qué está en el medio, cuántos y qué deshacer primero.
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoPaquete(err))
+	// Cargar histórico (mig 0087). Van acá por lo de siempre en este paquete: un centinela que el
+	// switch no conoce sale como 500 «error interno» y el usuario no puede distinguir un archivo
+	// rechazado —con instrucciones de qué hacer— de una caída del servidor.
+	case errors.Is(err, ErrCargaHistoricaNoEncontrada):
+		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrCargaHistoricaYaConfirmada):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrHistoricoSinEncabezado), errors.Is(err, ErrHistoricoVacio),
+		errors.Is(err, ErrHistoricoDemasiadasFilas), errors.Is(err, ErrHistoricoSinNadaQueCargar):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoPaquete(err))
+	// Archivo que no se puede abrir: es un ERROR DEL USUARIO (subió un .csv, un .xls o algo que no
+	// es un libro), no una caída. Sale 400 con qué hacer, y el detalle de excelize se queda
+	// envuelto en el error para el log en vez de irse a la pantalla.
+	case errors.Is(err, ErrHistoricoArchivoIlegible):
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, sinPrefijoPaquete(ErrHistoricoArchivoIlegible))
+	case errors.As(err, &historicoBloqueado):
+		// El mensaje ya nombra QUÉ mes y QUÉ cuenta: «no se puede cargar» a secas obligaría a
+		// adivinar cuál de los veinticuatro meses del archivo es el que estorba.
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoPaquete(err))
 	case errors.As(err, &enUso):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio,

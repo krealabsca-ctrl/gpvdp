@@ -130,9 +130,22 @@ type PlanClasifExcel struct {
 	Aviso string `json:"aviso"`
 }
 
-// encabezadosClasifExcel mapea nombre de columna normalizado → papel. Se aceptan las grafías que
+// encabezadosMovimientos mapea nombre de columna normalizado → papel. Se aceptan las grafías que
 // escriben las personas y las que exporta el propio sistema.
-var encabezadosClasifExcel = map[string]string{
+//
+// El mapa está en UN solo lugar y lo usan los DOS lectores de movimientos —traer la clasificación
+// (clasificacion_excel.go) y cargar histórico (historico.go)— a propósito: el archivo que el
+// usuario sube es el mismo, y dos mapas distintos significarían que un encabezado se entiende en
+// una pantalla y no en la otra.
+//
+// Faltaban justo las columnas del reporte que exporta el sistema, que es el archivo que el Director
+// Financiero usa de plantilla: «Consecutivo» es el DOCUMENTO (la referencia del banco) y
+// «Banco Cuenta» es la CUENTA, escrita como «Banco Popular · BP Negocios» o solo con el alias.
+//
+// «Equivalencia» (el monto en colones) y «Consecutivo largo» NO se mapean a propósito: son
+// DERIVADOS de salida —el primero lo calcula el motor de tipo de cambio, el segundo no se guarda—
+// y leerlos de vuelta sería dejar que el archivo pise un cálculo del sistema.
+var encabezadosMovimientos = map[string]string{
 	"fecha":               "fecha",
 	"fecha movimiento":    "fecha",
 	"fechamovimiento":     "fecha",
@@ -144,6 +157,7 @@ var encabezadosClasifExcel = map[string]string{
 	"no documento":        "documento",
 	"n documento":         "documento",
 	"numero de documento": "documento",
+	"consecutivo":         "documento",
 	"debito":              "debito",
 	"debitos":             "debito",
 	"debito (dr)":         "debito",
@@ -158,6 +172,7 @@ var encabezadosClasifExcel = map[string]string{
 	"partida":             "clasificacion",
 	"cuenta":              "cuenta",
 	"cuenta bancaria":     "cuenta",
+	"banco cuenta":        "cuenta",
 	"alias":               "cuenta",
 	"iban":                "cuenta",
 	"descripcion":         "descripcion",
@@ -172,7 +187,7 @@ func columnasClasifExcel(g Grid) (map[string]int, int) {
 	for i := 0; i < len(g) && i < 15; i++ {
 		col := map[string]int{}
 		for j, c := range g[i] {
-			if papel, ok := encabezadosClasifExcel[norm(c)]; ok {
+			if papel, ok := encabezadosMovimientos[norm(c)]; ok {
 				if _, repetido := col[papel]; !repetido {
 					col[papel] = j
 				}

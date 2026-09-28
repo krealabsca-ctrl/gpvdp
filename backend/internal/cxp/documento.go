@@ -57,9 +57,13 @@ var (
 	// ErrCorreoNoConfigurado: falta el servidor de correo saliente.
 	//
 	// Existe para no devolver «error interno» por una variable de entorno sin poner: el mensaje
-	// dice qué falta y quién lo pone, porque no es algo que el usuario pueda arreglar desde la
-	// pantalla. Pasó en producción el 9 de setiembre de 2026.
-	ErrCorreoNoConfigurado = errors.New("cxp: el correo saliente no está configurado; hay que definir SMTP_ADDR, SMTP_FROM, SMTP_USER y SMTP_PASS en el servidor")
+	// dice qué falta y quién lo pone. Pasó en producción el 9 de setiembre de 2026.
+	//
+	// Desde la migración 0084 hay DOS lugares donde se arregla, y el mensaje nombra primero el que
+	// el usuario sí puede tocar: la pantalla de Correo saliente (permiso admin.correo). Las cuatro
+	// variables del servidor siguen valiendo como caída para las empresas que no configuraron el
+	// suyo.
+	ErrCorreoNoConfigurado = errors.New("cxp: el correo saliente no está configurado; configurá el servidor de esta empresa en Configuración › Correo saliente, o pedí que definan SMTP_ADDR, SMTP_FROM, SMTP_USER y SMTP_PASS en el servidor")
 	// ErrParametroInvalido: la clave del umbral no existe o el valor no es un número >= 0.
 	ErrParametroInvalido = errors.New("cxp: parámetro de validación no válido")
 )

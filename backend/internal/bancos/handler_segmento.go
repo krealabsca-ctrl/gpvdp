@@ -17,11 +17,14 @@ import (
 	"github.com/gpvdp/erp/internal/httpx"
 )
 
-// MiSegmento GET /v1/bancos/mi-segmento/movimientos (bancos.ver_mi_segmento)
+// MiSegmento GET /v1/bancos/mi-segmento/movimientos?vista=partida (bancos.ver_mi_segmento)
 //
 // Acepta los mismos filtros de la hoja de trabajo —mes, cuenta, búsqueda— porque son los que el
 // equipo necesita para contestar «¿entró la planilla de setiembre?». Lo que NO acepta es ensanchar
 // el alcance: el servicio lo sobreescribe con el del rol.
+//
+// `vista` se puede omitir: «partida» es la única que hay. Cualquier otra cosa —incluida
+// `sin_clasificar`, que existió un día— se responde 400 y no se sirve la partida en su lugar.
 func (h *Handler) MiSegmento(c *gin.Context) {
 	claims, ok := auth.ClaimsFromContext(c)
 	if !ok {
@@ -35,18 +38,21 @@ func (h *Handler) MiSegmento(c *gin.Context) {
 	f.Page = atoiDefault(c.Query("page"), 1)
 	f.PageSize = atoiDefault(c.Query("page_size"), 100)
 
-	res, err := h.svc.MiSegmento(c.Request.Context(), claims.EmpresaID, claims.UsuarioID(), f)
+	res, err := h.svc.MiSegmento(c.Request.Context(), claims.EmpresaID, claims.UsuarioID(), c.Query("vista"), f)
 	// «Tu rol no tiene partidas asignadas» NO es un error: es el estado inicial de todo rol nuevo,
 	// y devolverlo como 4xx haría que la pantalla mostrara «algo falló» cuando lo único que pasa es
 	// que falta una marca en el catálogo. Va 200 con la lista vacía y el aviso.
 	if errors.Is(err, ErrSinAlcance) {
 		c.JSON(http.StatusOK, gin.H{
-			"partidas":      []PartidaDelSegmento{},
-			"cuentas":       []CuentaDelSegmento{},
-			"movimientos":   res.Movimientos,
-			"cargado_hasta": "",
-			"sin_alcance":   true,
-			"aviso":         "Tu rol todavía no tiene partidas asignadas para consulta. Pedile a Dirección Financiera que las marque en el catálogo de Bancos.",
+			"vista":                res.Vista,
+			"partidas":             []PartidaDelSegmento{},
+			"cuentas":              []CuentaDelSegmento{},
+			"movimientos":          res.Movimientos,
+			"cargado_hasta":        "",
+			"cargado_hasta_cuenta": nil,
+			"carga_por_cuenta":     []CuentaCargadaHasta{},
+			"sin_alcance":          true,
+			"aviso":                "Tu rol todavía no tiene partidas asignadas para consulta. Pedile a Dirección Financiera que las marque en el catálogo de Bancos.",
 		})
 		return
 	}
@@ -55,12 +61,40 @@ func (h *Handler) MiSegmento(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"partidas":      res.Partidas,
-		"cuentas":       res.Cuentas,
-		"movimientos":   res.Movimientos,
-		"cargado_hasta": res.CargadoHasta,
-		"sin_alcance":   false,
+		"vista":                res.Vista,
+		"partidas":             res.Partidas,
+		"cuentas":              res.Cuentas,
+		"movimientos":          res.Movimientos,
+		"cargado_hasta":        res.CargadoHasta,
+		"cargado_hasta_cuenta": res.CuentaMasAtrasada,
+		"carga_por_cuenta":     res.CargaPorCuenta,
+		"sin_alcance":          false,
 	})
+}
+
+// MisAvisos GET /v1/bancos/mi-segmento/mis-avisos?page=&page_size= (bancos.ver_mi_segmento)
+//
+// Los avisos que hizo QUIEN PREGUNTA, en la empresa del token, abiertos y resueltos: es donde
+// queda la respuesta cuando la resolución sacó el movimiento del alcance. La persona y la empresa
+// salen del token, nunca de la query: no hay forma de pedir los avisos de otro.
+func (h *Handler) MisAvisos(c *gin.Context) {
+	claims, ok := auth.ClaimsFromContext(c)
+	if !ok {
+		httpx.Abort(c, http.StatusUnauthorized, httpx.CodeNoAutenticado, "no autenticado")
+		return
+	}
+	res, err := h.svc.MisAvisos(c.Request.Context(), claims.EmpresaID, claims.UsuarioID(),
+		atoiDefault(c.Query("page"), 1), atoiDefault(c.Query("page_size"), 50))
+	// Igual que la lista: un rol sin partidas es un estado, no una falla. 200, vacío y marcado.
+	if errors.Is(err, ErrSinAlcance) {
+		c.JSON(http.StatusOK, res)
+		return
+	}
+	if err != nil {
+		h.responderError(c, err, "mis-avisos")
+		return
+	}
+	c.JSON(http.StatusOK, res)
 }
 
 type reportarSegmentacionRequest struct {

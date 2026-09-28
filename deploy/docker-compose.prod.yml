@@ -51,6 +51,16 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       ACCESS_TTL: ${ACCESS_TTL:-15m}
       REFRESH_TTL: ${REFRESH_TTL:-168h}
+      # Cifra la contraseña del buzón de correo de cada empresa (pantalla Correo saliente).
+      #
+      # `:-` para que un servidor con un `.env` viejo —el instalador conserva los que ya existen—
+      # arranque igual: sin esta variable el correo sigue saliendo por el SMTP global de abajo y lo
+      # único que no se puede es GUARDAR la contraseña de una empresa, que responde 422 nombrando
+      # la variable. No es fatal a propósito: tumbar el arranque convertiría una mejora del correo
+      # en la caída del ERP entero.
+      #
+      # ⚠ Si se pierde, las contraseñas ya guardadas son irrecuperables. Ver el comentario del .env.
+      CIFRADO_SECRET: ${CIFRADO_SECRET:-}
       # Mismo dominio para pantalla y API ⇒ el navegador no hace peticiones entre orígenes y
       # CORS no interviene. Se declara igual para poder llamar la API desde otra herramienta.
       CORS_ORIGINS: ${CORS_ORIGINS}

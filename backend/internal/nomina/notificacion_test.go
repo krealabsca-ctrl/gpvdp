@@ -16,9 +16,13 @@ type correoFake struct {
 	enviados []string // "to|asunto"
 	cuerpos  map[string]string
 	fallaA   string
+	// empresas guarda con qué empresa se pidió cada envío: es lo que prueba que la boleta sale del
+	// buzón de la empresa del empleado y no del de otra.
+	empresas []string
 }
 
-func (c *correoFake) Enviar(to, asunto, cuerpo string) error {
+func (c *correoFake) Enviar(_ context.Context, empresaID, to, asunto, cuerpo string) error {
+	c.empresas = append(c.empresas, empresaID)
 	if c.fallaA != "" && to == c.fallaA {
 		return errors.New("servidor rechazó el destinatario")
 	}
@@ -132,5 +136,36 @@ func TestMilesYFechaLegible(t *testing.T) {
 	}
 	if got := periodoTexto(2026, 13); got != "2026-13" {
 		t.Errorf("mes inválido debería caer al formato numérico, dio %q", got)
+	}
+}
+
+// La boleta tiene que salir del buzón de la empresa del empleado.
+//
+// Antes de la migración 0084 el mailer guardaba UN servidor leído en el arranque, así que la boleta
+// de un empleado de Coopeprofa salía desde el correo de Valle de Paz. El arreglo fue pasarle la
+// empresa al envío; este test es lo que impide que alguien la vuelva a quitar «porque no se usa».
+func TestLaBoletaSaleDelBuzonDeLaEmpresaDelEmpleado(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	st := repo.corridaStore()
+	st.corridas["c9"] = Corrida{ID: "c9", Anio: 2026, Mes: 9, FechaPago: "2026-09-30", Estado: "APROBADA"}
+	st.lineas["c9"] = []LineaCorrida{{ID: "l1", EmpleadoID: "e-1", Nombre: "Empleado Coopeprofa", Neto: "500000.00"}}
+	repo.correos = map[string]string{"e-1": "empleado@coopeprofa.cr"}
+	correo := &correoFake{}
+
+	svc := NewService(repo, nil, zap.NewNop())
+	svc.SetNotificaciones(nil, correo)
+
+	const coopeprofa = "f151fabc-f575-4871-817a-8f7bb193d04b"
+	if _, err := svc.EnviarBoletas(ctx, coopeprofa, "c9", "u1"); err != nil {
+		t.Fatalf("enviar: %v", err)
+	}
+
+	if len(correo.empresas) != 1 {
+		t.Fatalf("envíos = %d, quiere 1", len(correo.empresas))
+	}
+	if correo.empresas[0] != coopeprofa {
+		t.Errorf("la boleta se pidió con la empresa %q, quiere %q: sale del buzón equivocado",
+			correo.empresas[0], coopeprofa)
 	}
 }

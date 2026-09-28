@@ -833,6 +833,61 @@ export interface ResultadoImportacion {
 }
 
 // ---------------------------------------------------------------------------
+// Comprobante de pago: envío y bitácora (migración 0084)
+// ---------------------------------------------------------------------------
+
+/**
+ * Por qué no salió el correo. Es la causa CLASIFICADA, no el texto del servidor: ni el host, ni el
+ * usuario del buzón, ni el código SMTP cruzan hasta acá (esta bitácora la leen siete roles con
+ * `cxp.ver`; el detalle técnico vive en `probado_error` del correo saliente, detrás de
+ * `admin.correo`).
+ *
+ * `""` sale siempre —y SOLO— cuando `resultado === "OK"`: lo obliga un CHECK de la base, así que la
+ * pareja se puede confiar sin defenderse de la combinación imposible.
+ */
+export type CategoriaErrorEnvio =
+  | ""
+  | "AUTENTICACION_RECHAZADA"
+  | "HOST_INALCANZABLE"
+  | "RELAY_DENEGADO"
+  | "TLS_FALLIDO"
+  | "TIEMPO_AGOTADO"
+  | "CORREO_NO_CONFIGURADO"
+  | "SECRETO_ILEGIBLE"
+  | "OTRO";
+
+/** Una fila de la bitácora: UN intento de envío, haya salido o no. */
+export interface EnvioComprobante {
+  id: string;
+  enviado_en: string;
+  destinatario: string;
+  /** Copia (oculta) a quien aprobó el pago. `""` = salió sin copia porque no había aprobador con correo. */
+  copia: string;
+  remitente: string;
+  origen: "EMPRESA" | "GLOBAL";
+  archivo: string;
+  resultado: "OK" | "ERROR";
+  error_categoria: CategoriaErrorEnvio;
+  /** Frase para el operador de CxP. `null` exactamente cuando `resultado === "OK"`. */
+  error: string | null;
+  enviado_por: string;
+  /** DERIVADO: ya había un envío OK anterior. El primer OK es el envío; los siguientes, reenvíos. */
+  reenvio: boolean;
+  /** DERIVADO: lo que se mandó en esta fila es el PDF que está adjunto AHORA. */
+  mismo_archivo: boolean;
+}
+
+/** Lo que devuelve el POST de enviar: la pantalla ya puede decir «se envió a X con copia a Y». */
+export interface ResultadoEnvioComprobante {
+  ok: boolean;
+  destinatario: string;
+  copia: string;
+  origen: "EMPRESA" | "GLOBAL";
+  reenvio: boolean;
+  enviado_en: string;
+}
+
+// ---------------------------------------------------------------------------
 // Endpoints
 // ---------------------------------------------------------------------------
 
@@ -1158,9 +1213,20 @@ export const cxpApi = {
   descargarComprobante(id: string): Promise<Blob> {
     return apiFetch<Blob>(`/cxp/documentos/${id}/comprobante`, { method: "GET", blob: true });
   },
-  /** Envía el comprobante al correo del proveedor. */
-  enviarComprobante(id: string): Promise<{ ok: boolean }> {
-    return apiFetch(`/cxp/documentos/${id}/comprobante/enviar`, { method: "POST" });
+  /**
+   * Envía el comprobante al correo del proveedor. REENVIAR ES ESTA MISMA LLAMADA.
+   *
+   * Sin cuerpo: a quién le llega lo decide el dato (el correo del proveedor, con copia a quien
+   * aprobó el pago), no quien aprieta el botón.
+   */
+  enviarComprobante(id: string): Promise<ResultadoEnvioComprobante> {
+    return apiFetch<ResultadoEnvioComprobante>(`/cxp/documentos/${id}/comprobante/enviar`, {
+      method: "POST",
+    });
+  },
+  /** La bitácora de envíos de ese comprobante, del más reciente al más viejo. */
+  enviosComprobante(id: string): Promise<EnvioComprobante[]> {
+    return apiFetch<EnvioComprobante[]>(`/cxp/documentos/${id}/comprobante/envios`, { method: "GET" });
   },
 
   // --- Clasificación de gasto ---

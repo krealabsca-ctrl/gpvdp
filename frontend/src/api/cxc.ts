@@ -753,6 +753,14 @@ export interface MovimientoVinculado {
   monto: string;
   cuenta: string;
   banco: string;
+  /**
+   * Falso cuando el movimiento quedó excluido del cuadre (típicamente una importación duplicada
+   * que ya se revirtió). La fila SE SIGUE MOSTRANDO porque el vínculo lo hizo una persona y es la
+   * evidencia de lo que pasó, pero su monto ya no suma en «Depositado». Hay que pintarlo: si la
+   * fila se ve y el total no la incluye sin decir por qué, el operador vuelve a vincular otro
+   * crédito para «arreglarlo» y recrea el error que la corrección acababa de deshacer.
+   */
+  incluido: boolean;
 }
 
 /**

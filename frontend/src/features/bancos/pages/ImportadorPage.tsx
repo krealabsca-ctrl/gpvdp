@@ -4,6 +4,10 @@
  * tabla con chips por estado_duplicado) -> marcar exclusiones (DUPLICADO_REAL
  * por defecto) -> Confirmar -> toast con `insertados`.
  * 422 = formato no reconocido -> se muestra el mensaje del backend.
+ *
+ * Abajo va «Cargas hechas»: el historial de lo que se subió y la salida cuando una carga entró en
+ * la cuenta equivocada (revertirla entera, mig 0085). Vive en esta pantalla porque es la misma
+ * pregunta que trae acá —«¿qué subí?»— y porque quien acaba de confirmar mal lo corrige sin irse.
  */
 
 import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
@@ -34,6 +38,7 @@ import { mensajeError } from "@/lib/apiError";
 import { chipEstadoDuplicado } from "@/features/bancos/chips";
 import { useConfirmarImportacion, useCuentas, useImportar } from "@/features/bancos/hooks";
 import { ClasificarDesdeExcelPanel } from "@/features/bancos/components/ClasificarDesdeExcelPanel";
+import { CargasHechasPanel } from "@/features/bancos/components/CargasHechasPanel";
 import type { PreviewResult } from "@/api/bancos";
 
 export function ImportadorPage() {
@@ -251,6 +256,11 @@ export function ImportadorPage() {
       {/* Segunda vía de entrada: no cargar movimientos sino la CLASIFICACIÓN que ya se hizo en Excel.
           Va en esta pantalla porque es donde alguien busca «cómo meto lo que tengo en un archivo». */}
       <ClasificarDesdeExcelPanel cuentas={cuentasQuery.data ?? []} />
+
+      {/* La salida del error de carga: qué se subió y cómo se revierte una carga entera (mig 0085).
+          Va acá abajo porque es la misma pregunta que trae a esta pantalla —«¿qué subí?»— y porque
+          quien acaba de confirmar una carga equivocada la ve aparecer y la corrige sin irse. */}
+      <CargasHechasPanel cuentas={cuentasQuery.data ?? []} />
     </div>
   );
 }

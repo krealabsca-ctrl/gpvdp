@@ -86,21 +86,54 @@ func (r *pgRepository) PartidasDelAlcance(ctx context.Context, empresaID string,
 	return out, rows.Err()
 }
 
-// CuentasDelAlcance devuelve las cuentas donde el segmento recibe plata, para el filtro.
+// cuentasDelSegmentoSQL es la DEFINICIÓN de «cuentas del segmento» (decisión del Director
+// Financiero, 22-set-2026). Vive escrita UNA sola vez porque la usan dos consultas que no pueden
+// discrepar: el desplegable de cuentas (CuentasDelAlcance) y el «cargado hasta»
+// (CargaDeCuentasDelSegmento). Si cada una la escribiera a su modo, el filtro ofrecería una cuenta
+// de la que el encabezado después no sabría decir hasta cuándo está cargada.
+//
+// La usaban cinco hasta el 23-set-2026; las otras tres eran las que mostraban o dejaban avisar sobre
+// créditos SIN clasificar, que el Director Financiero mandó quitar de esta pantalla.
+//
+// Cuentas del segmento = las cuentas bancarias de la empresa que tienen AL MENOS UN crédito
+// INCLUIDO clasificado en el alcance del usuario, en todo el histórico.
+//
+//   - Es DERIVADA, no se configura: si una partida empieza a recibir plata en otra cuenta, esa
+//     cuenta entra sola en cuanto se clasifica el primer crédito.
+//   - «Incluido»: una cuenta cuyo único crédito de la partida era un duplicado revertido no es una
+//     cuenta donde entra la plata del equipo.
+//   - «En todo el histórico», no en el período filtrado: la pregunta es «¿en qué cuentas puede caer
+//     mi plata?», y un mes sin depósitos en una cuenta no la saca del segmento.
+//   - Alcance vacío → CERO cuentas (`= ANY('{}')` no calza con nada). Igual ninguna consulta llega
+//     acá con él: todas cortan antes.
+//
+// Devuelve un subselect de ids para usar con `IN (...)`. Espera la empresa en `$1`; `alcance` es
+// el placeholder del arreglo de clasificaciones (p. ej. "$2"). El alias `seg` es propio para no
+// correlacionarse por accidente con la `m` de la consulta de afuera.
+func cuentasDelSegmentoSQL(alcance string) string {
+	return `SELECT seg.cuenta_bancaria_id FROM movimiento_bancario seg
+	        WHERE seg.empresa_id = $1::uuid AND seg.incluido AND seg.credito > 0
+	          AND seg.clasificacion_id = ANY(` + alcance + `::uuid[])`
+}
+
+// CuentasDelAlcance devuelve las cuentas del segmento (ver cuentasDelSegmentoSQL), para el filtro.
 //
 // Sale de los movimientos del propio alcance: así el desplegable ofrece solo lo que el equipo puede
 // ver, y no hace falta darle acceso al catálogo de cuentas de la empresa.
+//
+// Solo cuentas con movimientos INCLUIDOS: la pregunta que contesta el desplegable es «¿de qué
+// cuentas entra mi plata?», y una cuenta que aporta cero —porque lo único que tenía era el
+// estado de cuenta importado por error y ya excluido— es una respuesta falsa a esa pregunta.
 func (r *pgRepository) CuentasDelAlcance(ctx context.Context, empresaID string, alcance []string) ([]CuentaDelSegmento, error) {
 	if len(alcance) == 0 {
 		return []CuentaDelSegmento{}, nil
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT DISTINCT cb.id::text, COALESCE(b.nombre,''), COALESCE(cb.alias,'')
-		FROM movimiento_bancario m
-		JOIN cuenta_bancaria cb ON cb.id = m.cuenta_bancaria_id
+		SELECT cb.id::text, COALESCE(b.nombre,''), COALESCE(cb.alias,'')
+		FROM cuenta_bancaria cb
 		LEFT JOIN banco b ON b.id = cb.banco_id
-		WHERE m.empresa_id = $1::uuid AND m.credito > 0 AND m.clasificacion_id = ANY($2::uuid[])
-		ORDER BY 2, 3`, empresaID, alcance)
+		WHERE cb.empresa_id = $1::uuid AND cb.id IN (`+cuentasDelSegmentoSQL("$2")+`)
+		ORDER BY 2, 3, 1`, empresaID, alcance)
 	if err != nil {
 		return nil, fmt.Errorf("bancos: cuentas del alcance: %w", err)
 	}
@@ -121,10 +154,15 @@ func (r *pgRepository) CuentasDelAlcance(ctx context.Context, empresaID string, 
 // Deliberadamente sin recortar por alcance: contesta «¿ya cargaron el banco?», que es una pregunta
 // sobre la operación y no sobre el segmento de nadie. Devuelve "" si la empresa no tiene ni un
 // movimiento.
+//
+// Solo movimientos INCLUIDOS: este dato acompaña al veredicto «no existe» y es lo que separa «no
+// entró» de «todavía no lo han cargado». Una fecha sostenida únicamente por una importación que
+// después se excluyó entera afirmaría «estamos al día» sobre datos que el sistema ya declaró que
+// no cuentan, y eso frena un aviso de faltante legítimo.
 func (r *pgRepository) UltimaFechaCargada(ctx context.Context, empresaID string) (string, error) {
 	var fecha *time.Time
 	err := r.pool.QueryRow(ctx,
-		`SELECT max(fecha) FROM movimiento_bancario WHERE empresa_id = $1::uuid`, empresaID).Scan(&fecha)
+		`SELECT max(fecha) FROM movimiento_bancario WHERE empresa_id = $1::uuid AND incluido`, empresaID).Scan(&fecha)
 	if err != nil {
 		return "", fmt.Errorf("bancos: última fecha cargada: %w", err)
 	}
@@ -132,6 +170,50 @@ func (r *pgRepository) UltimaFechaCargada(ctx context.Context, empresaID string)
 		return "", nil
 	}
 	return fecha.Format("2006-01-02"), nil
+}
+
+// CargaDeCuentasDelSegmento dice, para cada cuenta del segmento, hasta qué día está importada: el
+// máximo de `fecha` de sus movimientos INCLUIDOS (decisión del Director Financiero, 22-set-2026).
+//
+// Por cuenta se mira TODO lo incluido de la cuenta —débitos, créditos, cualquier partida—, no solo
+// lo del segmento: la pregunta es «¿ya cargaron este banco?», y una partida que no tuvo depósitos el
+// 10 no hace que el banco esté cargado solo hasta el 9. `incluido` por la misma razón que
+// UltimaFechaCargada: una importación revertida no prueba que el banco esté al día.
+//
+// Viene ordenada de la más atrasada a la más al día (desempate por banco, cuenta e id). Con alcance
+// vacío devuelve la lista vacía SIN consultar: cero cuentas, así que no hay fecha que afirmar.
+func (r *pgRepository) CargaDeCuentasDelSegmento(ctx context.Context, empresaID string, alcance []string) ([]CuentaCargadaHasta, error) {
+	if len(alcance) == 0 {
+		return []CuentaCargadaHasta{}, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT cb.id::text, COALESCE(b.nombre,''), COALESCE(cb.alias,''), max(m.fecha)
+		FROM movimiento_bancario m
+		JOIN cuenta_bancaria cb ON cb.id = m.cuenta_bancaria_id AND cb.empresa_id = $1::uuid
+		LEFT JOIN banco b ON b.id = cb.banco_id
+		WHERE m.empresa_id = $1::uuid AND m.incluido
+		  AND m.cuenta_bancaria_id IN (`+cuentasDelSegmentoSQL("$2")+`)
+		GROUP BY cb.id, b.nombre, cb.alias
+		ORDER BY max(m.fecha), 2, 3, 1`, empresaID, alcance)
+	if err != nil {
+		return nil, fmt.Errorf("bancos: carga de las cuentas del segmento: %w", err)
+	}
+	defer rows.Close()
+	out := []CuentaCargadaHasta{}
+	for rows.Next() {
+		var (
+			c     CuentaCargadaHasta
+			fecha time.Time
+		)
+		// max(fecha) no puede venir nulo: toda cuenta del segmento tiene, por definición, al menos
+		// un crédito incluido.
+		if err := rows.Scan(&c.ID, &c.Banco, &c.Cuenta, &fecha); err != nil {
+			return nil, fmt.Errorf("bancos: scan carga de cuenta: %w", err)
+		}
+		c.CargadoHasta = fecha.Format("2006-01-02")
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // RolesDeConsulta lista los roles de la empresa que TIENEN `bancos.ver_mi_segmento`.
@@ -260,7 +342,16 @@ func (r *pgRepository) GuardarConsultaDePartida(ctx context.Context, empresaID, 
 	return nil
 }
 
-// MovimientoEnAlcance dice si el movimiento existe en la empresa Y está en el alcance dado.
+// MovimientoEnAlcance dice si el movimiento existe en la empresa Y el equipo lo puede VER en su
+// pantalla, que es la condición para poder avisar sobre él: un crédito de una partida del alcance.
+//
+// Es exactamente el mismo predicado que arma la lista (condicionesMovimientos con Alcance): se puede
+// avisar sobre lo que se ve, y sobre nada más.
+//
+// Entre el 22 y el 23-set-2026 aceptaba además el crédito SIN clasificar de una cuenta del segmento,
+// porque la pestaña «Todavía sin partida» lo mostraba. Quitada la pestaña, se quitó acá también: si
+// no, mandando ids a mano se podría confirmar la existencia de un movimiento que la pantalla ya no
+// enseña, y la guarda estaría permitiendo justo lo que el permiso dice que no.
 //
 // Con alcance vacío devuelve false sin consultar: es la misma regla que el listado —sin alcance no
 // se ve nada—, y acá además evita que un `ANY(ARRAY[]::uuid[])` parezca un descuido.
@@ -287,12 +378,28 @@ func (r *pgRepository) MovimientoEnAlcance(ctx context.Context, empresaID, movID
 
 // BuscarPorFechaYMonto responde si existe un crédito de esa fecha y ese monto exactos (mig 0078).
 //
-// Devuelve por separado los que están en el alcance del rol —que se pueden mostrar completos— y
-// cuántos hay FUERA de él, sin traer ni un dato de esos: la existencia es todo lo que se divulga.
+// Separa las coincidencias en DOS grupos:
+//
+//   - `mios`: de una partida del alcance. Se devuelven completos, porque el usuario ya los ve.
+//   - `fuera`: todo lo demás —otra partida, o todavía sin partida—. Se CUENTA y no se trae ni un
+//     dato: la existencia es todo lo que se divulga.
+//
+// Lo sin clasificar tuvo su propio grupo entre el 22 y el 23-set-2026, mientras existió la pestaña
+// «Todavía sin partida»; ahora suma a `fuera` como el resto de lo que el usuario no ve.
+//
+// El grupo se decide con un CASE y no con `clasificacion_id = ANY(...)` escaneado a un bool: esa
+// comparación da NULL con un crédito sin clasificar —el caso más común, 563 en setiembre— y escanear
+// NULL en un bool era el 500 de «Falta un movimiento». Dentro del CASE el NULL no hace daño: un WHEN
+// que no es verdadero cae al ELSE, que es justamente donde va lo que no es suyo.
 //
 // El monto se compara contra `credito` y no contra `monto_crc`: el equipo tiene el recibo del
 // depósito en colones tal como lo hizo, y `monto_crc` de una cuenta en dólares es una conversión
 // que nunca va a coincidir con lo que la persona escribe.
+//
+// Solo movimientos INCLUIDOS. Es la consulta donde un duplicado hace el daño más silencioso: el
+// equipo busca su depósito, encuentra el fantasma, lee «existe, está en tu partida» y deja de
+// buscar, mientras el depósito de verdad puede seguir faltando. Si la única coincidencia es un
+// excluido, la respuesta correcta es «no existe», porque esa plata no entró a los libros.
 func (r *pgRepository) BuscarPorFechaYMonto(
 	ctx context.Context, empresaID, fecha string, monto decimal.Decimal, alcance []string,
 ) (mios []MovimientoRow, fuera int, err error) {
@@ -300,20 +407,26 @@ func (r *pgRepository) BuscarPorFechaYMonto(
 	if len(alcance) == 0 {
 		return nil, 0, nil
 	}
+	// `m.credito > 0` en el WHERE aunque el servicio ya exige un monto positivo: «solo créditos» es la
+	// regla de esta pantalla, y no puede depender de quién llame.
 	rows, err := r.pool.Query(ctx, `
 		SELECT m.id::text, m.fecha, COALESCE(m.documento,''), COALESCE(m.descripcion,''),
 		       m.debito, m.credito, m.moneda_original, m.monto_crc,
 		       m.concepto_id::text, COALESCE(co.nombre,''),
 		       m.clasificacion_id::text, COALESCE(cl.nombre,''),
-		       m.estado_clasificacion, m.es_traslado,
+		       m.estado_clasificacion, m.es_traslado, m.incluido,
 		       COALESCE(b.nombre,''), COALESCE(cb.alias,''),
-		       (m.clasificacion_id = ANY($4::uuid[])) AS es_mio
+		       CASE
+		         WHEN m.clasificacion_id = ANY($4::uuid[]) THEN 'MIO'
+		         ELSE 'FUERA'
+		       END AS grupo
 		FROM movimiento_bancario m
 		LEFT JOIN concepto co ON co.id = m.concepto_id
 		LEFT JOIN clasificacion cl ON cl.id = m.clasificacion_id
 		LEFT JOIN cuenta_bancaria cb ON cb.id = m.cuenta_bancaria_id
 		LEFT JOIN banco b ON b.id = cb.banco_id
-		WHERE m.empresa_id = $1::uuid AND m.fecha = $2::date AND m.credito = $3
+		WHERE m.empresa_id = $1::uuid AND m.incluido AND m.credito > 0
+		  AND m.fecha = $2::date AND m.credito = $3
 		ORDER BY m.id`, empresaID, fecha, monto, alcance)
 	if err != nil {
 		if idInvalido(err) {
@@ -329,18 +442,19 @@ func (r *pgRepository) BuscarPorFechaYMonto(
 			f         time.Time
 			deb, cred decimal.Decimal
 			mcrc      decimal.Decimal
-			esMio     bool
+			grupo     string
 		)
 		if err := rows.Scan(&row.ID, &f, &row.Documento, &row.Descripcion,
 			&deb, &cred, &row.Moneda, &mcrc,
 			&row.ConceptoID, &row.Concepto, &row.ClasificacionID, &row.Clasificacion,
-			&row.Estado, &row.EsTraslado, &row.Banco, &row.Cuenta, &esMio); err != nil {
+			&row.Estado, &row.EsTraslado, &row.Incluido,
+			&row.Banco, &row.Cuenta, &grupo); err != nil {
 			return nil, 0, fmt.Errorf("bancos: scan búsqueda de faltante: %w", err)
 		}
 		// Lo ajeno se CUENTA y se descarta acá mismo, en el repositorio: así no queda un
-		// `MovimientoRow` con datos de otra partida viajando por el servicio, donde un descuido
+		// `MovimientoRow` con datos que el usuario no ve viajando por el servicio, donde un descuido
 		// futuro lo podría serializar.
-		if !esMio {
+		if grupo != "MIO" {
 			fuera++
 			continue
 		}
@@ -348,6 +462,7 @@ func (r *pgRepository) BuscarPorFechaYMonto(
 		row.Debito = deb.String()
 		row.Credito = cred.String()
 		row.MontoCRC = mcrc.String()
+		row.ConsecutivoLargo = ConsecutivoLargo(row.Banco, row.Descripcion)
 		mios = append(mios, row)
 	}
 	return mios, fuera, rows.Err()
@@ -358,10 +473,15 @@ func (r *pgRepository) BuscarPorFechaYMonto(
 // Sirve para que el aviso de faltante llegue con el movimiento ya identificado y quien clasifica no
 // lo tenga que buscar. Si hay más de uno devuelve "" a propósito: dos depósitos idénticos el mismo
 // día son indistinguibles y adivinar cuál es sería peor que no enganchar ninguno.
+//
+// Solo movimientos INCLUIDOS: si no, el duplicado excluido convierte un enganche exitoso en un
+// empate y el aviso viaja sin movimiento, que es justo el trabajo manual que esta función existe
+// para evitar. (Hay empates legítimos —depósitos idénticos de verdad— y esos siguen dando "".)
 func (r *pgRepository) EngancharFaltante(ctx context.Context, empresaID, fecha string, monto decimal.Decimal) (string, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id::text FROM movimiento_bancario
-		WHERE empresa_id = $1::uuid AND fecha = $2::date AND credito = $3
+		WHERE empresa_id = $1::uuid AND incluido
+		  AND fecha = $2::date AND credito = $3
 		LIMIT 2`, empresaID, fecha, monto)
 	if err != nil {
 		if idInvalido(err) {
@@ -454,9 +574,16 @@ func (r *pgRepository) ListarReportesSegmentacion(ctx context.Context, empresaID
 	// LEFT JOIN con el movimiento, no JOIN: un aviso de FALTANTE puede no tener movimiento
 	// enganchado (mig 0078), y un JOIN lo dejaría fuera de la cola en silencio — el aviso existiría
 	// en la base y nadie lo vería nunca.
+	//
+	// Por eso `incluido` acá NO filtra: se TRAE. «El movimiento se excluyó por duplicado» suele ser
+	// LA respuesta al aviso, no algo que haya que ocultarle a quien lo resuelve; y con un LEFT JOIN
+	// filtrar ni siquiera sacaría el aviso de la cola, lo dejaría con todos los campos del
+	// movimiento vacíos y `EsFaltante` en false: una fila muda que no se entiende ni se resuelve.
+	// El COALESCE es obligatorio: sin movimiento enganchado la columna viene NULL.
 	rows, err := r.pool.Query(ctx, `
 		SELECT rs.id::text, rs.motivo, COALESCE(u.nombre, u.email), rs.creado_en,
 		       COALESCE(m.id::text,''), m.fecha, COALESCE(m.descripcion,''), COALESCE(m.monto_crc,0),
+		       COALESCE(m.incluido, true),
 		       COALESCE(b.nombre,''), COALESCE(cb.alias,''),
 		       COALESCE(co.nombre,''), COALESCE(cl.nombre,''),
 		       COALESCE(rs.resolucion,''), COALESCE(rs.respuesta,''),
@@ -486,9 +613,10 @@ func (r *pgRepository) ListarReportesSegmentacion(ctx context.Context, empresaID
 			resueltoEn    *time.Time
 			fechaEsperada *time.Time
 			montoEsperado decimal.NullDecimal
+			movIncluido   bool
 		)
 		if err := rows.Scan(&rep.ID, &rep.Motivo, &rep.Usuario, &creado,
-			&rep.MovimientoID, &fecha, &rep.Descripcion, &monto,
+			&rep.MovimientoID, &fecha, &rep.Descripcion, &monto, &movIncluido,
 			&rep.Banco, &rep.Cuenta, &rep.Concepto, &rep.Clasificacion,
 			&rep.Resolucion, &rep.Respuesta, &rep.ResueltoPor, &resueltoEn,
 			&fechaEsperada, &montoEsperado, &rep.Referencia); err != nil {
@@ -499,6 +627,8 @@ func (r *pgRepository) ListarReportesSegmentacion(ctx context.Context, empresaID
 			rep.Fecha = fecha.Format("2006-01-02")
 		}
 		rep.MontoCRC = monto.String()
+		// Sin movimiento enganchado no hay nada que marcar: el COALESCE de arriba devolvió true.
+		rep.MovExcluido = rep.MovimientoID != "" && !movIncluido
 		rep.Pendiente = resueltoEn == nil
 		if resueltoEn != nil {
 			rep.ResueltoEn = resueltoEn.Format(time.RFC3339)
@@ -541,28 +671,161 @@ func (r *pgRepository) ResolverReporteSegmentacion(ctx context.Context, empresaI
 
 // ReportesDeMovimientos dice cuáles de los movimientos dados ya tienen un reporte ABIERTO.
 //
-// La pantalla del equipo lo usa para no ofrecer «avisar» dos veces sobre el mismo movimiento —y
-// para mostrar el motivo que ya se escribió, que es lo que evita el tercer aviso idéntico—.
-func (r *pgRepository) ReportesDeMovimientos(ctx context.Context, empresaID string, movIDs []string) (map[string]string, error) {
-	out := map[string]string{}
+// La pantalla del equipo lo usa para no ofrecer «avisar» dos veces sobre el mismo movimiento (el
+// índice de un solo aviso abierto por movimiento respondería 409) —y, si el aviso es suyo, para
+// mostrarle el motivo que ya escribió, que es lo que evita el tercer aviso idéntico—.
+//
+// El motivo se recorta ACÁ, en la consulta (ver AvisoAbiertoDeFila): solo sale de la base si el
+// aviso es de `usuarioID` y no es un faltante (`fecha_esperada` nula). El de otra persona, o el de un
+// faltante que el servidor enganchó a este movimiento, dice que existe y nada más.
+func (r *pgRepository) ReportesDeMovimientos(ctx context.Context, empresaID, usuarioID string, movIDs []string) (map[string]AvisoAbiertoDeFila, error) {
+	out := map[string]AvisoAbiertoDeFila{}
 	if len(movIDs) == 0 {
 		return out, nil
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT movimiento_id::text, motivo
+		SELECT movimiento_id::text,
+		       (usuario_id = $3::uuid AND fecha_esperada IS NULL),
+		       CASE WHEN usuario_id = $3::uuid AND fecha_esperada IS NULL THEN motivo ELSE '' END
 		FROM movimiento_reporte_segmentacion
 		WHERE empresa_id = $1::uuid AND resuelto_en IS NULL AND movimiento_id = ANY($2::uuid[])`,
-		empresaID, movIDs)
+		empresaID, movIDs, usuarioID)
 	if err != nil {
 		return nil, fmt.Errorf("bancos: reportes de movimientos: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var id, motivo string
-		if err := rows.Scan(&id, &motivo); err != nil {
+		var (
+			id string
+			a  AvisoAbiertoDeFila
+		)
+		if err := rows.Scan(&id, &a.Propio, &a.Motivo); err != nil {
 			return nil, fmt.Errorf("bancos: scan reporte de movimiento: %w", err)
 		}
-		out[id] = motivo
+		out[id] = a
 	}
 	return out, rows.Err()
+}
+
+// AvisosResueltosDeMovimientos devuelve, para cada movimiento dado, el último aviso RESUELTO que hizo
+// `usuarioID` sobre él (sin contar faltantes).
+//
+// Es la otra mitad de ReportesDeMovimientos: antes, al resolverse un aviso el botón volvía a salir
+// y la respuesta no se veía en ningún lado. Solo los de quien pregunta (22-set-2026, decisión
+// conservadora hasta que el Director Financiero decida si se abre): el motivo y la respuesta del
+// aviso de otra persona son de ella, y un faltante resuelto vive en «Mis avisos».
+func (r *pgRepository) AvisosResueltosDeMovimientos(ctx context.Context, empresaID, usuarioID string, movIDs []string) (map[string]AvisoResuelto, error) {
+	out := map[string]AvisoResuelto{}
+	if len(movIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT ON (movimiento_id)
+		       movimiento_id::text, motivo, resolucion, COALESCE(respuesta,''), resuelto_en
+		FROM movimiento_reporte_segmentacion
+		WHERE empresa_id = $1::uuid AND resuelto_en IS NOT NULL AND movimiento_id = ANY($2::uuid[])
+		  AND usuario_id = $3::uuid AND fecha_esperada IS NULL
+		ORDER BY movimiento_id, resuelto_en DESC, id`,
+		empresaID, movIDs, usuarioID)
+	if err != nil {
+		return nil, fmt.Errorf("bancos: avisos resueltos de movimientos: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id       string
+			a        AvisoResuelto
+			resuelto time.Time
+		)
+		if err := rows.Scan(&id, &a.Motivo, &a.Resolucion, &a.Respuesta, &resuelto); err != nil {
+			return nil, fmt.Errorf("bancos: scan aviso resuelto: %w", err)
+		}
+		a.ResueltoEn = resuelto.Format(time.RFC3339)
+		out[id] = a
+	}
+	return out, rows.Err()
+}
+
+// MisAvisos devuelve los avisos que hizo ESTE usuario en ESTA empresa, abiertos y resueltos,
+// paginados con el total real. `page` y `pageSize` ya vienen normalizados por el servicio.
+//
+// No se recorta por alcance a propósito: el caso que lo justifica es el aviso resuelto
+// reclasificando el movimiento a OTRA partida, que lo saca del alcance justo cuando hay respuesta.
+// El recorte es otro y más estricto: `empresa_id` y `usuario_id` salen del token, así que nadie ve
+// los avisos de otra persona ni los de otra empresa.
+//
+// Lo que se trae es lo que el usuario vio al avisar (ver MiAviso), y el JOIN con el movimiento se
+// hace SOLO para los avisos sobre un movimiento visto. En un faltante (`fecha_esperada` no nula) el
+// movimiento enganchado lo eligió el servidor y el usuario nunca lo vio —era de otra partida—: la
+// condición del LEFT JOIN lo deja afuera, así que ni su documento ni su cuenta pueden viajar.
+//
+// Orden: primero los que siguen en revisión (el más nuevo arriba), después los resueltos (el
+// último respondido arriba); desempate por id para que el paginado no repita ni pierda.
+func (r *pgRepository) MisAvisos(ctx context.Context, empresaID, usuarioID string, page, pageSize int) (ListaMisAvisos, error) {
+	res := ListaMisAvisos{Items: []MiAviso{}, Page: page, PageSize: pageSize}
+	err := r.pool.QueryRow(ctx, `
+		SELECT count(*), count(*) FILTER (WHERE resuelto_en IS NULL)
+		FROM movimiento_reporte_segmentacion
+		WHERE empresa_id = $1::uuid AND usuario_id = $2::uuid`, empresaID, usuarioID).
+		Scan(&res.Total, &res.Abiertos)
+	if err != nil {
+		if idInvalido(err) {
+			return res, nil
+		}
+		return ListaMisAvisos{}, fmt.Errorf("bancos: contar mis avisos: %w", err)
+	}
+	res.Resueltos = res.Total - res.Abiertos
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT rs.id::text, (rs.fecha_esperada IS NOT NULL), rs.motivo, rs.creado_en,
+		       COALESCE(m.fecha, rs.fecha_esperada),
+		       COALESCE(m.documento,''),
+		       COALESCE(m.credito, rs.monto_esperado),
+		       COALESCE(m.moneda_original,''),
+		       COALESCE(b.nombre,''), COALESCE(cb.alias,''),
+		       COALESCE(rs.referencia,''),
+		       COALESCE(rs.resolucion,''), COALESCE(rs.respuesta,''), rs.resuelto_en
+		FROM movimiento_reporte_segmentacion rs
+		LEFT JOIN movimiento_bancario m
+		  ON rs.fecha_esperada IS NULL AND m.id = rs.movimiento_id AND m.empresa_id = rs.empresa_id
+		LEFT JOIN cuenta_bancaria cb ON cb.id = m.cuenta_bancaria_id
+		LEFT JOIN banco b ON b.id = cb.banco_id
+		WHERE rs.empresa_id = $1::uuid AND rs.usuario_id = $2::uuid
+		ORDER BY (rs.resuelto_en IS NULL) DESC, COALESCE(rs.resuelto_en, rs.creado_en) DESC, rs.id
+		LIMIT $3 OFFSET $4`, empresaID, usuarioID, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return ListaMisAvisos{}, fmt.Errorf("bancos: listar mis avisos: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			a          MiAviso
+			creado     time.Time
+			fecha      *time.Time
+			monto      decimal.NullDecimal
+			resueltoEn *time.Time
+		)
+		if err := rows.Scan(&a.ID, &a.EsFaltante, &a.Motivo, &creado,
+			&fecha, &a.Documento, &monto, &a.Moneda, &a.Banco, &a.Cuenta, &a.Referencia,
+			&a.Resolucion, &a.Respuesta, &resueltoEn); err != nil {
+			return ListaMisAvisos{}, fmt.Errorf("bancos: scan mi aviso: %w", err)
+		}
+		a.CreadoEn = creado.Format(time.RFC3339)
+		if fecha != nil {
+			a.Fecha = fecha.Format("2006-01-02")
+		}
+		if monto.Valid {
+			a.Monto = monto.Decimal.String()
+		}
+		a.Estado = AvisoEnRevision
+		if resueltoEn != nil {
+			a.Estado = AvisoResueltoEstado
+			a.ResueltoEn = resueltoEn.Format(time.RFC3339)
+		}
+		res.Items = append(res.Items, a)
+	}
+	if err := rows.Err(); err != nil {
+		return ListaMisAvisos{}, fmt.Errorf("bancos: iterar mis avisos: %w", err)
+	}
+	return res, nil
 }

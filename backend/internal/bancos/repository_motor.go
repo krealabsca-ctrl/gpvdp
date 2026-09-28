@@ -36,9 +36,14 @@ func (r *pgRepository) MovimientoClasif(ctx context.Context, empresaID, movID st
 func (r *pgRepository) ContarNoIdentificadosConPalabra(ctx context.Context, empresaID, palabra, aplicaA string) (int, error) {
 	// translate() quita tildes en ambos lados para contar igual que el matcher Go
 	// (norm), que es insensible a acentos: el banner promete lo que la regla aplicará.
+	//
+	// `incluido` por la misma razón: el motor NO clasifica los excluidos (ver
+	// movimientosParaClasificar), así que contarlos acá prometería un número que la regla
+	// después no cumple. Las dos consultas cambian juntas o ninguna.
 	const q = `
 		SELECT COUNT(*) FROM movimiento_bancario
-		WHERE empresa_id = $1::uuid AND estado_clasificacion = 'NO_IDENTIFICADO'
+		WHERE empresa_id = $1::uuid AND incluido
+		  AND estado_clasificacion = 'NO_IDENTIFICADO'
 		  AND translate(upper(descripcion), 'ÁÉÍÓÚÑÜ', 'AEIOUNU')
 		      LIKE '%' || translate(upper($2), 'ÁÉÍÓÚÑÜ', 'AEIOUNU') || '%'
 		  AND (CASE $3 WHEN 'DEBITO' THEN debito > 0 WHEN 'CREDITO' THEN credito > 0 ELSE true END)`
@@ -171,8 +176,15 @@ func (r *pgRepository) ClasificarMasivo(ctx context.Context, empresaID string, m
 	return int(tag.RowsAffected()), nil
 }
 
+// ResumenClasificacion es el KPI de auto-clasificación: un contador de lectura, no una lista
+// sobre la que alguien trabaje. Por eso los excluidos salen del conteo entero.
+//
+// «Sin clasificar» es la MISMA frase que usa el bloqueo del cierre de período, y ese ya mira
+// `incluido` (ver TotalesPeriodo). Sin esta condición las dos pantallas dirían números distintos
+// para la misma frase, y el porcentaje de auto-clasificación quedaría calculado sobre un
+// denominador con plata duplicada adentro.
 func (r *pgRepository) ResumenClasificacion(ctx context.Context, empresaID, periodo string) (ResumenClasif, error) {
-	conds := "empresa_id = $1::uuid"
+	conds := "empresa_id = $1::uuid AND incluido"
 	args := []any{empresaID}
 	if periodo != "" {
 		conds += " AND to_char(fecha, 'YYYY-MM') = $2"

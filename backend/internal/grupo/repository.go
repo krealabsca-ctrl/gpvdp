@@ -89,16 +89,31 @@ const sqlNaturaleza = `COALESCE(co.naturaleza, 'SIN_CLASIFICAR')`
 // El pct_clasificado se calcula por MONTO y no por cantidad de movimientos: 155 movimientos chicos
 // sin clasificar no dicen lo mismo que ₡32,6M sin clasificar, y lo que decide si el número sirve es
 // la plata.
+//
+// Lo excluido (una importación duplicada ya corregida) NO suma plata, igual que en las ~30 consultas
+// de dinero de Bancos. Pero SÍ se cuenta, y se publica aparte en Excluidos. El filtro va dentro de
+// cada FILTER y no en el ON del LEFT JOIN, por dos razones que costaron sangre:
+//
+//  1. En el ON, `count(m.id)` también se filtra, y de ese conteo sale SinDatos. Una empresa cuya
+//     única importación del mes fue la duplicada quedaría con «no tiene ningún movimiento en el
+//     período» — que es mentira y, peor, manda a alguien a re-importar: a recrear el duplicado que
+//     se acaba de corregir.
+//  2. En el WHERE, el LEFT JOIN se degrada a INNER y la empresa sin movimientos desaparece de la
+//     vista en silencio, sin SinDatos y sin aviso.
+//
+// Así el Consolidado cuenta los movimientos igual que Bancos (ahí el COUNT tampoco esconde los
+// excluidos): la misma palabra «movimientos» da el mismo número en las dos pantallas.
 func (r *pgRepository) ResumenPorEmpresa(ctx context.Context, empresaIDs []string, periodo string) ([]FilaEmpresa, error) {
 	const q = `
 		SELECT e.id::text, e.nombre,
-		  COALESCE(SUM(m.monto_crc) FILTER (WHERE ` + sqlNaturaleza + ` = 'INGRESO'), 0)::text,
-		  COALESCE(SUM(m.monto_crc) FILTER (WHERE ` + sqlNaturaleza + ` = 'GASTO'), 0)::text,
-		  COALESCE(SUM(m.monto_crc) FILTER (WHERE ` + sqlNaturaleza + ` = 'NEUTRO'), 0)::text,
+		  COALESCE(SUM(m.monto_crc) FILTER (WHERE m.incluido AND ` + sqlNaturaleza + ` = 'INGRESO'), 0)::text,
+		  COALESCE(SUM(m.monto_crc) FILTER (WHERE m.incluido AND ` + sqlNaturaleza + ` = 'GASTO'), 0)::text,
+		  COALESCE(SUM(m.monto_crc) FILTER (WHERE m.incluido AND ` + sqlNaturaleza + ` = 'NEUTRO'), 0)::text,
 		  count(m.id)::int,
-		  count(m.id) FILTER (WHERE m.clasificacion_id IS NULL)::int,
-		  COALESCE(SUM(m.monto_crc) FILTER (WHERE m.clasificacion_id IS NULL), 0)::text,
-		  COALESCE(SUM(m.monto_crc), 0)::text
+		  count(m.id) FILTER (WHERE NOT m.incluido)::int,
+		  count(m.id) FILTER (WHERE m.incluido AND m.clasificacion_id IS NULL)::int,
+		  COALESCE(SUM(m.monto_crc) FILTER (WHERE m.incluido AND m.clasificacion_id IS NULL), 0)::text,
+		  COALESCE(SUM(m.monto_crc) FILTER (WHERE m.incluido), 0)::text
 		FROM empresa e
 		LEFT JOIN movimiento_bancario m ON m.empresa_id = e.id
 		     AND to_char(m.fecha, 'YYYY-MM') = $2
@@ -119,7 +134,7 @@ func (r *pgRepository) ResumenPorEmpresa(ctx context.Context, empresaIDs []strin
 		var f FilaEmpresa
 		var totalCRC string
 		if err := rows.Scan(&f.EmpresaID, &f.Empresa, &f.IngresosCRC, &f.GastosCRC, &f.NeutroCRC,
-			&f.Movimientos, &f.SinClasificar, &f.SinClasificarCRC, &totalCRC); err != nil {
+			&f.Movimientos, &f.Excluidos, &f.SinClasificar, &f.SinClasificarCRC, &totalCRC); err != nil {
 			return nil, fmt.Errorf("grupo: scan fila empresa: %w", err)
 		}
 		f.PctClasificado = pctClasificado(totalCRC, f.SinClasificarCRC)
@@ -150,6 +165,11 @@ func (r *pgRepository) OperacionesEntreEmpresas(ctx context.Context, empresaIDs 
 		  JOIN clasificacion cl ON cl.id = m.clasificacion_id
 		  JOIN concepto co ON co.id = cl.concepto_id
 		  WHERE m.empresa_id = ANY($1::uuid[]) AND to_char(m.fecha, 'YYYY-MM') = $2
+		    -- Un movimiento excluido no es una operación entre empresas que haya que informar. Acá el
+		    -- JOIN es INNER, así que el filtro va en el WHERE sin riesgo de perder filas. Si sumara
+		    -- acá y no en el total de arriba, este bloque diría que entre empresas se movieron más
+		    -- colones de los que el total contiene, en la misma pantalla.
+		    AND m.incluido
 		)
 		SELECT e.id::text, e.nombre, mk.contraparte, mk.partida, mk.naturaleza,
 		       count(*)::int, SUM(mk.monto_crc)::text
@@ -191,6 +211,10 @@ func (r *pgRepository) PartidasDelGrupo(ctx context.Context, empresaIDs []string
 		  JOIN clasificacion cl ON cl.id = m.clasificacion_id
 		  JOIN concepto co ON co.id = cl.concepto_id
 		  WHERE m.empresa_id = ANY($1::uuid[]) AND to_char(m.fecha, 'YYYY-MM') = $2
+		    -- Lo excluido no suma. Acá además esconde: al ordenar por SUM(monto_crc) DESC y cortar en
+		    -- LIMIT $3, una partida inflada por una importación duplicada empuja a una partida
+		    -- legítima fuera del top-15. El CTE totales no lo repite porque lee de base, ya filtrado.
+		    AND m.incluido
 		    -- Los NEUTRO quedan afuera: son traslados y ahorro, no el gasto ni el ingreso del grupo.
 		    AND co.naturaleza IN ('INGRESO', 'GASTO')
 		),

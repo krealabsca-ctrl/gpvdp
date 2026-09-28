@@ -35,10 +35,11 @@ import {
   useToast,
 } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { formatFecha, formatMoneda, hoyCR, toNumber } from "@/lib/format";
+import { formatFecha, formatFechaHora, formatMoneda, hoyCR, toNumber } from "@/lib/format";
 import { mensajeError } from "@/lib/apiError";
 import { useTienePermiso } from "@/features/auth/permisos";
-import { ETIQUETA_ESTADO, ETIQUETA_TIPO, TONO_ESTADO, esViaExpresa, puedeAccion, textoRequisitoAprobacion } from "@/features/cxp/dominio";
+import { ETIQUETA_ESTADO, ETIQUETA_TIPO, PERMISO_COMPROBANTE, TONO_ESTADO, esViaExpresa, puedeAccion, textoRequisitoAprobacion } from "@/features/cxp/dominio";
+import { fraseEnvioOK } from "@/features/cxp/comprobanteDominio";
 import {
   useAdjuntarComprobante,
   useAsignarDepartamentoDoc,
@@ -347,6 +348,10 @@ export function BandejaPage() {
   const crearLote = useCrearLote();
   const adjuntar = useAdjuntarComprobante();
   const enviar = useEnviarComprobante();
+  // QUÉ fila está trabajando, no «hay algo en curso»: con un solo booleano, adjuntar un
+  // comprobante ponía a girar el botón de las 50 filas de la página.
+  const [adjuntandoId, setAdjuntandoId] = useState<string | null>(null);
+  const [enviandoId, setEnviandoId] = useState<string | null>(null);
   const lotesQ = useLotes();
 
   // La selección se limpia al cambiar de filtro Y al cambiar de página.
@@ -489,6 +494,10 @@ export function BandejaPage() {
   const puedePagar = puedeAccion(tiene, "pagar");
   const puedeRevision = puedeAccion(tiene, "denegar");
   const puedeAnticipos = tiene("cxp.anticipos");
+  // Adjuntar/enviar/reenviar el comprobante NO es tesorería: el backend lo exige con
+  // `cxp.comprobante`. Con `puedePagar` los botones no le salían al Auxiliar Financiero —que sí
+  // tiene ese permiso— y sí a quien solo tiene tesorería, que se comía un 403 al apretarlos.
+  const puedeComprobante = tiene(PERMISO_COMPROBANTE);
   const irAAnticipos = (docId: string) => navigate(`/cxp/documentos/${docId}#anticipos`);
 
   // Guardia proactiva (estándar SAP/Oracle): si el proveedor tiene anticipos con saldo sin
@@ -938,22 +947,40 @@ export function BandejaPage() {
       ) : fase === "pgd" ? (
         <TabPagadas
           items={items}
-          onAdjuntar={(id, archivo) =>
+          onAdjuntar={(id, archivo) => {
+            // Reemplazar el adjunto deja la factura como NO ENVIADA (el proveedor no tiene el PDF
+            // nuevo): se dice acá, porque si no el badge «Enviado ✓» desaparece sin explicación.
+            const reemplazo = items.find((d) => d.id === id)?.comprobante_enviado_en;
+            setAdjuntandoId(id);
             adjuntar.mutate(
               { id, archivo },
-              { onSuccess: () => toast.success("Comprobante adjuntado"), onError: (e) => toast.error(mensajeError(e)) },
-            )
-          }
-          onEnviar={(id) =>
+              {
+                onSuccess: () =>
+                  toast.success(
+                    reemplazo
+                      ? "Comprobante reemplazado: la factura vuelve a quedar como no enviada"
+                      : "Comprobante adjuntado",
+                  ),
+                onError: (e) => toast.error(mensajeError(e)),
+                onSettled: () => setAdjuntandoId(null),
+              },
+            );
+          }}
+          onEnviar={(id) => {
+            setEnviandoId(id);
             enviar.mutate(id, {
-              onSuccess: () => toast.success("Enviado al proveedor con el PDF adjunto"),
-              onError: (e) => toast.error(mensajeError(e)),
-            })
-          }
+              onSuccess: (r) => toast.success(fraseEnvioOK(r)),
+              // El fallo del correo QUEDA REGISTRADO en la bitácora del documento: el mensaje del
+              // servidor ya viene escrito para el operador, así que se muestra tal cual.
+              onError: (e) => toast.error(limpiarError(mensajeError(e))),
+              onSettled: () => setEnviandoId(null),
+            });
+          }}
           onVer={(id) => navigate(`/cxp/documentos/${id}`)}
           onVerComprobante={setViendoComprobante}
-          puede={puedePagar}
-          pendiente={adjuntar.isPending || enviar.isPending}
+          puede={puedeComprobante}
+          adjuntandoId={adjuntandoId}
+          enviandoId={enviandoId}
         />
       ) : fase === "abi" ? (
         <TabCarteraAbierta items={items} hoy={HOY} onVer={(id) => navigate(`/cxp/documentos/${id}`)}
@@ -2104,11 +2131,15 @@ function TabPagadas(props: {
   onEnviar: (id: string) => void;
   onVer: (id: string) => void;
   onVerComprobante: (recepcionId: string) => void;
+  /** `cxp.comprobante` — el permiso que exige el backend para adjuntar, enviar y reenviar. */
   puede: boolean;
-  pendiente: boolean;
+  adjuntandoId: string | null;
+  enviandoId: string | null;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [paraId, setParaId] = useState<string | null>(null);
+  /** El documento cuyo REENVÍO se está confirmando (null = no hay diálogo abierto). */
+  const [reenviando, setReenviando] = useState<Documento | null>(null);
 
   function onFile(e: ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -2122,6 +2153,7 @@ function TabPagadas(props: {
       <input ref={fileRef} type="file" accept="application/pdf,.pdf" onChange={onFile} className="sr-only" aria-label="Comprobante de pago (PDF)" />
       <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-content-muted">
         📎 Adjuntá el comprobante del banco y envialo — el proveedor recibe su respaldo por correo.
+        Si ya salió, se puede reenviar; el detalle de cada envío está en «Ver».
       </div>
       <TableContainer>
         <Table>
@@ -2142,7 +2174,14 @@ function TabPagadas(props: {
                 <CeldaMonto d={d} />
                 <TD>
                   {d.comprobante_enviado_en ? (
-                    <Badge tone="positivo">Enviado ✓ {formatFecha(d.comprobante_enviado_en.slice(0, 10))}</Badge>
+                    <div className="flex flex-col gap-0.5">
+                      <Badge tone="positivo" className="w-fit">Enviado ✓</Badge>
+                      {/* La HORA, no solo el día: al reenviar hay que poder distinguir el envío
+                          de hace un rato del de la semana pasada. */}
+                      <span className="text-[10.5px] text-content-muted">
+                        {formatFechaHora(d.comprobante_enviado_en)}
+                      </span>
+                    </div>
                   ) : d.tiene_comprobante ? (
                     <Badge tone="accent">Adjunto ✓</Badge>
                   ) : (
@@ -2155,7 +2194,7 @@ function TabPagadas(props: {
                       <Button
                         size="sm"
                         variant="secondary"
-                        loading={props.pendiente && paraId === d.id}
+                        loading={props.adjuntandoId === d.id}
                         onClick={() => {
                           setParaId(d.id);
                           fileRef.current?.click();
@@ -2164,9 +2203,20 @@ function TabPagadas(props: {
                         {d.tiene_comprobante ? "📎 Reemplazar" : "📎 Adjuntar"}
                       </Button>
                     )}
-                    {props.puede && d.tiene_comprobante && !d.comprobante_enviado_en && (
-                      <Button size="sm" onClick={() => props.onEnviar(d.id)} loading={props.pendiente}>
-                        ✉ Enviar
+                    {/* El botón YA NO DESAPARECE al enviar: reenviar es la misma llamada, y hasta
+                        ahora la única forma de reintentar un correo que rebotó era reemplazar el
+                        PDF para que el botón volviera a aparecer. El reenvío pide confirmación
+                        porque le vuelve a escribir al proveedor. */}
+                    {props.puede && d.tiene_comprobante && (
+                      <Button
+                        size="sm"
+                        variant={d.comprobante_enviado_en ? "secondary" : "primary"}
+                        loading={props.enviandoId === d.id}
+                        onClick={() =>
+                          d.comprobante_enviado_en ? setReenviando(d) : props.onEnviar(d.id)
+                        }
+                      >
+                        {d.comprobante_enviado_en ? "✉ Reenviar" : "✉ Enviar"}
                       </Button>
                     )}
                     <Button size="sm" variant="ghost" onClick={() => props.onVer(d.id)}>
@@ -2179,6 +2229,20 @@ function TabPagadas(props: {
           </TBody>
         </Table>
       </TableContainer>
+
+      {reenviando && (
+        <ConfirmDialog
+          titulo={`Reenviar el comprobante a ${reenviando.proveedor}`}
+          descripcion={`Se le vuelve a mandar el mismo PDF al correo del proveedor, con copia oculta a quien aprobó el pago. Último envío: ${formatFechaHora(reenviando.comprobante_enviado_en)}`}
+          textoConfirmar="Reenviar"
+          pendiente={props.enviandoId === reenviando.id}
+          onConfirmar={() => {
+            props.onEnviar(reenviando.id);
+            setReenviando(null);
+          }}
+          onCancelar={() => setReenviando(null)}
+        />
+      )}
     </div>
   );
 }

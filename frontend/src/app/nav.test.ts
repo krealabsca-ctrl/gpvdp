@@ -48,6 +48,17 @@ describe("permisoDeRuta", () => {
     expect(permisoDeRuta("/cxp/bandeja")).toBe("cxp.ver");
   });
 
+  it("separa el correo saliente del resto de Configuración", () => {
+    // El sobre y la carta son dos permisos DISTINTOS: en Notificaciones se edita TEXTO, mientras
+    // que en Correo saliente se guarda la CREDENCIAL del correo corporativo de la empresa. Si las
+    // dos rutas resolvieran al mismo permiso, quien redacta los correos podría cambiar el buzón
+    // desde el que salen. Y ninguna de las dos puede heredar `admin.roles` del módulo, que abriría
+    // la pantalla a quien administra usuarios.
+    expect(permisoDeRuta("/correo-saliente")).toBe("admin.correo");
+    expect(permisoDeRuta("/notificaciones")).toBe("admin.plantillas");
+    expect(permisoDeRuta("/usuarios")).toBe("admin.roles");
+  });
+
   it("toda página anidada resuelve a SU permiso y no al de su ruta padre", () => {
     // Barrido de todo el registro: por cada par de rutas donde una es prefijo de la otra, la más
     // larga tiene que quedarse con su propio permiso. Es el caso que hay que sostener cada vez que
