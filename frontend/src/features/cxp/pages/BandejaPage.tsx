@@ -245,6 +245,15 @@ export function BandejaPage() {
   const [montoMin, setMontoMin] = useState("");
   const [montoMax, setMontoMax] = useState("");
   const [estadoFiltro, setEstadoFiltro] = useState("");
+  // Rango de fechas. `campoFecha` dice SOBRE CUÁL fecha se filtra: emisión, vencimiento o la fecha
+  // de pago programada. Son preguntas distintas —«qué facturó el proveedor en agosto» no es «qué se
+  // vence en agosto»— y un solo par de campos con un selector evita tres pares en la barra.
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+  const [campoFecha, setCampoFecha] = useState<"emision" | "vencimiento" | "pago">("emision");
+  // El selector de fecha del navegador dispara en CADA tecla del año, así que tecleando «2026» la
+  // pantalla llegaría a pedir «0002-08-01». No se manda hasta que la fecha existe de verdad.
+  const fechaLista = (v: string) => (/^[1-9]\d{3}-\d{2}-\d{2}$/.test(v) ? v : undefined);
   const proveedoresQ = useTodosProveedores();
   const clasificacionesQ = useClasificaciones("cxp");
   useEffect(() => {
@@ -255,7 +264,18 @@ export function BandejaPage() {
     }, 300);
     return () => clearTimeout(t);
   }, [qInput, montoMinIn, montoMaxIn]);
-  const hayFiltros = !!(q || provFiltro || gastoFiltro || montoMin || montoMax || estadoFiltro || vencFiltro || prioFiltro);
+  const hayFiltros = !!(
+    q ||
+    provFiltro ||
+    gastoFiltro ||
+    montoMin ||
+    montoMax ||
+    estadoFiltro ||
+    vencFiltro ||
+    prioFiltro ||
+    desde ||
+    hasta
+  );
   function limpiarFiltros() {
     setQInput("");
     setProvFiltro("");
@@ -263,6 +283,8 @@ export function BandejaPage() {
     setMontoMinIn("");
     setMontoMaxIn("");
     setEstadoFiltro("");
+    setDesde("");
+    setHasta("");
     quitarVencimiento();
   }
 
@@ -331,6 +353,9 @@ export function BandejaPage() {
     clasificacion_id: gastoFiltro || undefined,
     monto_min: montoMin || undefined,
     monto_max: montoMax || undefined,
+    desde: fechaLista(desde),
+    hasta: fechaLista(hasta),
+    campo_fecha: desde || hasta ? campoFecha : undefined,
     vencimiento: vencFiltro || undefined,
     prioridad: (prioFiltro || undefined) as FiltrosDocumentos["prioridad"],
     orden: "vencimiento",
@@ -652,6 +677,22 @@ export function BandejaPage() {
         />
         <Input label="Monto ≥" value={montoMinIn} onChange={(e) => setMontoMinIn(e.target.value)} placeholder="0" inputMode="decimal" className="max-w-28" />
         <Input label="Monto ≤" value={montoMaxIn} onChange={(e) => setMontoMaxIn(e.target.value)} placeholder="—" inputMode="decimal" className="max-w-28" />
+        {/* El selector va ANTES de las fechas a propósito: primero se decide qué fecha se está
+            preguntando y después se escribe el rango. Al revés, uno llena las fechas y recién ahí
+            descubre que estaba filtrando por la columna que no era. */}
+        <Select
+          label="Fecha de"
+          value={campoFecha}
+          onChange={(e) => setCampoFecha(e.target.value as typeof campoFecha)}
+          options={[
+            { value: "emision", label: "Emisión" },
+            { value: "vencimiento", label: "Vencimiento" },
+            { value: "pago", label: "Pago programado" },
+          ]}
+          className="min-w-40"
+        />
+        <Input label="Desde" type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className="w-36" />
+        <Input label="Hasta" type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className="w-36" />
         {conf.estados.includes(",") && (
           <Select
             label="Estado"
@@ -889,6 +930,20 @@ export function BandejaPage() {
               {
                 onSuccess: async (lote) => {
                   setSel(new Set());
+                  // El corte pudo salir MÁS CHICO de lo que se pidió: lo que no entró no se paga, y
+                  // callarlo es lo que dejó pasar el lote #17. Se avisa antes de hablar de la macro.
+                  const fuera = lote.fuera ?? [];
+                  if (fuera.length > 0) {
+                    toast.error(
+                      `${fuera.length} factura(s) NO entraron al lote #${lote.numero}: ` +
+                        fuera
+                          .slice(0, 3)
+                          .map((f) => `${f.proveedor || f.consecutivo} (${f.motivo})`)
+                          .join(" · ") +
+                        (fuera.length > 3 ? ` y ${fuera.length - 3} más` : ""),
+                    );
+                  }
+                  let bajada = false;
                   try {
                     const blob = await cxpApi.descargarMacroLote(lote.id);
                     const url = URL.createObjectURL(blob);
@@ -899,10 +954,17 @@ export function BandejaPage() {
                     a.click();
                     a.remove();
                     URL.revokeObjectURL(url);
-                  } catch {
-                    /* la macro se puede re-descargar desde En banco */
+                    bajada = true;
+                  } catch (err) {
+                    // Antes esto se tragaba en silencio y el toast decía «macro descargada» igual.
+                    // Decir que se bajó un archivo que no se bajó es peor que no bajarlo.
+                    toast.error(`Lote #${lote.numero} creado, pero la macro no se pudo generar: ${mensajeError(err)}`);
                   }
-                  toast.success(`Lote #${lote.numero} creado (${lote.cantidad} pagos) · macro descargada — subila al banco`);
+                  if (bajada) {
+                    toast.success(
+                      `Lote #${lote.numero} creado (${lote.cantidad} pagos) · macro descargada — subila al banco`,
+                    );
+                  }
                   setFase("bco");
                 },
                 onError: (err) => toast.error(mensajeError(err)),

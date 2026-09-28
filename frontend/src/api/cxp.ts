@@ -433,6 +433,21 @@ export interface LotePago {
   pagadas: number;
   rebotadas: number;
   pendientes: number;
+  /**
+   * Las facturas que se pidieron cortar y NO entraron a este lote, con el porqué de cada una.
+   * Ausente en el caso normal. Si viene, el corte salió más chico de lo que se pidió y hay que
+   * decirlo: lo que no entró no se paga, y antes eso desaparecía sin una palabra.
+   */
+  fuera?: DocumentoFueraDelLote[];
+}
+
+/** Una factura que quedó fuera del lote, con su razón escrita para leerse en pantalla. */
+export interface DocumentoFueraDelLote {
+  documento_id: string;
+  consecutivo: string;
+  proveedor: string;
+  estado: string;
+  motivo: string;
 }
 
 /** 3er nivel del catálogo de gasto (cuelga de una Clasificación). Exclusivo de CxP. */
@@ -472,6 +487,15 @@ export interface FiltrosDocumentos {
   clasificacion_id?: string;
   monto_min?: string;
   monto_max?: string;
+  /**
+   * Rango de fechas (aaaa-mm-dd, inclusivo en las dos puntas). `campo_fecha` dice sobre CUÁL de las
+   * tres fechas del documento se filtra; sin él, emisión. Mandar una fecha a medio teclear
+   * («0002-08-01», lo que emite el navegador mientras se escribe el año) devuelve 400: el cliente
+   * no las manda hasta que existen.
+   */
+  desde?: string;
+  hasta?: string;
+  campo_fecha?: "emision" | "vencimiento" | "pago";
   lote_id?: string;
   /** "sin" = sin lote asignado · "con" = con lote. */
   lote?: string;
@@ -774,6 +798,24 @@ export interface ResumenRecepcion {
   parqueadas: number;
   descartadas: number;
   ultima_en?: string;
+  /**
+   * Los buzones y los tipos que EXISTEN de verdad en la bandeja, para llenar los dos selectores.
+   * Salen de los datos y no de una lista fija: ofrecer «NC» cuando nunca llegó una nota de crédito
+   * hace perder el tiempo buscando lo que no hay.
+   */
+  buzones: string[];
+  tipos: string[];
+}
+
+/** Filtros de la bandeja de recepción. Las fechas son de LLEGADA (aaaa-mm-dd). */
+export interface FiltrosRecepcion {
+  estado?: string;
+  q?: string;
+  desde?: string;
+  hasta?: string;
+  buzon?: string;
+  tipo_documento?: string;
+  limite?: number;
 }
 
 export interface BandejaRecepcion {
@@ -1314,10 +1356,14 @@ export const cxpApi = {
 
   // --- Recepción de facturas por buzón de correo ---
   /** La bandeja de lo que llegó por correo, con el resumen y la cola de errores. */
-  recepciones(filtros: { estado?: string; q?: string; limite?: number } = {}): Promise<BandejaRecepcion> {
+  recepciones(filtros: FiltrosRecepcion = {}): Promise<BandejaRecepcion> {
     const p = new URLSearchParams();
     if (filtros.estado) p.set("estado", filtros.estado);
     if (filtros.q) p.set("q", filtros.q);
+    if (filtros.desde) p.set("desde", filtros.desde);
+    if (filtros.hasta) p.set("hasta", filtros.hasta);
+    if (filtros.buzon) p.set("buzon", filtros.buzon);
+    if (filtros.tipo_documento) p.set("tipo_documento", filtros.tipo_documento);
     if (filtros.limite) p.set("limite", String(filtros.limite));
     const qs = p.toString();
     return apiFetch<BandejaRecepcion>("/cxp/recepciones" + (qs ? "?" + qs : ""));

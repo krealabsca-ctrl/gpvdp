@@ -29,10 +29,26 @@ type RecepcionNueva struct {
 }
 
 // FiltrosRecepcion filtra la bandeja de recepción.
+//
+// Hasta el 25-set-2026 solo tenía estado y búsqueda libre, y con eso no se podía contestar ninguna
+// de las preguntas que se le hacen a esta pantalla: «¿qué llegó la semana pasada?», «¿qué entró por
+// el buzón de Coopeprofa?», «¿cuántas notas de crédito me mandaron?». La lista además se corta en
+// 200, así que sin filtros lo viejo directamente no se alcanza.
 type FiltrosRecepcion struct {
 	Estado string
 	Q      string
-	Limite int
+	// Desde / Hasta acotan por FECHA DE LLEGADA (`creado_en`), inclusive en las dos puntas. Es la
+	// única fecha que esta bandeja conoce: la del documento todavía no se leyó cuando algo no pudo
+	// entrar, que es justo el caso que se viene a revisar acá.
+	Desde string
+	Hasta string
+	// Buzon: la casilla por la que entró. Con varias empresas en el mismo servidor de correo, es
+	// lo que separa «no llegó» de «llegó al buzón equivocado».
+	Buzon string
+	// TipoDocumento: FE, NC, ND, TE… La pestaña «Sin pago» ya agrupa notas de crédito y recibos,
+	// pero no deja mirar UN tipo.
+	TipoDocumento string
+	Limite        int
 }
 
 // ArchivoRecepcion es el XML o el PDF originales, para descargarlos del expediente.
@@ -50,6 +66,11 @@ type ResumenRecepcion struct {
 	Parqueadas  int    `json:"parqueadas"`
 	Descartadas int    `json:"descartadas"`
 	UltimaEn    string `json:"ultima_en,omitempty"`
+	// Buzones y Tipos son los valores que EXISTEN de verdad en la bandeja, para llenar los dos
+	// selectores. Salen de los datos y no de una lista fija a propósito: un selector que ofrece
+	// «NC» cuando nunca llegó una nota de crédito hace perder el tiempo buscando lo que no hay.
+	Buzones []string `json:"buzones"`
+	Tipos   []string `json:"tipos"`
 }
 
 // CedulasDeEmpresa devuelve las cédulas jurídicas que responde la empresa.
@@ -290,6 +311,24 @@ func (r *pgRepository) ListarRecepciones(ctx context.Context, empresaID string, 
 			"(rc.clave ILIKE $%d OR rc.asunto ILIKE $%d OR rc.remitente ILIKE $%d OR p.nombre ILIKE $%d)",
 			len(args), len(args), len(args), len(args)))
 	}
+	// Fecha de LLEGADA. `creado_en` es timestamptz: se compara por día con un cast, o «hasta el 31»
+	// dejaría afuera todo lo que llegó ese 31 después de medianoche.
+	if d := strings.TrimSpace(f.Desde); d != "" {
+		args = append(args, d)
+		conds = append(conds, fmt.Sprintf("rc.creado_en::date >= $%d::date", len(args)))
+	}
+	if h := strings.TrimSpace(f.Hasta); h != "" {
+		args = append(args, h)
+		conds = append(conds, fmt.Sprintf("rc.creado_en::date <= $%d::date", len(args)))
+	}
+	if b := strings.TrimSpace(f.Buzon); b != "" {
+		args = append(args, b)
+		conds = append(conds, fmt.Sprintf("rc.buzon = $%d", len(args)))
+	}
+	if td := strings.TrimSpace(f.TipoDocumento); td != "" {
+		args = append(args, td)
+		conds = append(conds, fmt.Sprintf("rc.tipo_documento = $%d", len(args)))
+	}
 	limite := f.Limite
 	if limite <= 0 || limite > 500 {
 		limite = 200
@@ -394,7 +433,38 @@ func (r *pgRepository) ResumenRecepcion(ctx context.Context, empresaID string) (
 	if err != nil {
 		return ResumenRecepcion{}, fmt.Errorf("cxp: resumen de recepción: %w", err)
 	}
+	res.Buzones, err = r.valoresDeRecepcion(ctx, empresaID, "buzon")
+	if err != nil {
+		return ResumenRecepcion{}, err
+	}
+	res.Tipos, err = r.valoresDeRecepcion(ctx, empresaID, "tipo_documento")
+	if err != nil {
+		return ResumenRecepcion{}, err
+	}
 	return res, nil
+}
+
+// valoresDeRecepcion lista los valores distintos de una columna de la bandeja, para los selectores.
+//
+// `col` NO viene del cliente: la llaman dos veces con literales de este archivo. Se deja privada y
+// sin parámetro dinámico expuesto justamente para que siga siendo así.
+func (r *pgRepository) valoresDeRecepcion(ctx context.Context, empresaID, col string) ([]string, error) {
+	q := `SELECT DISTINCT ` + col + ` FROM cxp_recepcion
+	      WHERE empresa_id = $1::uuid AND COALESCE(` + col + `, '') <> '' ORDER BY 1`
+	rows, err := r.pool.Query(ctx, q, empresaID)
+	if err != nil {
+		return nil, fmt.Errorf("cxp: valores de recepción (%s): %w", col, err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, fmt.Errorf("cxp: scan valor de recepción: %w", err)
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
 }
 
 // ClaveEnOtraEmpresa dice si esa clave ya se registró en OTRA empresa del grupo.

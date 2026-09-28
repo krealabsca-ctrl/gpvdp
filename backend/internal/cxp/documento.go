@@ -2,6 +2,7 @@ package cxp
 
 import (
 	"errors"
+	"time"
 
 	"github.com/shopspring/decimal"
 )
@@ -243,9 +244,20 @@ type FiltrosDocumentos struct {
 	ClasificacionID string
 	MontoMin        string
 	MontoMax        string
-	LoteID          string // filtra las facturas de un lote de pago
-	LoteFiltro      string // "sin" = sin lote asignado · "con" = con lote
-	Orden           string // "vencimiento" => calendariza por fecha de vencimiento; default: emisión desc
+	// Rango de fechas de la Bandeja (YYYY-MM-DD, inclusivo en las dos puntas).
+	//
+	// `CampoFecha` dice SOBRE CUÁL fecha se filtra: "emision" (por defecto), "vencimiento" o
+	// "pago" (la programada). Son las tres que la pantalla ya muestra y por las que ya ordena, y
+	// preguntan cosas distintas: «qué facturó el proveedor en agosto» no es «qué se vence en
+	// agosto» ni «qué se va a pagar en agosto». Un solo par de campos con un selector evita tres
+	// pares de fechas en la barra, que nadie usaría bien.
+	Desde      string
+	Hasta      string
+	CampoFecha string
+
+	LoteID     string // filtra las facturas de un lote de pago
+	LoteFiltro string // "sin" = sin lote asignado · "con" = con lote
+	Orden      string // "vencimiento" => calendariza por fecha de vencimiento; default: emisión desc
 	// Vencimiento: tramo de antigüedad del dashboard ("vencido" = todos los vencidos, o una
 	// clave de tramo: v90, v61, v31, v1, s7, s30, futuro, sin_fecha). Hace navegable el
 	// panel de vencimientos: del número se llega a las facturas que lo componen.
@@ -277,6 +289,45 @@ type FiltrosDocumentos struct {
 	Prioridad string
 	Page      int
 	PageSize  int
+}
+
+// Campos de fecha por los que la Bandeja deja filtrar.
+const (
+	// FechaEmision es la del documento: «qué facturó el proveedor en agosto». Es la de siempre y
+	// la que ordena la lista por defecto.
+	FechaEmision = "emision"
+	// FechaVencimiento: «qué se vence en agosto». Es por la que ordena la fase «Por pagar».
+	FechaVencimiento = "vencimiento"
+	// FechaPago es la fecha de pago PROGRAMADA: «qué quedó cortado para agosto».
+	FechaPago = "pago"
+)
+
+// FechaISOValida dice si el texto es una fecha aaaa-mm-dd que existe en el calendario.
+//
+// El selector de fecha del navegador dispara en CADA tecla del año y rellena con ceros, así que
+// tecleando «2026» el cliente llega a pedir «0002-08-01». Sin esta guarda ese texto llega al
+// `::date` de Postgres: en un caso revienta con un 500 «error interno» y en otro («0202-08-01»)
+// devuelve 200 con una lista vacía, que es peor, porque parece un filtro que funcionó. El piso de
+// cuatro cifras corta las dos puntas. Misma regla que en Bancos.
+func FechaISOValida(v string) bool {
+	t, err := time.Parse("2006-01-02", v)
+	return err == nil && t.Year() >= 1000 && t.Format("2006-01-02") == v
+}
+
+// columnaFecha traduce el campo pedido a una columna REAL, desde una whitelist.
+//
+// La columna se concatena al SQL —no puede ir como parámetro—, así que esto es lo único que separa
+// un filtro de una inyección. Cualquier valor desconocido cae en emisión, que es el defecto de la
+// pantalla: un campo mal escrito NO puede abrir otra columna ni tumbar la consulta.
+func columnaFecha(campo string) string {
+	switch campo {
+	case FechaVencimiento:
+		return "d.fecha_vencimiento"
+	case FechaPago:
+		return "d.fecha_pago_programada"
+	default:
+		return "d.fecha_emision"
+	}
 }
 
 // prioridadesFiltro son los valores aceptados por FiltrosDocumentos.Prioridad.

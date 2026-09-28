@@ -118,6 +118,17 @@ func (h *Handler) ListarDocumentos(c *gin.Context) {
 	if v := c.Query("estados"); v != "" {
 		estados = strings.Split(v, ",")
 	}
+	// Una fecha a medio teclear NO puede terminar en un 500 ni, peor, en una lista vacía que se
+	// lee como un filtro que funcionó. Se corta acá y se dice cuál de las dos está mal.
+	for _, f := range []struct{ nombre, valor string }{
+		{"desde", c.Query("desde")}, {"hasta", c.Query("hasta")},
+	} {
+		if f.valor != "" && !FechaISOValida(f.valor) {
+			httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion,
+				"la fecha «"+f.nombre+"» no es válida (se espera aaaa-mm-dd)")
+			return
+		}
+	}
 	lista, err := h.svc.ListarDocumentos(c.Request.Context(), claims.EmpresaID, claims.Rol, claims.UsuarioID(), FiltrosDocumentos{
 		Estado:             c.Query("estado"),
 		Estados:            estados,
@@ -127,6 +138,9 @@ func (h *Handler) ListarDocumentos(c *gin.Context) {
 		ClasificacionID:    c.Query("clasificacion_id"),
 		MontoMin:           c.Query("monto_min"),
 		MontoMax:           c.Query("monto_max"),
+		Desde:              c.Query("desde"),
+		Hasta:              c.Query("hasta"),
+		CampoFecha:         c.Query("campo_fecha"),
 		LoteID:             c.Query("lote_id"),
 		LoteFiltro:         c.Query("lote"),
 		Orden:              c.Query("orden"),

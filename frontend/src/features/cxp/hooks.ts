@@ -14,6 +14,7 @@ import {
   type DepartamentoInput,
   type DocumentoInput,
   type FiltrosDocumentos,
+  type FiltrosRecepcion,
   type FilaIBAN,
   type FondoInput,
   type ValeInput,
@@ -954,7 +955,7 @@ function invalidarDocumento(qc: QueryClient, empresaId: string, id: string): voi
 // ---------------------------------------------------------------------------
 
 /** La bandeja de lo que llegó por correo, con su resumen y la cola de errores. */
-export function useRecepciones(filtros: { estado?: string; q?: string } = {}) {
+export function useRecepciones(filtros: FiltrosRecepcion = {}) {
   const empresaId = useEmpresaId();
   return useQuery({
     queryKey: queryKeys.cxp.recepciones(empresaId, filtros),

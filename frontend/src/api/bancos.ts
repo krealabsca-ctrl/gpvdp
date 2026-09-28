@@ -240,6 +240,106 @@ export interface FiltrosImportaciones {
   page_size?: number;
 }
 
+// --- Cargar histórico (mig 0087) ---
+//
+// Un archivo con VARIAS cuentas y VARIOS meses que CREA los movimientos con su partida ya puesta.
+// Es lo contrario de «Traer la clasificación desde Excel», que solo pinta la partida sobre lo que ya
+// está cargado. Se sube, se mira el plan, y recién entonces se confirma.
+
+/** Un nombre de cuenta que el archivo trae y que no existe (o no sirve) en la empresa. */
+export interface CuentaNoResuelta {
+  /** El texto tal cual venía en la celda: es lo que hay que ir a crear. */
+  nombre_en_archivo: string;
+  filas: number;
+  /** Ubica el problema en el Excel sin contar filas a mano. */
+  primera_linea: number;
+  /** Distingue «no existe» de «está desactivada» y de «hay dos iguales»: se arreglan distinto. */
+  motivo: string;
+}
+
+/** Una fila que no se pudo leer, con el texto original que no se entendió. */
+export interface ErrorFilaHistorico {
+  linea: number;
+  motivo: string;
+  texto: string;
+}
+
+/** Lo que el archivo trae para UNA cuenta. Montos como string decimal. */
+export interface ResumenCuentaHistorico {
+  cuenta_bancaria_id: string;
+  cuenta: string;
+  banco: string;
+  moneda: Moneda;
+  /** Las grafías con que el archivo nombró esta cuenta (el alias y su IBAN caen en la misma). */
+  nombres_en_archivo: string[];
+  filas: number;
+  fecha_desde: string;
+  fecha_hasta: string;
+  /** Meses «YYYY-MM» que toca esta cuenta, ordenados. */
+  meses: string[];
+  /** De TODAS las filas del archivo para esta cuenta. */
+  total_debitos: string;
+  total_creditos: string;
+  /**
+   * Solo de lo que VA A ENTRAR (descontando lo que ya está). En una re-subida los dos pares dicen
+   * cosas distintas, y el número que hay que mirar antes de confirmar es cuánta plata entra.
+   */
+  debitos_nuevos: string;
+  creditos_nuevos: string;
+  nuevas: number;
+  /** Lo que NO se va a insertar porque esa huella ya cuenta plata en los libros. */
+  ya_existen: number;
+  /** El archivo no dice partida (celda vacía o «Sin clasificar»). */
+  sin_partida: number;
+  /** El archivo nombra una partida que no está en el catálogo: se cargan igual, sin partida. */
+  partida_desconocida: number;
+  /** Cuenta en dólares cuyo monto en colones queda provisional hasta registrar el TC del mes. */
+  sin_tipo_cambio: number;
+  /** Solo al confirmar. */
+  importacion_id: string;
+  insertados: number;
+}
+
+export interface TotalesHistorico {
+  /** Filas de MOVIMIENTO: la decoración del reporte no cuenta acá. */
+  filas: number;
+  /** Banda de partida, «Subtotal …», «TOTAL · N» y el pie. NO son errores. */
+  lineas_de_formato: number;
+  nuevas: number;
+  ya_existen: number;
+  sin_partida: number;
+  partida_desconocida: number;
+  sin_cuenta: number;
+  errores: number;
+  total_debitos: string;
+  total_creditos: string;
+  fecha_desde: string;
+  fecha_hasta: string;
+}
+
+/** Qué va a pasar (o qué pasó) con el archivo entero. */
+export interface PlanHistorico {
+  carga_id: string;
+  nombre_archivo: string;
+  /** Se lee UNA hoja; `hojas` son todas las del libro, porque callarlo esconde trabajo. */
+  hoja: string;
+  hojas: string[];
+  totales: TotalesHistorico;
+  cuentas: ResumenCuentaHistorico[];
+  /** Lo que hay que crear antes de volver a subir. */
+  cuentas_no_resueltas: CuentaNoResuelta[];
+  /** Nombres de partida que el archivo trae y el catálogo no tiene. */
+  partidas_faltantes: string[];
+  errores: ErrorFilaHistorico[];
+  /** La lista de errores se recortó; el contador de `totales` es el real. */
+  errores_truncados: boolean;
+  /** false = fue una previsualización y no se escribió nada. */
+  aplicado: boolean;
+  insertados: number;
+  /** Una frase con lo que hay que mirar antes de confirmar (vacío = nada que advertir). */
+  aviso: string;
+}
+
 export interface ResultadoReversa {
   importacion_id: string;
   estado: EstadoImportacion;
@@ -1292,6 +1392,24 @@ export const bancosApi = {
     return apiFetch<ConfirmarResult>(`/bancos/importaciones/${importacionId}/confirmar`, {
       method: "POST",
       json: { excluir },
+    });
+  },
+
+  // --- Cargar histórico (mig 0087) ---
+  /** multipart: sube el .xlsx y devuelve el PLAN. No escribe nada todavía. */
+  subirHistorico(archivo: File): Promise<PlanHistorico> {
+    const fd = new FormData();
+    fd.append("archivo", archivo);
+    return apiFetch<PlanHistorico>("/bancos/importaciones/historico", { method: "POST", raw: fd });
+  },
+  /** Rearma la previsualización de una carga ya subida, sin volver a mandar el archivo. */
+  previewHistorico(cargaId: string): Promise<PlanHistorico> {
+    return apiFetch<PlanHistorico>(`/bancos/importaciones/historico/${cargaId}`, { method: "GET" });
+  },
+  /** Escribe: una importación POR CUENTA y sus movimientos, con la partida del archivo. */
+  confirmarHistorico(cargaId: string): Promise<PlanHistorico> {
+    return apiFetch<PlanHistorico>(`/bancos/importaciones/historico/${cargaId}/confirmar`, {
+      method: "POST",
     });
   },
 

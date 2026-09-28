@@ -216,6 +216,19 @@ func (r *pgRepository) ListarDocumentos(ctx context.Context, empresaID string, f
 		args = append(args, f.MontoMax)
 		conds = append(conds, fmt.Sprintf("d.total_crc <= $%d::numeric", len(args)))
 	}
+	// Rango de fechas. La columna sale de una whitelist, NUNCA del texto del cliente: acá se
+	// concatena SQL y un campo libre sería una inyección con forma de filtro.
+	if f.Desde != "" || f.Hasta != "" {
+		col := columnaFecha(f.CampoFecha)
+		if f.Desde != "" {
+			args = append(args, f.Desde)
+			conds = append(conds, fmt.Sprintf("%s >= $%d::date", col, len(args)))
+		}
+		if f.Hasta != "" {
+			args = append(args, f.Hasta)
+			conds = append(conds, fmt.Sprintf("%s <= $%d::date", col, len(args)))
+		}
+	}
 	if f.LoteID != "" {
 		args = append(args, f.LoteID)
 		conds = append(conds, fmt.Sprintf("d.lote_id = $%d::uuid", len(args)))
@@ -278,6 +291,7 @@ func (r *pgRepository) ListarDocumentos(ctx context.Context, empresaID string, f
 	if err := r.pool.QueryRow(ctx, "SELECT COUNT(*) "+documentoFrom+" WHERE "+where, args...).Scan(&total); err != nil {
 		return ListaDocumentos{}, fmt.Errorf("cxp: contar documentos: %w", err)
 	}
+
 	if f.PageSize <= 0 || f.PageSize > 500 {
 		f.PageSize = 100
 	}
