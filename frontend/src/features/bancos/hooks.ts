@@ -586,6 +586,35 @@ export function useDeshacerReversaImportacion() {
   });
 }
 
+/**
+ * Cargar histórico: subir el archivo y ver el plan. NO escribe nada, así que no invalida nada.
+ *
+ * El plan vive en el estado de la pantalla y no en la caché: es de UN archivo que el usuario acaba
+ * de elegir, y guardarlo por clave haría que al volver a entrar reapareciera el plan de un archivo
+ * que ya no está en la mano.
+ */
+export function useSubirHistorico() {
+  return useMutation({
+    mutationFn: (archivo: File) => bancosApi.subirHistorico(archivo),
+  });
+}
+
+/**
+ * Confirmar la carga histórica: escribe una importación POR CUENTA y sus movimientos.
+ *
+ * Mete plata en los libros, así que refresca lo MISMO que la reversa —que la saca—: son la misma
+ * lista de pantallas que suman. Y el listado de cargas, porque cada cuenta del archivo aparece ahí
+ * como una carga propia que se puede revertir sola.
+ */
+export function useConfirmarHistorico() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (cargaId: string) => bancosApi.confirmarHistorico(cargaId),
+    onSuccess: () => invalidarTrasReversa(qc, empresaId),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Cuadre / Dashboard
 // ---------------------------------------------------------------------------

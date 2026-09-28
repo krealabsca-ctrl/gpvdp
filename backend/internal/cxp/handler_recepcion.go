@@ -124,8 +124,21 @@ func (h *Handler) Recepciones(c *gin.Context) {
 		return
 	}
 	limite, _ := strconv.Atoi(c.Query("limite"))
+	// Misma guarda que la Bandeja: una fecha a medio teclear no puede salir como 500 ni como una
+	// lista vacía que parece un filtro aplicado.
+	for _, f := range []struct{ nombre, valor string }{
+		{"desde", c.Query("desde")}, {"hasta", c.Query("hasta")},
+	} {
+		if f.valor != "" && !FechaISOValida(f.valor) {
+			httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion,
+				"la fecha «"+f.nombre+"» no es válida (se espera aaaa-mm-dd)")
+			return
+		}
+	}
 	lista, err := h.svc.Recepciones(c.Request.Context(), empresaID, FiltrosRecepcion{
 		Estado: c.Query("estado"), Q: c.Query("q"), Limite: limite,
+		Desde: c.Query("desde"), Hasta: c.Query("hasta"),
+		Buzon: c.Query("buzon"), TipoDocumento: c.Query("tipo_documento"),
 	})
 	if err != nil {
 		h.responderError(c, err, "recepciones")

@@ -1,6 +1,7 @@
 package cxp
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -29,6 +30,17 @@ func (h *Handler) CrearLote(c *gin.Context) {
 		return
 	}
 	lote, err := h.svc.CrearLote(c.Request.Context(), empresaID, req.FechaCorte, req.IDs, usuarioID)
+	// Ninguna de las seleccionadas se pudo cortar. Va con el detalle factura por factura y NO por
+	// responderError, que solo sabe mandar un mensaje: acá lo que sirve es la lista.
+	var vacio *LoteVacioError
+	if errors.As(err, &vacio) {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"code":    "LOTE_VACIO",
+			"message": vacio.Error(),
+			"fuera":   vacio.Fuera,
+		})
+		return
+	}
 	if err != nil {
 		h.responderError(c, err, "crear-lote")
 		return
@@ -59,6 +71,20 @@ func (h *Handler) MacroLote(c *gin.Context) {
 	rows, err := h.svc.MacroLote(c.Request.Context(), empresaID, c.Param("id"))
 	if err != nil {
 		h.responderError(c, err, "macro-lote")
+		return
+	}
+	// GUARDARRAÍL: una macro SIN LÍNEAS no se baja.
+	//
+	// Un .txt vacío se sube al banco igual que uno bueno y no paga a nadie; el error aparece días
+	// después, cuando el proveedor reclama. Pasaba con los lotes que se creaban vacíos (ya no se
+	// pueden crear) y sigue siendo posible si a un lote con facturas se le bloquea la última
+	// después de cortarlo, porque la consulta de la macro salta lo bloqueado.
+	if len(rows) == 0 {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"code": "MACRO_VACIA",
+			"message": "Este lote no tiene ninguna línea para pagar: o quedó sin facturas, " +
+				"o las que tiene están bloqueadas para pago. Revisalo antes de subir nada al banco.",
+		})
 		return
 	}
 	// GUARDARRAÍL: sin IBAN el banco rechaza la línea. Antes la macro se bajaba igual y el error

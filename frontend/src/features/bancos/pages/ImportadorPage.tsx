@@ -38,6 +38,7 @@ import { mensajeError } from "@/lib/apiError";
 import { chipEstadoDuplicado } from "@/features/bancos/chips";
 import { useConfirmarImportacion, useCuentas, useImportar } from "@/features/bancos/hooks";
 import { ClasificarDesdeExcelPanel } from "@/features/bancos/components/ClasificarDesdeExcelPanel";
+import { CargarHistoricoPanel } from "@/features/bancos/components/CargarHistoricoPanel";
 import { CargasHechasPanel } from "@/features/bancos/components/CargasHechasPanel";
 import type { PreviewResult } from "@/api/bancos";
 
@@ -256,6 +257,11 @@ export function ImportadorPage() {
       {/* Segunda vía de entrada: no cargar movimientos sino la CLASIFICACIÓN que ya se hizo en Excel.
           Va en esta pantalla porque es donde alguien busca «cómo meto lo que tengo en un archivo». */}
       <ClasificarDesdeExcelPanel cuentas={cuentasQuery.data ?? []} />
+
+      {/* Tercera vía: el HISTÓRICO. Crea movimientos de varias cuentas y varios meses de un solo
+          archivo. Va después de la otra a propósito: son las dos que se confunden, y así se leen
+          seguidas con la diferencia escrita al lado. */}
+      <CargarHistoricoPanel />
 
       {/* La salida del error de carga: qué se subió y cómo se revierte una carga entera (mig 0085).
           Va acá abajo porque es la misma pregunta que trae a esta pantalla —«¿qué subí?»— y porque

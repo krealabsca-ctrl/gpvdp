@@ -26,6 +26,7 @@ import {
   EmptyState,
   ErrorState,
   Input,
+  Select,
   LoadingState,
   PageHeader,
   TBody,
@@ -51,6 +52,19 @@ const TONO: Record<EstadoRecepcion, BadgeTone> = {
   DUPLICADA: "accent",
   PARQUEADA: "negativo",
   DESCARTADA: "neutral",
+};
+
+/**
+ * Los tipos de comprobante de Hacienda, dichos por lo que son y no por su sigla. Un tipo que no
+ * esté acá se muestra con su código tal cual: es mejor un «TEE» crudo que esconder el filtro.
+ */
+const ETIQUETA_TIPO: Record<string, string> = {
+  FE: "Factura electrónica",
+  NC: "Nota de crédito",
+  ND: "Nota de débito",
+  TE: "Tiquete electrónico",
+  FEC: "Factura de compra",
+  FEE: "Factura de exportación",
 };
 
 /**
@@ -94,7 +108,23 @@ export function RecepcionPage() {
   const [viendo, setViendo] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [busqueda, setBusqueda] = useState("");
-  const query = useRecepciones({ estado: estado || undefined, q: busqueda || undefined });
+  // Las fechas son de LLEGADA: la del documento todavía no se leyó cuando algo no pudo entrar, que
+  // es justo el caso que se viene a revisar acá. No se mandan a medio teclear (el selector del
+  // navegador dispara en cada tecla del año y emitiría «0002-08-01»).
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+  const [buzon, setBuzon] = useState("");
+  const [tipo, setTipo] = useState("");
+  const fechaLista = (v: string) => (/^[1-9]\d{3}-\d{2}-\d{2}$/.test(v) ? v : undefined);
+  const query = useRecepciones({
+    estado: estado || undefined,
+    q: busqueda || undefined,
+    desde: fechaLista(desde),
+    hasta: fechaLista(hasta),
+    buzon: buzon || undefined,
+    tipo_documento: tipo || undefined,
+  });
+  const hayFiltros = !!(busqueda || desde || hasta || buzon || tipo);
   const reintentar = useReintentarRecepcion();
 
   const datos = query.data;
@@ -174,12 +204,53 @@ export function RecepcionPage() {
               })}
             </div>
             <form
-              className="flex items-end gap-2"
+              className="flex flex-wrap items-end gap-2"
               onSubmit={(e) => {
                 e.preventDefault();
                 setBusqueda(q.trim());
               }}
             >
+              <Input
+                label="Desde"
+                type="date"
+                value={desde}
+                onChange={(e) => setDesde(e.target.value)}
+                hint="fecha de llegada"
+                className="w-36"
+              />
+              <Input
+                label="Hasta"
+                type="date"
+                value={hasta}
+                onChange={(e) => setHasta(e.target.value)}
+                className="w-36"
+              />
+              {/* Los dos selectores se llenan con lo que REALMENTE llegó: si solo hay un buzón, no
+                  tiene sentido ofrecer una lista, y si nunca llegó una nota de crédito tampoco. */}
+              {datos.resumen.buzones.length > 1 && (
+                <Select
+                  label="Buzón"
+                  value={buzon}
+                  onChange={(e) => setBuzon(e.target.value)}
+                  options={[
+                    { value: "", label: "Todos" },
+                    ...datos.resumen.buzones.map((b) => ({ value: b, label: b })),
+                  ]}
+                  className="min-w-48"
+                />
+              )}
+              {datos.resumen.tipos.length > 1 && (
+                <Select
+                  label="Tipo"
+                  value={tipo}
+                  onChange={(e) => setTipo(e.target.value)}
+                  options={[
+                    { value: "", label: "Todos" },
+                    ...datos.resumen.tipos.map((t) => ({ value: t, label: ETIQUETA_TIPO[t] ?? t })),
+                  ]}
+                  className="min-w-44"
+                />
+              )}
               <label className="flex flex-col gap-1 text-xs text-content-muted">
                 Buscar
                 <Input
@@ -192,6 +263,23 @@ export function RecepcionPage() {
               <Button type="submit" variant="secondary" size="sm">
                 Buscar
               </Button>
+              {hayFiltros && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setQ("");
+                    setBusqueda("");
+                    setDesde("");
+                    setHasta("");
+                    setBuzon("");
+                    setTipo("");
+                  }}
+                >
+                  Quitar filtros
+                </Button>
+              )}
             </form>
           </div>
 

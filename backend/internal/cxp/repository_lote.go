@@ -3,6 +3,8 @@ package cxp
 import (
 	"context"
 	"fmt"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // CrearLote crea un lote de pago para la fecha de corte y le asigna las facturas indicadas que
@@ -39,6 +41,24 @@ func (r *pgRepository) CrearLote(ctx context.Context, empresaID, fechaCorte stri
 	}
 	lote.Cantidad = int(tag.RowsAffected())
 
+	// Lo que se pidió y NO entró. Este UPDATE filtra por estado y por «sin lote», y hasta el
+	// 25-set-2026 lo que no calzaba desaparecía sin una palabra: el lote se creaba igual, con cero
+	// facturas, y la macro se bajaba vacía. Así nació el lote #17.
+	if lote.Cantidad < len(ids) {
+		fuera, err := motivosFueraDelLote(ctx, tx, empresaID, ids, lote.ID)
+		if err != nil {
+			return LotePago{}, err
+		}
+		// Si no entró NINGUNA, no queda lote: un lote vacío no es un corte, es basura que después
+		// hay que distinguir de los buenos. Se aborta y se dice, factura por factura, por qué.
+		if lote.Cantidad == 0 {
+			return LotePago{}, &LoteVacioError{Fuera: fuera}
+		}
+		// Parcial: el lote se crea con lo que sí entró —cortar 9 de 10 es trabajo hecho— pero la
+		// décima viaja en la respuesta con su motivo, o se paga de menos sin que nadie se entere.
+		lote.Fuera = fuera
+	}
+
 	// Total del lote = suma de NETOS (descontando anticipos aplicados): es lo que se va a pagar.
 	if err := tx.QueryRow(ctx,
 		`SELECT COALESCE(SUM(GREATEST(d.total_crc - COALESCE((SELECT SUM(aa.monto_crc) FROM anticipo_aplicacion aa WHERE aa.factura_id = d.id AND aa.activo), 0), 0)), 0)::text
@@ -50,6 +70,49 @@ func (r *pgRepository) CrearLote(ctx context.Context, empresaID, fechaCorte stri
 		return LotePago{}, fmt.Errorf("cxp: commit lote: %w", err)
 	}
 	return lote, nil
+}
+
+// motivosFueraDelLote dice, factura por factura, por qué una de las pedidas no entró al lote.
+//
+// Se corre DENTRO de la transacción y después del UPDATE, así que lee el estado ya actualizado: una
+// factura recién asignada a ESTE lote no figura, y las que quedaron afuera traen la razón de verdad
+// y no una reconstruida de memoria. Un id que no existe —o que es de otra empresa— cae en el
+// `LEFT JOIN` y se reporta como inexistente: para esta empresa, no existe.
+func motivosFueraDelLote(ctx context.Context, tx pgx.Tx, empresaID string, ids []string, loteID string) ([]DocumentoFueraDelLote, error) {
+	const q = `
+		SELECT pedido.id::text,
+		       COALESCE(d.consecutivo, ''), COALESCE(p.nombre, ''), COALESCE(d.estado, ''),
+		       CASE
+		         WHEN d.id IS NULL THEN 'no existe en esta empresa'
+		         WHEN d.bloqueado_para_pago
+		           THEN 'está bloqueada para pago' ||
+		                COALESCE(NULLIF(': ' || d.bloqueo_motivo, ': '), '')
+		         WHEN d.lote_id IS NOT NULL
+		           THEN 'ya está en el lote #' || COALESCE(lp.numero::text, '?')
+		         WHEN d.estado <> 'PROGRAMADO'
+		           THEN 'está en ' || d.estado || ': solo se puede cortar lo aprobado o lo ya programado'
+		         ELSE 'no se pudo programar'
+		       END
+		FROM unnest($2::uuid[]) AS pedido(id)
+		LEFT JOIN documento_cxp d ON d.id = pedido.id AND d.empresa_id = $1::uuid
+		LEFT JOIN proveedor p ON p.id = d.proveedor_id
+		LEFT JOIN lote_pago lp ON lp.id = d.lote_id
+		WHERE d.lote_id IS DISTINCT FROM $3::uuid
+		ORDER BY 3, 2`
+	rows, err := tx.Query(ctx, q, empresaID, ids, loteID)
+	if err != nil {
+		return nil, fmt.Errorf("cxp: motivos fuera del lote: %w", err)
+	}
+	defer rows.Close()
+	fuera := []DocumentoFueraDelLote{}
+	for rows.Next() {
+		var f DocumentoFueraDelLote
+		if err := rows.Scan(&f.DocumentoID, &f.Consecutivo, &f.Proveedor, &f.Estado, &f.Motivo); err != nil {
+			return nil, fmt.Errorf("cxp: scan motivo fuera del lote: %w", err)
+		}
+		fuera = append(fuera, f)
+	}
+	return fuera, rows.Err()
 }
 
 // ListarLotes lista los lotes de la empresa con cantidad y total (más reciente primero).
