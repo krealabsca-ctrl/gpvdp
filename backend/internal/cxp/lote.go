@@ -1,6 +1,10 @@
 package cxp
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
 
 // LoteVacioError frena la creación de un lote al que no entró NI UNA factura.
 //
@@ -15,7 +19,46 @@ func (e *LoteVacioError) Error() string {
 	if len(e.Fuera) == 1 {
 		return fmt.Sprintf("no se creó el lote: la única factura seleccionada no se puede cortar (%s)", e.Fuera[0].Motivo)
 	}
-	return fmt.Sprintf("no se creó el lote: ninguna de las %d facturas seleccionadas se puede cortar", len(e.Fuera))
+	return fmt.Sprintf("no se creó el lote: ninguna de las %d facturas seleccionadas se puede cortar. Motivos: %s",
+		len(e.Fuera), resumirMotivos(e.Fuera))
+}
+
+// topeMotivos corta la enumeración: son cinco CLASES de motivo, pero dos de ellas llevan un dato
+// adentro («está en REVISADO», «ya está en el lote #14»), así que un corte de decenas de facturas
+// puede producir decenas de motivos distintos. El detalle completo viaja igual en `fuera`.
+const topeMotivos = 4
+
+// resumirMotivos agrupa las facturas por razón: «está en RECIBIDO: … (2); está bloqueada… (1)».
+//
+// Agrupa en vez de enumerar porque el caso real es un corte de decenas de facturas con dos o tres
+// razones: noventa líneas iguales no se leen, y lo accionable es la razón, no cuál factura la tiene
+// (para eso está la lista `fuera`, que la pantalla muestra completa).
+//
+// El conteo va al final entre paréntesis y no adelante a propósito: los motivos vienen redactados
+// en singular desde la consulta («está en…», «ya está en…», «no existe…») y anteponerles un número
+// obligaría a conjugarlos en plural, que en español es una tabla de irregulares esperando fallar.
+func resumirMotivos(fuera []DocumentoFueraDelLote) string {
+	orden := make([]string, 0, len(fuera))
+	cuenta := make(map[string]int, len(fuera))
+	for _, f := range fuera {
+		if _, visto := cuenta[f.Motivo]; !visto {
+			orden = append(orden, f.Motivo)
+		}
+		cuenta[f.Motivo]++
+	}
+	// El motivo más frecuente primero: es el que explica el corte. Orden estable en el empate, así
+	// el mismo error da siempre el mismo texto (un mensaje que baila es un mensaje que no se cita).
+	sort.SliceStable(orden, func(i, j int) bool { return cuenta[orden[i]] > cuenta[orden[j]] })
+
+	partes := make([]string, 0, len(orden))
+	for _, m := range orden[:min(len(orden), topeMotivos)] {
+		partes = append(partes, fmt.Sprintf("%s (%d)", m, cuenta[m]))
+	}
+	texto := strings.Join(partes, "; ")
+	if sobran := len(orden) - topeMotivos; sobran > 0 {
+		texto += fmt.Sprintf("; y %d motivo(s) más", sobran)
+	}
+	return texto
 }
 
 // LotePago es un lote/corte de pago: agrupa facturas PROGRAMADAS a pagar en el banco.
@@ -28,6 +71,13 @@ type LotePago struct {
 	Cantidad   int    `json:"cantidad"`
 	TotalCRC   string `json:"total_crc"`
 	CreadoEn   string `json:"creado_en"`
+	// ModoPago dice cuántas transferencias salieron: FACTURA (una por factura) o PROVEEDOR (una
+	// por proveedor, cubriendo varias). Se guarda y no se infiere de si hay remesas: un corte por
+	// proveedor donde cada uno trajo una sola factura no agrupa nada y aun así se armó así.
+	ModoPago string `json:"modo_pago"`
+	// Remesas son los pagos agrupados de ESTE lote (vacío en el modo por factura). Solo lo llena
+	// quien lo necesita —la pantalla del lote y la macro—, no el listado.
+	Remesas []Remesa `json:"remesas,omitempty"`
 	// Desglose del resultado (histórico/auditoría del corte).
 	Pagadas    int `json:"pagadas"`
 	Rebotadas  int `json:"rebotadas"`

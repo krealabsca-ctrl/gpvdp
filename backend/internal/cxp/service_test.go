@@ -12,6 +12,25 @@ import (
 func dec(s string) decimal.Decimal { return decimal.RequireFromString(s) }
 
 type fakeRepo struct {
+	// Remesas (pagos agrupados). `capRemesaCerrada` deja ver si se intentó cerrar y cuál.
+	remesaPorHuella  Remesa
+	errRemesa        error
+	cerradas         int
+	conceptoComun    string
+	clasifComun      string
+	capRemesaCerrada string
+	remesasDeLote    []Remesa
+	aviso            AvisoDePago
+	errAviso         error
+	lote             LotePago
+	errLote          error
+	rubros           []RubroConCodigo
+	codigoPago       string
+	errCodigo        error
+	capCodigo        string
+	capCodigoNivel   string
+	capCodigoID      string
+
 	creado      *ProveedorInput
 	doc         Documento            // lo que devuelve DocumentoPorID por defecto (para probar guards)
 	docs        map[string]Documento // por id (anticipos: factura y anticipo distintos)
@@ -368,9 +387,63 @@ func (f *fakeRepo) DashboardCxP(_ context.Context, _, periodo string, deptIDs []
 	// Devuelve lo recibido para poder afirmar que el servicio propaga período y alcance.
 	return DashboardCxP{Periodo: periodo, AlcanceLimitado: deptIDs != nil}, nil
 }
-func (f *fakeRepo) CrearLote(context.Context, string, string, []string, string) (LotePago, error) {
-	return LotePago{}, nil
+func (f *fakeRepo) CrearLote(_ context.Context, _, _, modo string, _ []string, _ string) (LotePago, error) {
+	// El modo viaja de vuelta para que el service pueda verificarse: es lo que decide cuántas
+	// transferencias salen, así que un fake que lo tirara escondería que no llegó.
+	return LotePago{ModoPago: modo}, nil
 }
+
+// --- Remesas (pagos agrupados por proveedor) ---
+
+// remesaPorHuella y errRemesa controlan qué encuentra el fake; cerradas/gastoComun, qué devuelve
+// al cerrarla. capRemesaCerrada deja ver si de verdad se intentó cerrar.
+func (f *fakeRepo) RemesaPorHuella(context.Context, string, string) (Remesa, error) {
+	if f.errRemesa != nil {
+		return Remesa{}, f.errRemesa
+	}
+	return f.remesaPorHuella, nil
+}
+
+func (f *fakeRepo) CerrarRemesa(_ context.Context, _, remesaID string) (int, string, string, error) {
+	f.capRemesaCerrada = remesaID
+	return f.cerradas, f.conceptoComun, f.clasifComun, nil
+}
+
+func (f *fakeRepo) RemesasDeLote(context.Context, string, string) ([]Remesa, error) {
+	return f.remesasDeLote, nil
+}
+
+func (f *fakeRepo) LotePorID(context.Context, string, string) (LotePago, error) {
+	return f.lote, f.errLote
+}
+
+// --- Nomenclatura interna del pago ---
+
+func (f *fakeRepo) CatalogoConCodigos(context.Context, string) ([]RubroConCodigo, error) {
+	return f.rubros, nil
+}
+
+// capCodigo guarda lo que se intentó escribir: así se puede verificar que al service le llegó
+// NORMALIZADO (en mayúsculas y sin espacios) y no tal como lo tecleó la persona.
+func (f *fakeRepo) AsignarCodigoPago(_ context.Context, _, nivel, id, codigo string) error {
+	f.capCodigo = codigo
+	f.capCodigoNivel = nivel
+	f.capCodigoID = id
+	return f.errCodigo
+}
+
+func (f *fakeRepo) CodigoPagoDeDocumento(context.Context, string, string) (string, error) {
+	return f.codigoPago, nil
+}
+
+func (f *fakeRepo) AvisoDeRemesa(context.Context, string, string) (AvisoDePago, error) {
+	return f.aviso, f.errAviso
+}
+
+func (f *fakeRepo) AvisoDeFactura(context.Context, string, string) (AvisoDePago, error) {
+	return f.aviso, f.errAviso
+}
+
 func (f *fakeRepo) ListarLotes(context.Context, string) ([]LotePago, error) {
 	return nil, nil
 }

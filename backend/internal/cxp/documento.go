@@ -184,6 +184,44 @@ type Documento struct {
 	// conserva su XML. Vacío = entró por Excel o a mano, y entonces NO HAY factura que mostrar:
 	// el XML nunca llegó al ERP por ese camino. Es lo que decide si la fila ofrece «Ver».
 	RecepcionID string `json:"recepcion_id,omitempty"`
+	// PagoBanco es el MOVIMIENTO BANCARIO con el que esta factura se pagó, cuando la conciliación
+	// por huella los enlazó. Es la otra mitad de `PagoCxP` en Bancos: el enlace existía en la base
+	// desde la migración 0043 y ninguna de las dos pantallas lo mostraba, así que «¿con cuál pago
+	// se cerró esta factura?» solo se podía contestar leyendo SQL. Ausente = sin enlace todavía.
+	PagoBanco *PagoBancoDelDocumento `json:"pago_banco,omitempty"`
+	// Remesa es el pago agrupado dentro del que se fue esta factura, cuando el lote se cortó por
+	// proveedor. Ausente = se paga sola y su propia huella es lo que viaja al banco.
+	//
+	// Existe porque la pantalla mostraba SIEMPRE la huella de la factura, y en un pago agrupado esa
+	// huella no viaja a ningún lado: lo que sale en la macro —y lo único que vuelve en el estado de
+	// cuenta— es «REM 0035-01 CXPR-…». Quien tenía el archivo del banco de un lado y la Bandeja del
+	// otro veía dos códigos distintos para el mismo pago y no podía cruzarlos.
+	Remesa *RemesaDelDocumento `json:"remesa,omitempty"`
+}
+
+// RemesaDelDocumento es lo mínimo para reconocer el pago agrupado desde la fila de una factura:
+// cómo se llama en el estado de cuenta y con cuántas facturas comparte la transferencia.
+type RemesaDelDocumento struct {
+	ID string `json:"id"`
+	// Huella es el código interno del pago agrupado («CXPR-…»), el que vuelve del banco.
+	Huella string `json:"huella"`
+	// Referencia es la mitad legible («REM 0035-01»), la que una persona lee y busca.
+	Referencia string `json:"referencia"`
+	// Facturas es cuántas cubre la transferencia, contando esta. Siempre ≥ 1.
+	Facturas int `json:"facturas"`
+}
+
+// PagoBancoDelDocumento es el movimiento bancario que pagó una factura, con lo mínimo para
+// reconocerlo: cuándo salió, de cuál cuenta y por cuánto.
+type PagoBancoDelDocumento struct {
+	MovimientoID string `json:"movimiento_id"`
+	Fecha        string `json:"fecha"`
+	// Cuenta es el alias de la cuenta bancaria («BN Jardines Colones»), no el IBAN.
+	Cuenta string `json:"cuenta"`
+	Banco  string `json:"banco"`
+	// Debito es lo que el banco debitó de verdad, que puede diferir del neto de la factura: la
+	// conciliación no empareja cuando difieren, pero un enlace hecho a mano sí puede traerlo.
+	Debito string `json:"debito"`
 }
 
 // Orígenes posibles de la marca «de Contabilidad».

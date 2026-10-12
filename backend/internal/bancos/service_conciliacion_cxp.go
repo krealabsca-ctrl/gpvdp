@@ -42,8 +42,19 @@ func (s *Service) ConciliarCxP(ctx context.Context, empresaID, importacionID, us
 
 		switch res.Veredicto {
 		case HuellaConciliado:
-			clasificado, enlazado, err := s.repo.EnlazarPagoCxP(ctx, empresaID, m.ID,
-				res.DocumentoID, res.ConceptoID, res.ClasificacionID)
+			// Un pago agrupado se enlaza contra la REMESA, no contra una de sus facturas: CxP
+			// devuelve DocumentoID vacío justamente para que acá no se elija una al azar.
+			var (
+				clasificado, enlazado bool
+				err                   error
+			)
+			if res.RemesaID != "" {
+				clasificado, enlazado, err = s.repo.EnlazarPagoRemesa(ctx, empresaID, m.ID,
+					res.RemesaID, res.ConceptoID, res.ClasificacionID)
+			} else {
+				clasificado, enlazado, err = s.repo.EnlazarPagoCxP(ctx, empresaID, m.ID,
+					res.DocumentoID, res.ConceptoID, res.ClasificacionID)
+			}
 			if err != nil {
 				return ReporteConciliacionCxP{}, err
 			}
@@ -63,8 +74,18 @@ func (s *Service) ConciliarCxP(ctx context.Context, empresaID, importacionID, us
 			})
 		case HuellaMontoDiferente:
 			rep.MontoDiferente++
-		case HuellaSinDocumento, HuellaSinHuella:
+		case HuellaSinDocumento:
 			rep.SinDocumento++
+		case HuellaSinHuella:
+			// NO es un pago nuestro: el pre-filtro busca «CXP» a secas (el banco borra el guion del
+			// código, así que un filtro más estricto no traería ni uno de los verdaderos), y eso
+			// arrastra descripciones ajenas como «FIDE 1937 CXP 430581 JUNIO 26/BANCO IMPROSA».
+			//
+			// Se cuenta aparte y NO va al detalle. Mezclarlo con «sin factura que lo reclame»
+			// convertía cinco movimientos de otro banco en cinco problemas de CxP que no existen,
+			// y una alarma falsa que se repite todos los meses termina ignorándose entera.
+			rep.SinHuella++
+			continue
 		}
 		rep.Detalle = append(rep.Detalle, linea)
 	}

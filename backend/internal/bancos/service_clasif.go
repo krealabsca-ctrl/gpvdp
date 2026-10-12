@@ -31,7 +31,11 @@ type FiltrosMovimientos struct {
 	// ahí. Con 7 bancos y 15 cuentas, revisar la conciliación de UNA cuenta obligaba a leer
 	// todo. El banco filtra el grupo completo; la cuenta afina dentro de él.
 	BancoID, CuentaID string
-	Estado, Tipo, Q   string
+	// MontoMin / MontoMax: rango en COLONES y en valor absoluto (ver condicionesMovimientos).
+	// Llegan como texto y se castean en SQL: son dinero, y pasar por float64 para validarlos
+	// perdería centavos justo en el filtro con el que alguien busca un movimiento exacto.
+	MontoMin, MontoMax string
+	Estado, Tipo, Q    string
 	// Traslado: "" (todos) | "si" (solo traslados emparejados) | "no".
 	Traslado string
 	// Orden: "" (fecha desc) | fecha_asc | monto_desc | monto_asc.
@@ -126,6 +130,37 @@ type MovimientoRow struct {
 	// con su respuesta y cuándo. Solo viene cuando NO hay uno abierto (el abierto es lo vigente). Lo
 	// llena solo la consulta por segmento.
 	AvisoResuelto *AvisoResuelto `json:"aviso_resuelto,omitempty"`
+	// PagoCxP identifica la FACTURA que este movimiento pagó, cuando la conciliación por huella
+	// los enlazó. El enlace vivía en `movimiento_bancario.documento_cxp_id` desde la migración 0043
+	// y NINGUNA pantalla lo mostraba: en Bancos se veía un débito con un código ilegible y en CxP
+	// una factura «pagada» sin decir con cuál movimiento. Mirar las dos pantallas no alcanzaba para
+	// responder «¿a qué factura corresponde este pago?», que es la pregunta de todos los cierres.
+	// Vacío (ausente) = este movimiento no está enlazado a ninguna factura.
+	PagoCxP *PagoCxPDeMovimiento `json:"pago_cxp,omitempty"`
+	// SelloExterno: este pago YA estaba aplicado en el sistema anterior (mig 0091).
+	//
+	// Ausente en la enorme mayoría. No es lo mismo que `PagoCxP`: aquel dice QUÉ FACTURA del ERP
+	// cerró el movimiento, y esto dice «alguien ya lo resolvió afuera» — una afirmación más débil y
+	// más honesta, que no inventa un enlace que nadie verificó.
+	//
+	// El movimiento sigue visible: decisión del Director Financiero (6-oct-2026). La plata salió
+	// del banco igual, y lo que desaparece de la lista no se revisa más.
+	SelloExterno *SelloVisible `json:"sello_externo,omitempty"`
+}
+
+// PagoCxPDeMovimiento es la factura que un movimiento bancario pagó, con lo mínimo para
+// reconocerla sin salir de la pantalla: a quién y por cuál documento.
+type PagoCxPDeMovimiento struct {
+	DocumentoID string `json:"documento_id"`
+	Consecutivo string `json:"consecutivo"`
+	Proveedor   string `json:"proveedor"`
+	// Huella es el código interno del pago («CXP-54A4281AE49A»): el mismo que viaja en la
+	// descripción del banco y el que permite seguir el pago de punta a punta.
+	Huella string `json:"huella"`
+	// Facturas: cuántas cubre este movimiento. Es 1 en el pago de una factura suelta y más en un
+	// pago AGRUPADO por proveedor (remesa), donde `Consecutivo` trae la referencia del grupo
+	// («REM 0029-01») en vez del número de una factura — porque no hay una sola que nombrar.
+	Facturas int `json:"facturas"`
 }
 
 // ListaMovimientos es la respuesta paginada con totales.
@@ -202,7 +237,43 @@ type NuevaRegla struct {
 
 // ListarMovimientos devuelve la hoja de trabajo filtrada.
 func (s *Service) ListarMovimientos(ctx context.Context, empresaID string, f FiltrosMovimientos) (ListaMovimientos, error) {
-	return s.repo.ListarMovimientos(ctx, empresaID, f)
+	lista, err := s.repo.ListarMovimientos(ctx, empresaID, f)
+	if err != nil {
+		return lista, err
+	}
+	if err := s.anotarSelloExterno(ctx, empresaID, lista.Items); err != nil {
+		return ListaMovimientos{}, err
+	}
+	return lista, nil
+}
+
+// anotarSelloExterno marca los movimientos que el sistema ANTERIOR ya tenía aplicados.
+//
+// Se anota DESPUÉS y no con un JOIN en el listado: la enorme mayoría de los movimientos no tiene
+// sello, y una consulta aparte por los ids de la página cuesta menos que colgarle otra tabla a la
+// consulta más caliente del módulo. Es el mismo criterio que ya se usa con los avisos del segmento.
+func (s *Service) anotarSelloExterno(ctx context.Context, empresaID string, items []MovimientoRow) error {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(items))
+	for _, m := range items {
+		ids = append(ids, m.ID)
+	}
+	sellos, err := s.repo.SellosDeMovimientos(ctx, empresaID, ids)
+	if err != nil {
+		return err
+	}
+	if len(sellos) == 0 {
+		return nil
+	}
+	for i := range items {
+		if s, ok := sellos[items[i].ID]; ok {
+			sello := s
+			items[i].SelloExterno = &sello
+		}
+	}
+	return nil
 }
 
 // Conceptos y Clasificaciones exponen el catálogo de la empresa.

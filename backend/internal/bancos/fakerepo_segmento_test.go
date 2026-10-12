@@ -97,6 +97,43 @@ func (f *fakeRepo) MisAvisos(_ context.Context, _, _ string, page, pageSize int)
 	return f.misAvisos, nil
 }
 
+// capAlcanceOtrosMeses guarda el alcance con el que se pidió el aviso de otros meses: es la
+// garantía de que el recorte por segmento viaja también en esa consulta, y no solo en la lista.
+func (f *fakeRepo) CoincidenciasEnOtrosMeses(_ context.Context, _ string, fl FiltrosMovimientos) ([]CoincidenciaEnOtroMes, error) {
+	f.capAlcanceOtrosMeses = fl.Alcance
+	f.capQOtrosMeses = fl.Q
+	return f.otrosMeses, nil
+}
+
+// ── Sello «aplicado en el sistema anterior» (mig 0091) ───────────────────────
+//
+// El doble devuelve lo que se le sembró y GUARDA lo que se le mandó: las pruebas del servicio
+// comprueban QUÉ se decidió sellar, que es la decisión del servicio. Si el SQL de verdad es lo que
+// se quiere probar, hay que ir contra Postgres —un repositorio probado solo detrás de un fake no
+// está probado, y eso ya nos costó un 500 con MIN(uuid)—.
+
+func (f *fakeRepo) DebitosParaCruzar(context.Context, string) ([]DebitoCandidato, error) {
+	return f.debitosCandidatos, nil
+}
+
+func (f *fakeRepo) SellarPagosExternos(_ context.Context, _, _ string, sellos []SelloPagoExterno) (string, int, error) {
+	f.sellosEscritos = sellos
+	return "carga-de-prueba", len(sellos), nil
+}
+
+func (f *fakeRepo) SellosDeMovimientos(context.Context, string, []string) (map[string]SelloVisible, error) {
+	return f.sellosVisibles, nil
+}
+
+func (f *fakeRepo) RevertirCargaDeSellos(_ context.Context, _, cargaID string) (int, error) {
+	f.cargaRevertida = cargaID
+	return f.quitadosEnReversa, nil
+}
+
+func (f *fakeRepo) ResumenSellos(context.Context, string) (ResumenPagosExternos, error) {
+	return f.resumenSellos, nil
+}
+
 func (f *fakeRepo) CargaDeCuentasDelSegmento(context.Context, string, []string) ([]CuentaCargadaHasta, error) {
 	f.cargaCuentasPedida = true
 	if f.cargaCuentas == nil {

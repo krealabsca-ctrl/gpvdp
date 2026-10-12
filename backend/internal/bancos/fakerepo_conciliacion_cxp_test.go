@@ -18,3 +18,17 @@ func (f *fakeRepo) EnlazarPagoCxP(_ context.Context, _, movimientoID, documentoI
 	f.yaEnlazados[movimientoID] = documentoID
 	return conceptoID != "", true, nil
 }
+
+// EnlazarPagoRemesa comparte el mapa con EnlazarPagoCxP a propósito: en la base las dos columnas
+// son excluyentes, así que un fake que las tratara por separado dejaría pasar un movimiento
+// enlazado dos veces.
+func (f *fakeRepo) EnlazarPagoRemesa(_ context.Context, _, movimientoID, remesaID, conceptoID, _ string) (bool, bool, error) {
+	if f.yaEnlazados == nil {
+		f.yaEnlazados = map[string]string{}
+	}
+	if _, existe := f.yaEnlazados[movimientoID]; existe {
+		return false, false, nil
+	}
+	f.yaEnlazados[movimientoID] = remesaID
+	return conceptoID != "", true, nil
+}

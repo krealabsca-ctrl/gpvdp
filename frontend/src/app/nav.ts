@@ -41,6 +41,7 @@ import {
   ShoppingBag,
   ShoppingCart,
   TrendingUp,
+  FileCheck,
   Upload,
   Users,
   Wallet,
@@ -102,6 +103,9 @@ export const MODULES: NavModule[] = [
       // El Importador no tiene nada que LEER: es el formulario de carga. Su permiso de lectura es
       // el mismo de la acción, porque verlo sin poder subir nada no sirve de nada.
       { label: "Importador", descripcion: "Subir estados de cuenta", to: "/importador", icon: Upload, permiso: "bancos.importar" },
+      // Va PEGADO al importador y no en Conciliación: es una carga de archivo, el mismo gesto y el
+      // mismo permiso. Quien sube estados de cuenta es quien tiene el reporte del sistema viejo.
+      { label: "Pagos del sistema anterior", descripcion: "Qué salidas ya estaban aplicadas", to: "/pagos-externos", icon: FileCheck, permiso: "bancos.importar" },
       // La PANTALLA de catálogo es de administración: crea, renombra, fusiona y elimina. Por eso
       // pide `bancos.catalogo` y no el permiso base. `bancos.ver` sigue dejando LEER conceptos y
       // clasificaciones —lo que necesitan los selectores de las otras pantallas—, pero no abre esta.

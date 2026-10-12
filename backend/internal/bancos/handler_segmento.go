@@ -61,10 +61,16 @@ func (h *Handler) MiSegmento(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"vista":                res.Vista,
-		"partidas":             res.Partidas,
-		"cuentas":              res.Cuentas,
-		"movimientos":          res.Movimientos,
+		"vista":       res.Vista,
+		"partidas":    res.Partidas,
+		"cuentas":     res.Cuentas,
+		"movimientos": res.Movimientos,
+		// Dónde MÁS está lo que se buscó. Este mapa se arma campo por campo, así que un campo nuevo
+		// de MiSegmento no llega solo: `otros_meses` se calculaba, se devolvía y se sabía pintar, y
+		// se perdía acá —la pantalla seguía diciendo «ningún movimiento coincide» con el movimiento
+		// a un mes de distancia—. Hay una prueba que compara este mapa contra los tags del struct
+		// para que el próximo campo no se caiga igual (ver handler_segmento_campos_test.go).
+		"otros_meses":          res.OtrosMeses,
 		"cargado_hasta":        res.CargadoHasta,
 		"cargado_hasta_cuenta": res.CuentaMasAtrasada,
 		"carga_por_cuenta":     res.CargaPorCuenta,

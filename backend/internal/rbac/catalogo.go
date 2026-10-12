@@ -103,6 +103,19 @@ var Catalogo = []PermisoDef{
 	{"cxp.catalogo", "Cuentas por pagar", "Abrir rubros de gasto", "Crear y renombrar conceptos y clasificaciones de gasto visibles para CxP (no apaga, no fusiona, no declara naturaleza)", false},
 	{"cxp.fuentes", "Cuentas por pagar", "Configurar los buzones de recepción", "Da de alta el correo de cada empresa y genera su credencial: define desde qué buzón el sistema acepta facturas", true},
 	{"cxp.parametros", "Cuentas por pagar", "Configurar los umbrales de validación", "Define desde qué monto y en qué casos una factura requiere que el área confirme la conformidad (cambia cuánto gasto se paga sin revisión humana)", true},
+	// Calendario de responsabilidades mensuales (lo que se paga todos los meses y no llega por
+	// factura: alquileres, servicios, cargas sociales).
+	//
+	// Los cinco EXISTÍAN —la migración los sembró en `permiso` y el router los exige— pero nunca se
+	// escribieron acá, y como la matriz de Seguridad se dibuja desde este catálogo y no desde la
+	// tabla, no había dónde marcarlos: la función era inalcanzable para todo rol que no fuera ADMIN
+	// (que saltea la matriz). Un permiso que el router pide y el catálogo no nombra es una función
+	// construida y apagada. Hay una prueba que compara las dos listas (ver catalogo_router_test.go).
+	{"cxp.responsabilidades.ver", "Cuentas por pagar", "Ver el calendario de responsabilidades", "Las obligaciones mensuales de TODAS las áreas y el estado del mes (lectura)", false},
+	{"cxp.responsabilidades.ver_mias", "Cuentas por pagar", "Ver solo mis responsabilidades", "Únicamente las obligaciones asignadas al propio usuario, sin abrir el calendario completo", false},
+	{"cxp.responsabilidades.declarar", "Cuentas por pagar", "Declarar responsabilidades", "Crear, editar y cambiar el estado de una obligación recurrente: define qué se va a pagar todos los meses", true},
+	{"cxp.responsabilidades.abrir_mes", "Cuentas por pagar", "Abrir el mes", "Previsualizar y generar las obligaciones del período a partir de las responsabilidades declaradas", false},
+	{"cxp.responsabilidades.cerrar", "Cuentas por pagar", "Cerrar y reabrir el período", "Cierra el mes de responsabilidades, y puede REABRIR uno ya cerrado", true},
 	// Cuentas por cobrar — la cartera de 70 000+ contratos. El alcance de datos del
 	// operador es su SEDE: sin cxc.ver_todas_sedes solo ve la cartera que le asignaron.
 	{"cxc.ver", "Cuentas por cobrar", "Ver CxC", "Cola de cobro, contratos y cargos (lectura)", false},

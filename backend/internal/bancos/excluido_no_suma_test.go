@@ -28,6 +28,18 @@ import (
 var tablasDelIncidente = []string{
 	"banco", "cuenta_bancaria", "concepto", "clasificacion",
 	"movimiento_bancario", "usuario", "movimiento_reporte_segmentacion",
+	// El listado de movimientos muestra la FACTURA que cada pago cerró (ver PagoCxP en
+	// MovimientoRow), así que la consulta toca estas dos. Sin ellas el esquema temporal da
+	// «relation documento_cxp does not exist» — que es exactamente lo que tiene que pasar:
+	// el pool solo ve este esquema, así que una tabla olvidada falla en vez de leer la real.
+	"documento_cxp", "proveedor",
+	// Y los pagos agrupados (mig 0088-0089): un movimiento puede apuntar a una remesa.
+	"remesa_pago", "lote_pago",
+	// Las dimensiones del gasto y su presupuesto: el control por departamento las une para resolver
+	// a quién se le cobra cada movimiento (ver joinDimensiones).
+	"departamento", "sede", "presupuesto_departamento",
+	// El sello «aplicado en el sistema anterior» (mig 0091).
+	"pago_aplicado_externo",
 }
 
 // baseDelIncidente levanta el esquema temporal y devuelve el repositorio que apunta a él.

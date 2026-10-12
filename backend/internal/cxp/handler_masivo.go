@@ -75,11 +75,14 @@ func (h *Handler) ArchivoPagoLote(c *gin.Context) {
 	if sin := FaltanIBAN(rows); len(sin) > 0 && c.Query("igual") != "si" {
 		faltantes := make([]gin.H, 0, len(sin))
 		for _, r := range sin {
-			faltantes = append(faltantes, gin.H{"proveedor": r.Nombre, "consecutivo": r.Consecutivo, "monto": r.MontoNeto})
+			faltantes = append(faltantes, gin.H{
+				"proveedor": r.Nombre, "consecutivo": r.Consecutivo, "monto": r.MontoNeto,
+				"motivo": MotivoIBANInvalido(r.IBAN),
+			})
 		}
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"code":      "IBAN_FALTANTE",
-			"message":   "Hay pagos sin cuenta IBAN: el banco rechazaría esas líneas. Cargá el IBAN de estos proveedores y volvé a generar la macro.",
+			"message":   mensajeIBAN(sin),
 			"faltantes": faltantes,
 		})
 		return

@@ -3,9 +3,11 @@ package bancos
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 
 	"github.com/gpvdp/erp/internal/auth"
 	"github.com/gpvdp/erp/internal/httpx"
@@ -30,6 +32,8 @@ func filtrosDeQuery(c *gin.Context) FiltrosMovimientos {
 		ClasificacionIDs: listaDeQuery(c, "clasificaciones"),
 		BancoID:          c.Query("banco_id"),
 		CuentaID:         c.Query("cuenta_bancaria_id"),
+		MontoMin:         c.Query("monto_min"),
+		MontoMax:         c.Query("monto_max"),
 		Estado:           c.Query("estado_clasificacion"),
 		Tipo:             c.Query("tipo"),
 		Traslado:         c.Query("traslado"),
@@ -79,6 +83,16 @@ func validarFiltros(f FiltrosMovimientos) (string, bool) {
 	fechas := map[string]string{"desde": f.Desde, "hasta": f.Hasta}
 	for nombre, v := range fechas {
 		if v != "" && !fechaISOValida(v) {
+			return nombre, false
+		}
+	}
+	// Los montos del rango, por la MISMA razón que las fechas: el texto crudo llega a un
+	// `::numeric` y «1.000.000» —escrito como lo escribe cualquiera en Costa Rica, con puntos de
+	// miles— revienta el cast y vuelve como 500 por un dato mal tecleado. El cliente manda el
+	// número pelado; acá se verifica antes de que toque el SQL.
+	montos := map[string]string{"monto_min": f.MontoMin, "monto_max": f.MontoMax}
+	for nombre, v := range montos {
+		if v != "" && !montoValido(v) {
 			return nombre, false
 		}
 	}
@@ -133,6 +147,21 @@ const anioMinimo = 1000
 //     rechaza con 500, y también «0202-09-01» o «0020-09-01», que Postgres SÍ acepta y convierten
 //     el filtro en «todo el histórico». Son los valores que emite el selector de fecha del
 //     navegador mientras se teclea el año.
+//
+// montoValido acepta un número pelado, con punto decimal opcional y sin separadores de miles.
+//
+// Se parsea con `decimal` y no con `strconv.ParseFloat` por la regla del proyecto: esto es dinero,
+// y aunque acá solo se valide la forma, usar float sería el primer paso para que alguien lo
+// reutilice donde sí importa. Sin signo: el filtro compara contra el valor ABSOLUTO, así que un
+// «-50000» pedido por el cliente es un malentendido, no un rango.
+func montoValido(v string) bool {
+	if strings.ContainsAny(v, " ,+-") {
+		return false
+	}
+	d, err := decimal.NewFromString(v)
+	return err == nil && !d.IsNegative()
+}
+
 func fechaISOValida(v string) bool {
 	if len(v) != 10 {
 		return false

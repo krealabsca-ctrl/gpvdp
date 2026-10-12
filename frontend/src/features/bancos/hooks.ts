@@ -576,6 +576,21 @@ export function useRevertirImportacion() {
   });
 }
 
+/**
+ * Barrido de códigos internos Bancos↔CxP, a pedido sobre lo ya cargado.
+ *
+ * Invalida lo mismo que una reversa: conciliar mueve facturas a CONCILIADO y clasifica movimientos
+ * que estaban en «No identificado», así que cambia el cuadre, el tablero y lo que falta clasificar.
+ */
+export function useConciliarCxP() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => bancosApi.conciliarCxP(),
+    onSuccess: () => invalidarTrasReversa(qc, empresaId),
+  });
+}
+
 export function useDeshacerReversaImportacion() {
   const empresaId = useEmpresaId();
   const qc = useQueryClient();

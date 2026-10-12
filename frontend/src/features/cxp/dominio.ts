@@ -73,6 +73,21 @@ export function esViaExpresa(tipo: string): boolean {
   return tipo === "ANTICIPO" || tipo === "REINTEGRO" || tipo === "INTERNO";
 }
 
+/**
+ * Se puede cortar = el servidor la va a dejar entrar al lote de pago.
+ *
+ * Una factura bloqueada para pago no entra NUNCA, por más aprobada que esté: es lo que hace
+ * `ProgramarAprobados` (`AND NOT bloqueado_para_pago`) y lo que reporta `motivosFueraDelLote`.
+ * El caso típico es un viático, que ya se desembolsó y se archiva con «liquidar».
+ *
+ * Esto NO reemplaza la verificación del servidor —la pantalla nunca decide quién cobra—, sirve
+ * para no ofrecer un tilde que después se va a rechazar: el 25 de setiembre de 2026 se marcaron
+ * tres bloqueadas y el corte entero se abortó.
+ */
+export function sePuedeCortar(d: { bloqueado_para_pago?: boolean }): boolean {
+  return !d.bloqueado_para_pago;
+}
+
 // Umbrales (CRC) — espejo de aprobacion.go.
 export const UMBRAL_UN_APROBADOR = 1_000_000;
 export const UMBRAL_DOS_APROBADOR = 5_000_000;

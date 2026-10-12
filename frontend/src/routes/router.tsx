@@ -8,6 +8,7 @@ import { NotFoundPage } from "@/routes/NotFoundPage";
 // Módulo Bancos (Fase 1 + Bandeja de clasificación Fase A)
 import { DashboardPage } from "@/features/bancos/pages/DashboardPage";
 import { ImportadorPage } from "@/features/bancos/pages/ImportadorPage";
+import { PagosExternosPage } from "@/features/bancos/pages/PagosExternosPage";
 import { ClasificarPage } from "@/features/bancos/pages/ClasificarPage";
 import { CatalogoPage } from "@/features/bancos/pages/CatalogoPage";
 import { MiSegmentoPage } from "@/features/bancos/pages/MiSegmentoPage";
@@ -101,6 +102,7 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <DashboardPage /> },
           { path: "importador", element: <ImportadorPage /> },
+          { path: "pagos-externos", element: <PagosExternosPage /> },
           { path: "clasificar", element: <ClasificarPage /> },
           // Rutas viejas → Clasificar (Movimientos y Revisar se fundieron en la Bandeja).
           { path: "movimientos", element: <Navigate to="/clasificar" replace /> },

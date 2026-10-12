@@ -125,7 +125,20 @@ type Repository interface {
 	DashboardCxP(ctx context.Context, empresaID, periodo string, deptIDs []string) (DashboardCxP, error)
 
 	// Lotes de pago (corte)
-	CrearLote(ctx context.Context, empresaID, fechaCorte string, ids []string, usuarioID string) (LotePago, error)
+	CrearLote(ctx context.Context, empresaID, fechaCorte, modo string, ids []string, usuarioID string) (LotePago, error)
+	// --- Pagos agrupados por proveedor (remesas, mig 0088) ---
+	RemesaPorHuella(ctx context.Context, empresaID, huella string) (Remesa, error)
+	// CerrarRemesa lleva a CONCILIADO las facturas de la remesa. Devuelve cuántas movió y el gasto
+	// COMÚN (concepto, clasificación), vacío si el pago mezcla gastos distintos.
+	CerrarRemesa(ctx context.Context, empresaID, remesaID string) (int, string, string, error)
+	RemesasDeLote(ctx context.Context, empresaID, loteID string) ([]Remesa, error)
+	LotePorID(ctx context.Context, empresaID, loteID string) (LotePago, error)
+	// --- Nomenclatura interna del pago (mig 0090) ---
+	CatalogoConCodigos(ctx context.Context, empresaID string) ([]RubroConCodigo, error)
+	AsignarCodigoPago(ctx context.Context, empresaID, nivel, id, codigo string) error
+	CodigoPagoDeDocumento(ctx context.Context, empresaID, documentoID string) (string, error)
+	AvisoDeRemesa(ctx context.Context, empresaID, remesaID string) (AvisoDePago, error)
+	AvisoDeFactura(ctx context.Context, empresaID, documentoID string) (AvisoDePago, error)
 	ListarLotes(ctx context.Context, empresaID string) ([]LotePago, error)
 	DocumentosParaPagoPorLote(ctx context.Context, empresaID, loteID string) ([]PagoRow, error)
 	Reintentar(ctx context.Context, empresaID, id string) (int64, error)

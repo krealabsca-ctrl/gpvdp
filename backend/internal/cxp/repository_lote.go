@@ -2,6 +2,7 @@ package cxp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -9,9 +10,15 @@ import (
 
 // CrearLote crea un lote de pago para la fecha de corte y le asigna las facturas indicadas que
 // estén PROGRAMADO y sin lote (tenant-safe). Devuelve el lote con número, cantidad y total.
-func (r *pgRepository) CrearLote(ctx context.Context, empresaID, fechaCorte string, ids []string, usuarioID string) (LotePago, error) {
+//
+// `modo` decide cuántas transferencias salen: una por factura (el de siempre) o una por proveedor
+// que cubre todas sus facturas del lote (ver crearRemesas).
+func (r *pgRepository) CrearLote(ctx context.Context, empresaID, fechaCorte, modo string, ids []string, usuarioID string) (LotePago, error) {
 	if len(ids) == 0 {
 		return LotePago{}, ErrSinDocumentos
+	}
+	if !ModoPagoValido(modo) {
+		return LotePago{}, ErrModoPagoInvalido
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -21,14 +28,14 @@ func (r *pgRepository) CrearLote(ctx context.Context, empresaID, fechaCorte stri
 
 	var lote LotePago
 	const insLote = `
-		INSERT INTO lote_pago (empresa_id, numero, fecha_corte, creado_por)
+		INSERT INTO lote_pago (empresa_id, numero, fecha_corte, creado_por, modo_pago)
 		VALUES ($1::uuid,
 		        (SELECT COALESCE(MAX(numero), 0) + 1 FROM lote_pago WHERE empresa_id = $1::uuid),
-		        $2::date, $3::uuid)
+		        $2::date, $3::uuid, $4)
 		RETURNING id::text, numero, to_char(fecha_corte, 'YYYY-MM-DD'), estado,
-		          to_char(creado_en, 'YYYY-MM-DD"T"HH24:MI:SSOF')`
-	if err := tx.QueryRow(ctx, insLote, empresaID, fechaCorte, usuarioID).
-		Scan(&lote.ID, &lote.Numero, &lote.FechaCorte, &lote.Estado, &lote.CreadoEn); err != nil {
+		          to_char(creado_en, 'YYYY-MM-DD"T"HH24:MI:SSOF'), modo_pago`
+	if err := tx.QueryRow(ctx, insLote, empresaID, fechaCorte, usuarioID, modo).
+		Scan(&lote.ID, &lote.Numero, &lote.FechaCorte, &lote.Estado, &lote.CreadoEn, &lote.ModoPago); err != nil {
 		return LotePago{}, fmt.Errorf("cxp: crear lote: %w", err)
 	}
 
@@ -59,6 +66,15 @@ func (r *pgRepository) CrearLote(ctx context.Context, empresaID, fechaCorte stri
 		lote.Fuera = fuera
 	}
 
+	// Un pago por proveedor: se agrupan las facturas que SÍ entraron y cada grupo recibe su
+	// referencia. Va DENTRO de la transacción del lote porque un lote por proveedor sin sus remesas
+	// es un lote que no se puede pagar: la macro no sabría qué escribir.
+	if modo == ModoProveedor {
+		if err := crearRemesas(ctx, tx, empresaID, lote.ID); err != nil {
+			return LotePago{}, err
+		}
+	}
+
 	// Total del lote = suma de NETOS (descontando anticipos aplicados): es lo que se va a pagar.
 	if err := tx.QueryRow(ctx,
 		`SELECT COALESCE(SUM(GREATEST(d.total_crc - COALESCE((SELECT SUM(aa.monto_crc) FROM anticipo_aplicacion aa WHERE aa.factura_id = d.id AND aa.activo), 0), 0)), 0)::text
@@ -70,6 +86,55 @@ func (r *pgRepository) CrearLote(ctx context.Context, empresaID, fechaCorte stri
 		return LotePago{}, fmt.Errorf("cxp: commit lote: %w", err)
 	}
 	return lote, nil
+}
+
+// crearRemesas agrupa las facturas YA asignadas al lote: una remesa por proveedor.
+//
+// Se corre después del UPDATE de asignación y dentro de la misma transacción, así que agrupa lo que
+// de verdad entró —no lo que se pidió—. Un proveedor cuya única factura quedó afuera no genera una
+// remesa vacía.
+//
+// El uuid se genera en el SELECT y se usa para las dos cosas (la clave y el código), porque el
+// código SE DERIVA del id: así no hay un segundo UPDATE que pueda quedar a medias y dejar remesas
+// sin código, que es lo mismo que un pago sin referencia.
+//
+// El monto sale de netoAPagarSQL, la MISMA expresión que arma el archivo de pago y que verifica la
+// conciliación. Si la remesa sumara por su cuenta, el día que cambie la regla del neto el banco
+// debitaría una cifra y la conciliación esperaría otra.
+func crearRemesas(ctx context.Context, tx pgx.Tx, empresaID, loteID string) error {
+	const q = `
+		WITH grupos AS (
+			SELECT gen_random_uuid() AS id,
+			       d.proveedor_id,
+			       ROW_NUMBER() OVER (ORDER BY MIN(p.nombre), d.proveedor_id) AS numero,
+			       SUM(` + netoAPagarSQL + `) AS monto
+			FROM documento_cxp d
+			JOIN proveedor p ON p.id = d.proveedor_id
+			WHERE d.empresa_id = $1::uuid AND d.lote_id = $2::uuid
+			  -- MISMA exclusión que el archivo de pago. Una factura bloqueada puede estar en el
+			  -- lote (el UPDATE de asignación filtra por estado, no por el bloqueo) y la macro no
+			  -- la paga; si la remesa la sumara, el banco debitaría menos de lo que dice la remesa
+			  -- y la conciliación lo marcaría como monto distinto para siempre.
+			  AND NOT d.bloqueado_para_pago
+			GROUP BY d.proveedor_id
+		), insertadas AS (
+			INSERT INTO remesa_pago (id, empresa_id, lote_id, proveedor_id, numero, huella, monto_crc)
+			SELECT g.id, $1::uuid, $2::uuid, g.proveedor_id, g.numero,
+			       'CXPR-' || UPPER(LEFT(REPLACE(g.id::text, '-', ''), 12)), g.monto
+			FROM grupos g
+			RETURNING id, proveedor_id
+		)
+		UPDATE documento_cxp d
+		   SET remesa_id = i.id, actualizado_en = now()
+		  FROM insertadas i
+		 WHERE d.empresa_id = $1::uuid AND d.lote_id = $2::uuid AND d.proveedor_id = i.proveedor_id
+		   -- Y tampoco se marca la bloqueada: decir que la cubre una remesa que no la sumó sería
+		   -- afirmar que se pagó algo que no se pagó.
+		   AND NOT d.bloqueado_para_pago`
+	if _, err := tx.Exec(ctx, q, empresaID, loteID); err != nil {
+		return fmt.Errorf("cxp: crear remesas: %w", err)
+	}
+	return nil
 }
 
 // motivosFueraDelLote dice, factura por factura, por qué una de las pedidas no entró al lote.
@@ -147,16 +212,31 @@ func (r *pgRepository) ListarLotes(ctx context.Context, empresaID string) ([]Lot
 	return out, rows.Err()
 }
 
-// DocumentosParaPagoPorLote devuelve las líneas de pago (para la macro) de todas las facturas del lote.
+// DocumentosParaPagoPorLote devuelve las líneas de pago (para la macro) del lote.
+//
+// UNA LÍNEA = UNA TRANSFERENCIA, no una factura. En el modo por proveedor eso significa una línea
+// por remesa, con el monto agrupado: es la razón de ser del modo. Si acá se devolviera una línea
+// por factura, el lote diría «un pago por proveedor» y el banco haría cinco igual.
 func (r *pgRepository) DocumentosParaPagoPorLote(ctx context.Context, empresaID, loteID string) ([]PagoRow, error) {
+	modo, numero, err := r.modoYNumeroDeLote(ctx, empresaID, loteID)
+	if err != nil {
+		return nil, err
+	}
+	if modo == ModoProveedor {
+		return r.pagosPorRemesa(ctx, empresaID, loteID, numero)
+	}
 	// El monto que va al banco es el NETO: total − retención − anticipos aplicados. Sin restar
 	// los anticipos se le pagaría al proveedor el total de una factura ya neteada (doble pago).
 	const q = `
 		SELECT COALESCE(p.identificacion, ''), p.nombre, COALESCE(p.iban, ''), d.moneda,
 		       GREATEST(d.total - d.retencion - COALESCE((SELECT SUM(aa.monto_crc) FROM anticipo_aplicacion aa WHERE aa.factura_id = d.id AND aa.activo), 0), 0)::text,
-		       COALESCE(d.huella, ''), COALESCE(d.consecutivo, ''), d.id::text
+		       COALESCE(d.huella, ''), COALESCE(d.consecutivo, ''), d.id::text,
+		       -- La nomenclatura interna («A8», «A9»): sale del catálogo de gasto de la factura.
+		       ` + codigoPagoSQL + `
 		FROM documento_cxp d
 		JOIN proveedor p ON p.id = d.proveedor_id
+		LEFT JOIN concepto c ON c.id = d.concepto_id
+		LEFT JOIN clasificacion cl ON cl.id = d.clasificacion_id
 		WHERE d.empresa_id = $1::uuid AND d.lote_id = $2::uuid
 		  AND NOT d.bloqueado_para_pago
 		ORDER BY p.nombre`
@@ -169,9 +249,72 @@ func (r *pgRepository) DocumentosParaPagoPorLote(ctx context.Context, empresaID,
 	for rows.Next() {
 		var pr PagoRow
 		if err := rows.Scan(&pr.Cedula, &pr.Nombre, &pr.IBAN, &pr.Moneda, &pr.MontoNeto,
-			&pr.Descripcion, &pr.Consecutivo, &pr.DocumentoID); err != nil {
+			&pr.Descripcion, &pr.Consecutivo, &pr.DocumentoID, &pr.CodigoPago); err != nil {
 			return nil, fmt.Errorf("cxp: scan pago lote: %w", err)
 		}
+		out = append(out, pr)
+	}
+	return out, rows.Err()
+}
+
+// modoYNumeroDeLote lee cómo se armó el lote y su número. El número hace falta para la referencia
+// legible de la remesa («REM 0043-07»), que es lo que una persona busca en el estado de cuenta.
+func (r *pgRepository) modoYNumeroDeLote(ctx context.Context, empresaID, loteID string) (string, int64, error) {
+	var modo string
+	var numero int64
+	err := r.pool.QueryRow(ctx,
+		`SELECT modo_pago, numero FROM lote_pago WHERE empresa_id = $1::uuid AND id = $2::uuid`,
+		empresaID, loteID).Scan(&modo, &numero)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", 0, ErrLoteNoEncontrado
+	}
+	if err != nil {
+		return "", 0, fmt.Errorf("cxp: modo del lote: %w", err)
+	}
+	return modo, numero, nil
+}
+
+// pagosPorRemesa arma la macro de un lote agrupado: una línea por proveedor.
+//
+// La remesa SIN facturas vivas no se paga. Puede pasar si entre el corte y la bajada de la macro
+// alguien anuló lo único que cubría: transferir igual sería mandar plata sin nada que la respalde.
+func (r *pgRepository) pagosPorRemesa(ctx context.Context, empresaID, loteID string, numeroLote int64) ([]PagoRow, error) {
+	const q = `
+		SELECT COALESCE(p.identificacion, ''), p.nombre, COALESCE(p.iban, ''),
+		       -- La moneda sale de las facturas que cubre. El modo agrupado exige que sean todas la
+		       -- misma: un pago no puede salir mitad en colones y mitad en dólares.
+		       MIN(d.moneda), r.monto_crc::text, r.huella, r.numero,
+		       -- La nomenclatura de un pago AGRUPADO solo existe si todas las facturas que cubre
+		       -- comparten el mismo código. Si mezcla A8 y A9, el pago no es ni una cosa ni la
+		       -- otra y va sin código: etiquetarlo con el de la primera diría que ese débito es
+		       -- todo comisiones cuando la mitad es planilla, que es justo lo que se quiere evitar.
+		       CASE WHEN COUNT(DISTINCT ` + codigoPagoSQL + `) = 1
+		            THEN MIN(` + codigoPagoSQL + `) ELSE '' END
+		FROM remesa_pago r
+		JOIN proveedor p ON p.id = r.proveedor_id
+		JOIN documento_cxp d ON d.remesa_id = r.id AND NOT d.bloqueado_para_pago
+		LEFT JOIN concepto c ON c.id = d.concepto_id
+		LEFT JOIN clasificacion cl ON cl.id = d.clasificacion_id
+		WHERE r.empresa_id = $1::uuid AND r.lote_id = $2::uuid
+		GROUP BY r.id, r.numero, r.huella, r.monto_crc, p.identificacion, p.nombre, p.iban
+		HAVING COUNT(d.id) > 0
+		ORDER BY r.numero`
+	rows, err := r.pool.Query(ctx, q, empresaID, loteID)
+	if err != nil {
+		return nil, fmt.Errorf("cxp: pagos por remesa: %w", err)
+	}
+	defer rows.Close()
+	var out []PagoRow
+	for rows.Next() {
+		var pr PagoRow
+		var numero int
+		if err := rows.Scan(&pr.Cedula, &pr.Nombre, &pr.IBAN, &pr.Moneda, &pr.MontoNeto,
+			&pr.Descripcion, &numero, &pr.CodigoPago); err != nil {
+			return nil, fmt.Errorf("cxp: scan pago por remesa: %w", err)
+		}
+		// La referencia legible reemplaza al «FC 000487» de una factura suelta: acá no hay UNA
+		// factura que nombrar, y nombrar solo a la primera sería mentir sobre lo que cubre el pago.
+		pr.Referencia = ReferenciaRemesa(numeroLote, numero)
 		out = append(out, pr)
 	}
 	return out, rows.Err()

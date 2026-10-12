@@ -342,6 +342,70 @@ func (r *pgRepository) GuardarConsultaDePartida(ctx context.Context, empresaID, 
 	return nil
 }
 
+// CoincidenciasEnOtrosMeses cuenta, por mes, lo que la MISMA búsqueda encontraría fuera del filtro
+// de fecha vigente.
+//
+// Reusa `condicionesMovimientos` con el filtro COMPLETO menos las fechas: así el alcance del
+// segmento, la cuenta y el rango de montos siguen aplicando. Esto no es cosmético — si el aviso
+// contara sobre toda la empresa, le estaría diciendo a un consultor que «existe algo» en una
+// partida que no puede ver, que es precisamente lo que el recorte por segmento impide.
+//
+// Sin texto buscado devuelve vacío: «hay movimientos en otros meses» sin una búsqueda detrás es
+// una obviedad, y un aviso que siempre aparece deja de leerse.
+func (r *pgRepository) CoincidenciasEnOtrosMeses(ctx context.Context, empresaID string, f FiltrosMovimientos) ([]CoincidenciaEnOtroMes, error) {
+	// Sin búsqueda, o sin ningún filtro de fecha, no hay «otros meses» de los que avisar: en el
+	// segundo caso el usuario ya está viendo todo y el aviso contaría lo que tiene delante.
+	if strings.TrimSpace(f.Q) == "" || (f.Periodo == "" && f.Desde == "" && f.Hasta == "") {
+		return nil, nil
+	}
+	sinFecha := f
+	sinFecha.Periodo, sinFecha.Periodos, sinFecha.Desde, sinFecha.Hasta = "", nil, "", ""
+	where, args := condicionesMovimientos(empresaID, sinFecha)
+
+	// Lo que queda FUERA del tramo que el usuario ya está mirando. Se arma con los valores del
+	// filtro original, no con el mes de hoy.
+	var fuera []string
+	if f.Periodo != "" {
+		args = append(args, f.Periodo)
+		fuera = append(fuera, fmt.Sprintf("to_char(m.fecha, 'YYYY-MM') <> $%d", len(args)))
+	}
+	// El rango se trata en UN solo caso con los dos extremos: fuera de un rango es «antes del
+	// desde O después del hasta». Escrito como dos condiciones sueltas quedarían unidas por AND
+	// —antes Y después, que no es nadie— y el aviso jamás encontraría nada.
+	switch {
+	case f.Desde != "" && f.Hasta != "":
+		args = append(args, f.Desde, f.Hasta)
+		fuera = append(fuera, fmt.Sprintf("(m.fecha < $%d OR m.fecha > $%d)", len(args)-1, len(args)))
+	case f.Desde != "":
+		args = append(args, f.Desde)
+		fuera = append(fuera, fmt.Sprintf("m.fecha < $%d", len(args)))
+	case f.Hasta != "":
+		args = append(args, f.Hasta)
+		fuera = append(fuera, fmt.Sprintf("m.fecha > $%d", len(args)))
+	}
+
+	// Tope de 6 meses: es un aviso para orientar, no un reporte. Los más recientes primero, que
+	// es donde está lo que alguien busca.
+	q := `SELECT to_char(m.fecha, 'YYYY-MM') AS periodo, COUNT(*)::int
+	      FROM movimiento_bancario m
+	      WHERE ` + where + " AND " + strings.Join(fuera, " AND ") + `
+	      GROUP BY 1 ORDER BY 1 DESC LIMIT 6`
+	rows, err := r.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("bancos: coincidencias en otros meses: %w", err)
+	}
+	defer rows.Close()
+	out := make([]CoincidenciaEnOtroMes, 0)
+	for rows.Next() {
+		var c CoincidenciaEnOtroMes
+		if err := rows.Scan(&c.Periodo, &c.Cuantos); err != nil {
+			return nil, fmt.Errorf("bancos: scan coincidencia: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // MovimientoEnAlcance dice si el movimiento existe en la empresa Y el equipo lo puede VER en su
 // pantalla, que es la condición para poder avisar sobre él: un crédito de una partida del alcance.
 //

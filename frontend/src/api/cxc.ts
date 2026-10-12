@@ -194,6 +194,16 @@ export const cxcApi = {
       query: { solo_abiertos: soloAbiertos },
     });
   },
+  /**
+   * Baja el machote del archivo de cartera: los encabezados que el lector reconoce, la ayuda de
+   * cada columna y los valores válidos del catálogo de la empresa.
+   *
+   * Existe porque un archivo con los encabezados equivocados NO falla: entra con los campos vacíos
+   * y cae en cuarentena en bloque.
+   */
+  plantillaContratos(): Promise<Blob> {
+    return apiFetch<Blob>("/cxc/importaciones/contratos/plantilla", { method: "GET", blob: true });
+  },
   /** Lee el archivo y devuelve el reporte SIN escribir en la cartera. */
   previsualizarContratos(archivo: File): Promise<PrevisualizacionCxc> {
     const fd = new FormData();

@@ -200,9 +200,10 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 	case errors.Is(err, ErrProveedorNoEncontrado), errors.Is(err, ErrDocumentoNoEncontrado), errors.Is(err, ErrComprobanteNoEncontrado), errors.Is(err, ErrDepartamentoNoEncontrado), errors.Is(err, ErrAplicacionNoEncontrada),
 		errors.Is(err, ErrFondoNoEncontrado), errors.Is(err, ErrValeNoEncontrado):
 		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, err.Error())
-	case errors.Is(err, ErrFuenteNoEncontrada), errors.Is(err, ErrRecepcionNoEncontrada):
+	case errors.Is(err, ErrFuenteNoEncontrada), errors.Is(err, ErrRecepcionNoEncontrada),
+		errors.Is(err, ErrRemesaNoEncontrada), errors.Is(err, ErrLoteNoEncontrado):
 		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, err.Error())
-	case errors.Is(err, ErrFuenteDuplicada):
+	case errors.Is(err, ErrFuenteDuplicada), errors.Is(err, ErrCodigoPagoDuplicado):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
 	case errors.Is(err, ErrRecepcionNoReintentable):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
@@ -231,9 +232,14 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 	// formado y el estado es correcto, lo que no corresponde es pagarlo por banco.
 	case errors.Is(err, ErrDocumentoBloqueadoParaPago):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
+	// ErrSinComprobantes estaba declarado y sin traducir: subir un archivo legible pero sin
+	// comprobantes devolvía 500 «error interno» en vez de decir qué le faltaba al archivo. Lo
+	// encontró TestTodoCentinelaTieneTraduccionHTTP, no un usuario.
 	case errors.Is(err, ErrArchivoVacio), errors.Is(err, ErrFormatoImportacion),
+		errors.Is(err, ErrSinComprobantes),
 		errors.Is(err, ErrAccionInvalida), errors.Is(err, ErrFechaPagoRequerida), errors.Is(err, ErrSinDocumentos),
-		errors.Is(err, ErrPeriodoInvalido):
+		errors.Is(err, ErrPeriodoInvalido), errors.Is(err, ErrModoPagoInvalido),
+		errors.Is(err, ErrCodigoPagoInvalido):
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, err.Error())
 	case errors.Is(err, ErrRolNoAutorizado), errors.Is(err, ErrNoEsValidador), errors.Is(err, ErrValidadorNoAprueba),
 		errors.Is(err, ErrNoAprobadorContabilidad), errors.Is(err, ErrMarcadorNoAprueba):
