@@ -80,6 +80,7 @@ import { AdminDepartamentos } from "@/features/bancos/components/AdminDepartamen
 import type {
   EstadoControl,
   FilaControl,
+  GastoMes,
   GastoPartidaDimension,
   OrigenDimension,
 } from "@/api/bancos";
@@ -697,6 +698,9 @@ function DetallePartidas({
                   <TH>Partida</TH>
                   <TH className="text-right">Movs</TH>
                   <TH className="text-right">Gasto</TH>
+                  {/* «Cuándo»: el total del rango no distingue una partida que viene cayendo de una
+                      que viene subiendo, y es lo primero que se pregunta al mirar un gasto. */}
+                  <TH>Cuándo</TH>
                   {esSinAsignar ? (
                     <TH>Asignar a</TH>
                   ) : (
@@ -718,6 +722,9 @@ function DetallePartidas({
                     </TD>
                     <TD className="text-right tabular-nums">{p.movs}</TD>
                     <TD className="text-right font-medium tabular-nums">{formatMonto(p.gasto)}</TD>
+                    <TD>
+                      <CuandoSeGasto meses={p.meses} pico={p.mes_pico ?? ""} />
+                    </TD>
                     {esSinAsignar ? (
                       <TD>
                         <AsignarPartida
@@ -801,6 +808,65 @@ function DetallePartidas({
  * repartir un rango de seis meses en una sola línea no diría en cuál de los seis se puede gastar.
  * El monto que se muestra sí es el del rango completo, porque es contra eso que se compara el gasto.
  */
+/** «set 26» — el mes en la forma corta que cabe debajo de una barra. */
+function mesCorto(periodo: string): string {
+  const largo = etiquetaPeriodo(periodo); // «Septiembre 2026»
+  const [nombre, anio] = largo.split(" ");
+  if (!nombre || !anio) return periodo;
+  return `${nombre.slice(0, 3).toLowerCase()} ${anio.slice(-2)}`;
+}
+
+/**
+ * La forma del gasto de una partida a lo largo del rango.
+ *
+ * Es la respuesta a «¿y en qué mes?», que el total de la fila no podía dar: con el rango en un solo
+ * número, una partida que viene CAYENDO (1,7 M → 1,1 M → 294 K) y una que viene SUBIENDO
+ * (153 K → 247 K → 313 K) se ven exactamente igual, y son dos problemas opuestos.
+ *
+ * Barras y no columnas por mes: el rango llega a 12 meses y doce columnas más no caben en una tabla
+ * que ya tiene siete. La barra se lee de un vistazo —dónde está el bulto— y el detalle exacto de
+ * cada mes va en el `title`, que es donde se consulta un número puntual.
+ *
+ * La altura es relativa al mes MÁS ALTO de esa partida, no al de la tabla: lo que importa acá es
+ * cómo se reparte ESTE gasto, no compararlo contra el de otra partida que puede ser mil veces mayor.
+ */
+function CuandoSeGasto({ meses, pico }: { meses: GastoMes[]; pico: string }) {
+  if (!meses || meses.length === 0) return <span className="text-xs text-content-muted">—</span>;
+
+  // Un solo mes: no hay forma que mostrar y una barra sola engaña (se vería siempre «llena»).
+  if (meses.length === 1) {
+    return <span className="whitespace-nowrap text-xs text-content-muted">{mesCorto(meses[0]!.periodo)}</span>;
+  }
+
+  const valores = meses.map((m) => Math.abs(toNumber(m.gasto)));
+  const mayor = Math.max(...valores);
+  const detalle = meses
+    .map((m, i) => `${mesCorto(m.periodo)}: ${formatMonto(m.gasto)} (${m.movs} mov.)${valores[i] === mayor ? " ← el más alto" : ""}`)
+    .join("\n");
+
+  return (
+    <div className="whitespace-nowrap" title={detalle}>
+      <div className="flex h-7 items-end gap-[2px]">
+        {meses.map((m, i) => {
+          // Mínimo visible: un mes con poco gasto no puede verse igual que uno SIN gasto.
+          const alto = mayor > 0 ? Math.max(3, Math.round((valores[i]! / mayor) * 26)) : 3;
+          const esPico = m.periodo === pico;
+          return (
+            <span
+              key={m.periodo}
+              style={{ height: `${alto}px` }}
+              className={cn("w-[6px] rounded-sm", esPico ? "bg-accent" : "bg-accent/30")}
+            />
+          );
+        })}
+      </div>
+      <span className="mt-0.5 block text-[10.5px] text-content-muted">
+        {pico ? `pico ${mesCorto(pico)}` : `${meses.length} meses`}
+      </span>
+    </div>
+  );
+}
+
 function SubpresupuestoDePartida({
   departamentoID,
   partida,

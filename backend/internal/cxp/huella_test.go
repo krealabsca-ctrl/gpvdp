@@ -149,3 +149,61 @@ func TestConciliaDescripcionesDelFormatoViejo(t *testing.T) {
 		}
 	}
 }
+
+// EL BANCO BORRA EL GUION. Esto no es una hipótesis: son las descripciones que devolvió el estado
+// de cuenta de Valle de Paz después de las dos primeras corridas de pago reales (30-set-2026). El
+// sistema emitió «CXP-54A4281AE49A» y el banco escribió «CXP54A4281AE49A».
+//
+// Mientras el patrón exigió el guion, el barrido examinó 0 movimientos y enlazó 0 facturas. Si
+// alguien "limpia" el regex y vuelve a poner el guion obligatorio, esta prueba se pone roja antes
+// de que la conciliación se muera otra vez en silencio.
+func TestElBancoBorraElGuionDeLaHuella(t *testing.T) {
+	reales := []struct{ nombre, descripcion, quiere string }{
+		{
+			"débito SINPE tal como vuelve del banco",
+			"DEBITO MASIVO SINPE ( - 1060746795 Pagar Proveedores Nuevo FC 000487 CXP54A4281AE49A Lote 888607 Linea 21 [FC 000487 CXP54A4281AE49A])",
+			"CXP-54A4281AE49A",
+		},
+		{
+			"segunda línea de la misma corrida",
+			"DEBITO MASIVO SINPE ( - 1060746795 Pagar Proveedores Nuevo FC 001856 CXPBF83125517BE Lote 888607 Linea 15 [FC 001856 CXPBF83125517BE])",
+			"CXP-BF83125517BE",
+		},
+		{
+			// La forma canónica tiene que seguir funcionando: hay pagos emitidos de las dos maneras.
+			"con guion, como lo emite la macro",
+			"FC 000487 CXP-54A4281AE49A",
+			"CXP-54A4281AE49A",
+		},
+	}
+	for _, c := range reales {
+		t.Run(c.nombre, func(t *testing.T) {
+			h, ok := extraerHuella(c.descripcion)
+			if !ok {
+				t.Fatalf("no reconoció la huella en una descripción REAL del banco:\n%s", c.descripcion)
+			}
+			// Siempre canónica: es la forma con la que se busca el documento en la base.
+			if h != c.quiere {
+				t.Errorf("huella = %q, quiere %q (canónica, con guion)", h, c.quiere)
+			}
+		})
+	}
+}
+
+// El pre-filtro de Bancos trae de más (busca «CXP» a secas) y es el patrón el que decide. Estas
+// descripciones son de movimientos REALES de la empresa que contienen «CXP» y NO son pagos
+// nuestros: si alguna calzara, el barrido intentaría conciliar un pago de otro banco contra una
+// factura, y eso sí mueve plata de lugar.
+func TestNoConfundeUnCXPAjenoConLaHuella(t *testing.T) {
+	ajenas := []string{
+		"FIDE 1937 CXP 430581 JUNIO 26/BANCO IMPROSA S.A",
+		"A1 FIDE 1937 CXP 432547 JUIO 2/BANCO IMPROSA S.A",
+		"INTERNET TRANSF PROV // ASEMOPT _ CXP_GT_ 280826 ASEMOPT FU",
+		"COMISION POR TRANSACCION",
+	}
+	for _, desc := range ajenas {
+		if h, ok := extraerHuella(desc); ok {
+			t.Errorf("reconoció %q como huella en una descripción ajena:\n%s", h, desc)
+		}
+	}
+}

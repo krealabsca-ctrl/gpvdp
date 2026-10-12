@@ -94,11 +94,19 @@ func (s *Service) MiSegmento(ctx context.Context, empresaID, usuarioID, vista st
 		return MiSegmento{}, err
 	}
 
+	// Dónde MÁS está lo que se buscó. Va con el mismo filtro (alcance incluido), así que no puede
+	// delatar movimientos de una partida que este rol no puede ver.
+	otros, err := s.repo.CoincidenciasEnOtrosMeses(ctx, empresaID, f)
+	if err != nil {
+		return MiSegmento{}, err
+	}
+
 	return MiSegmento{
 		Vista:             vista,
 		Partidas:          partidas,
 		Cuentas:           cuentas,
 		Movimientos:       lista,
+		OtrosMeses:        otros,
 		CargadoHasta:      cargadoHasta,
 		CuentaMasAtrasada: masAtrasada,
 		CargaPorCuenta:    carga,

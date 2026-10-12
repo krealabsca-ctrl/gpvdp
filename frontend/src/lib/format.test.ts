@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { aFechaHora, formatMoneda, montoACentimos, montoLegible, montoParaApi } from "./format";
+import {
+  aFechaHora,
+  finDeMes,
+  formatMoneda,
+  montoACentimos,
+  montoLegible,
+  montoParaApi,
+} from "./format";
 
 /**
  * EL BUG DE LA CAPTURA DE SALDOS (10 de setiembre de 2026).
@@ -106,5 +113,31 @@ describe("aFechaHora", () => {
     for (const x of ["", "   ", "no es fecha", null, undefined]) {
       expect(aFechaHora(x)).toBeNull();
     }
+  });
+});
+
+/**
+ * `finDeMes` convierte un mes en un rango cerrado: lo usa el salto de «está en otro mes» de «Mi
+ * partida» (2-oct-2026).
+ *
+ * El filtro de MONTO de esa misma pantalla NO trae helper nuevo: usa `montoParaApi`, el de arriba.
+ * Inventar un normalizador por pantalla es exactamente lo que causó el bug de los saldos.
+ */
+describe("finDeMes", () => {
+  it("meses de 31, de 30 y febrero", () => {
+    expect(finDeMes("2026-01")).toBe("2026-01-31");
+    expect(finDeMes("2026-04")).toBe("2026-04-30");
+    expect(finDeMes("2026-02")).toBe("2026-02-28");
+  });
+
+  it("un año bisiesto da 29", () => {
+    // Si alguien lo reescribiera con una tabla de 30/31, este caso se pierde.
+    expect(finDeMes("2028-02")).toBe("2028-02-29");
+  });
+
+  it("no se corre un día por la zona horaria", () => {
+    // Armado con toISOString() daría el día anterior en Costa Rica (UTC−6), y el rango dejaría
+    // afuera justo el último día del mes al que se saltó.
+    expect(finDeMes("2026-12")).toBe("2026-12-31");
   });
 });

@@ -412,6 +412,93 @@ export interface MovimientoRow {
    * manda.
    */
   aviso_resuelto?: AvisoResuelto;
+  /**
+   * La FACTURA que este movimiento pagó, cuando la conciliación por huella los enlazó.
+   *
+   * Ausente = este débito no está enlazado a ninguna factura de CxP (la enorme mayoría: un pago de
+   * planilla, una comisión, un traslado). Ausente NO significa «no se pudo»: significa que no hay
+   * enlace, y la pantalla no debe sugerir otra cosa.
+   */
+  pago_cxp?: PagoCxPDeMovimiento;
+  /**
+   * Este pago YA estaba aplicado en el sistema ANTERIOR.
+   *
+   * No es lo mismo que `pago_cxp`: aquel dice qué factura del ERP cerró el movimiento, y esto dice
+   * «alguien ya lo resolvió afuera» — más débil y más honesto, porque no inventa un enlace que
+   * nadie verificó. El movimiento sigue visible: la plata salió del banco igual.
+   */
+  sello_externo?: SelloExterno;
+}
+
+/** El sello «aplicado en el sistema anterior», con el renglón del reporte que lo explica. */
+export interface SelloExterno {
+  referencia: string;
+  documento: string;
+  tercero: string;
+  /** YYYY-MM-DD, o "" si el reporte no traía fecha. */
+  fecha_aplicado: string;
+  /** Lo que el reporte decía; puede diferir del débito del banco. */
+  monto_reportado: string;
+}
+
+/** Cuánto hay sellado y —lo que importa— cuánto queda sin explicar. */
+export interface ResumenPagosExternos {
+  sellados: number;
+  monto_sellado: string;
+  cargas: number;
+  /** Débitos sin enlace al ERP y sin sello: el número que se quiere ver bajar. */
+  pendientes: number;
+  monto_pendiente: string;
+}
+
+/** El veredicto de una fila del reporte al cruzarla contra el banco. */
+export interface ResultadoCruce {
+  fila: {
+    linea: number;
+    referencia: string;
+    documento: string;
+    tercero: string;
+    fecha: string;
+    monto: string;
+    nota: string;
+    motivo?: string;
+  };
+  veredicto: "UNICO" | "VARIOS" | "SIN_MOVIMIENTO" | "ILEGIBLE";
+  por?: "REFERENCIA" | "FECHA_Y_MONTO";
+  movimiento_id?: string;
+  candidatos: number;
+  /** Calzó por referencia pero el monto no coincide. Se sella igual: es un hallazgo. */
+  diferencia_monto?: string;
+}
+
+/** Lo que se muestra ANTES de confirmar la carga. */
+export interface PrevisualizacionPagosExternos {
+  filas: number;
+  unicos: number;
+  varios: number;
+  sin_movimiento: number;
+  ilegibles: number;
+  con_diferencia: number;
+  monto_a_marcar: string;
+  /** Acotado a 500, y lo que NO calzó va primero: es lo único accionable. */
+  detalle: ResultadoCruce[];
+  antes: ResumenPagosExternos;
+}
+
+/** La factura que un movimiento bancario pagó, con lo mínimo para reconocerla en la fila. */
+export interface PagoCxPDeMovimiento {
+  documento_id: string;
+  /**
+   * El número de la factura, o la referencia del GRUPO («REM 0029-01») cuando el pago cubre varias
+   * de un proveedor: ahí no hay una sola factura que nombrar, y mostrar la primera haría creer que
+   * ese débito pagó solo esa.
+   */
+  consecutivo: string;
+  proveedor: string;
+  /** El código interno del pago («CXP-…» o «CXPR-…»), el mismo que viaja en el banco. */
+  huella: string;
+  /** Cuántas facturas cubre: 1 en un pago suelto, más en uno agrupado por proveedor. */
+  facturas: number;
 }
 
 /** Cómo se cerró un aviso: la partida se corrigió, o estaba bien y se explica por qué. */
@@ -469,10 +556,26 @@ export interface CuentaCargadaHasta {
  * que acompaña a NO_EXISTE en «Falta un movimiento», así el encabezado y el diálogo no se
  * contradicen. Vacío = el segmento no tiene ninguna cuenta.
  */
+/** Un mes DISTINTO al consultado donde la misma búsqueda sí encuentra algo. */
+export interface CoincidenciaEnOtroMes {
+  /** YYYY-MM. */
+  periodo: string;
+  cuantos: number;
+}
+
 export interface MiSegmento {
   partidas: PartidaDelSegmento[];
   cuentas: CuentaDelSegmento[];
   movimientos: ListaMovimientos;
+  /**
+   * Dónde MÁS está lo que se buscó, fuera del filtro de fecha vigente.
+   *
+   * Existe porque buscar y no encontrar era ambiguo: «no hay ningún depósito de SOLIDARIS» y «no
+   * hay ninguno EN ESTE MES» se veían igual —una lista vacía— y la segunda es la respuesta
+   * correcta casi siempre. Ausente = la búsqueda no encuentra nada en ningún otro mes, y entonces
+   * sí se puede afirmar que no existe.
+   */
+  otros_meses?: CoincidenciaEnOtroMes[];
   cargado_hasta: string;
   /** La cuenta cuya fecha es `cargado_hasta` (null sin cuentas). */
   cargado_hasta_cuenta: CuentaCargadaHasta | null;
@@ -652,6 +755,13 @@ export interface FiltrosMovimientos {
   conceptos?: string[];
   /** El nivel fino: hay cientos de clasificaciones, así que se eligen buscando, no en parrilla. */
   clasificaciones?: string[];
+  /**
+   * Rango de monto, en COLONES y en valor absoluto: un débito y un crédito del mismo tamaño son
+   * «el mismo monto» para quien busca. Van como número pelado, sin separadores de miles ni signo
+   * — el servidor rechaza cualquier otra cosa con un 400 antes de que toque la base.
+   */
+  monto_min?: string;
+  monto_max?: string;
   /** Filtra el grupo completo de cuentas de un banco. */
   banco_id?: string;
   /** Afina a una sola cuenta (dentro del banco elegido, si hay uno). */
@@ -843,6 +953,24 @@ export interface GastoPartidaDimension {
    */
   partida_departamento_id: string;
   partida_sede_id: string;
+  /**
+   * El gasto de la partida MES A MES, solo los meses con movimiento y en orden.
+   *
+   * El rango puede ser de hasta 12 meses y la fila traía un único total, así que «¿en qué partida
+   * se fue la plata?» se contestaba y «¿en qué mes?» no: un trimestre donde una partida cayó de
+   * 1,7 M a 294 K se veía igual de plano que uno parejo.
+   */
+  meses: GastoMes[];
+  /** El mes que concentró más gasto. Vacío cuando el rango es de un solo mes. */
+  mes_pico?: string;
+}
+
+/** Lo que una partida gastó en UN mes. */
+export interface GastoMes {
+  /** YYYY-MM. */
+  periodo: string;
+  movs: number;
+  gasto: string;
 }
 
 /** Estado de un departamento frente a su presupuesto. */
@@ -1266,6 +1394,42 @@ export const bancosApi = {
       query: incluirInactivas ? { incluir_inactivas: true } : {},
     });
   },
+  // --- Pagos que el sistema ANTERIOR ya tenía aplicados (mig 0091) ---
+  //
+  // Dos pasos, como el resto de los importadores: se sube, se ve qué va a pasar y recién ahí se
+  // confirma. Marcar miles de movimientos como resueltos sin que nadie mire antes no se puede
+  // deshacer leyendo la pantalla.
+  resumenPagosExternos(): Promise<ResumenPagosExternos> {
+    return apiFetch<ResumenPagosExternos>("/bancos/pagos-externos", { method: "GET" });
+  },
+  previsualizarPagosExternos(archivo: File): Promise<PrevisualizacionPagosExternos> {
+    const fd = new FormData();
+    fd.append("archivo", archivo);
+    return apiFetch<PrevisualizacionPagosExternos>("/bancos/pagos-externos/previsualizar", {
+      method: "POST",
+      raw: fd,
+    });
+  },
+  /** Se manda el MISMO archivo: la fuente de verdad es el archivo, no un estado a medias. */
+  confirmarPagosExternos(
+    archivo: File,
+  ): Promise<{
+    reporte: PrevisualizacionPagosExternos;
+    carga_id: string;
+    sellados: number;
+    despues: ResumenPagosExternos;
+  }> {
+    const fd = new FormData();
+    fd.append("archivo", archivo);
+    return apiFetch("/bancos/pagos-externos/confirmar", { method: "POST", raw: fd });
+  },
+  /** Quita las marcas de una carga entera, para deshacer una importación equivocada. */
+  revertirPagosExternos(cargaID: string): Promise<{ quitados: number }> {
+    return apiFetch<{ quitados: number }>(`/bancos/pagos-externos/${cargaID}/revertir`, {
+      method: "POST",
+    });
+  },
+
   // --- Administración de bancos y cuentas (catálogo) ---
   bancos(incluirInactivos = false): Promise<BancoItem[]> {
     return apiFetch<BancoItem[]>("/bancos/catalogo/bancos", {
@@ -2003,7 +2167,55 @@ export const bancosApi = {
       json: { cuenta_id: cuentaId, periodo },
     });
   },
+  /**
+   * Barre los movimientos que traen el código interno de CxP y empareja cada uno con su factura.
+   *
+   * Corre solo al confirmar una importación; esto lo REPITE sobre lo ya cargado. Hace falta porque
+   * durante mucho tiempo el barrido automático no enganchaba nada (buscaba el código con guion y el
+   * banco lo devuelve sin él), así que todo lo pagado hasta hoy quedó sin enlazar.
+   */
+  conciliarCxP(): Promise<ReporteConciliacionCxP> {
+    return apiFetch<ReporteConciliacionCxP>("/bancos/conciliacion-cxp", { method: "POST" });
+  },
 };
+
+/** Resultado del barrido de códigos internos Bancos↔CxP. */
+export interface ReporteConciliacionCxP {
+  /**
+   * CANDIDATOS que trajo el pre-filtro: movimientos cuya descripción contiene «CXP» y que todavía
+   * no estaban enlazados. No todos son pagos nuestros — ver `sin_huella`.
+   */
+  examinados: number;
+  conciliados: number;
+  /** El código calzó pero el banco debitó otra cifra: NO se concilia, es un hallazgo. */
+  monto_diferente: number;
+  /** Hay código pero ninguna factura pagable lo reclama (ya conciliada, anulada, de otra empresa). */
+  sin_documento: number;
+  /**
+   * Candidatos que NO son pagos de CxP: el pre-filtro busca «CXP» a secas —el banco borra el guion
+   * del código, así que uno más estricto no traería ninguno de los buenos— y eso arrastra
+   * descripciones ajenas de otros bancos. No son un problema; se informan para que el total cuadre.
+   */
+  sin_huella: number;
+  detalle: PagoConciliado[];
+  /** false = CxP no está conectado. No es un error: no hay nada que barrer. */
+  disponible: boolean;
+}
+
+/** Una línea del reporte del barrido. */
+export interface PagoConciliado {
+  movimiento_id: string;
+  fecha: string;
+  cuenta: string;
+  huella: string;
+  veredicto: "CONCILIADO" | "MONTO_DIFERENTE" | "SIN_DOCUMENTO" | "SIN_HUELLA";
+  consecutivo: string;
+  proveedor: string;
+  monto_banco: string;
+  monto_esperado: string;
+  /** El movimiento además quedó clasificado con el gasto de la factura. */
+  clasificado: boolean;
+}
 
 // --- Diccionario del catálogo ---
 

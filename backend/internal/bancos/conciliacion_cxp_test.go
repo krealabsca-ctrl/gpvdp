@@ -14,7 +14,9 @@ type conciliadorFake struct {
 	llamados  int
 }
 
-func (c *conciliadorFake) PrefijoHuella() string { return "CXP-" }
+// Sin el guion, igual que el servicio real: el banco lo borra y un pre-filtro con guion descarta
+// justo los movimientos a examinar. Un fake que mienta acá deja pasar la regresión.
+func (c *conciliadorFake) PrefijoHuella() string { return "CXP" }
 
 func (c *conciliadorFake) ConciliarHuella(_ context.Context, _, descripcion, montoBanco, _ string) (ResultadoHuella, error) {
 	c.llamados++

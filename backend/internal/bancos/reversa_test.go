@@ -45,6 +45,10 @@ var tablasDeLaReversa = []string{
 	"importacion", "movimiento_bancario", "movimiento_reporte_segmentacion",
 	"cobro_cxc", "cxc_planilla_movimiento", "responsabilidad_periodo",
 	"periodo_cierre", "acta_conciliacion", "auditoria_evento",
+	// El listado de movimientos muestra la factura que cada pago cerró (PagoCxP en MovimientoRow).
+	"documento_cxp", "proveedor",
+	// Y los pagos agrupados (mig 0088-0089): un movimiento puede apuntar a una remesa.
+	"remesa_pago", "lote_pago",
 }
 
 const (

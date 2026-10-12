@@ -37,7 +37,25 @@ const documentoCols = `d.id::text, d.proveedor_id::text, COALESCE(p.nombre, ''),
 	-- Solo las que conservan el XML: sin XML no hay nada que mostrar.
 	COALESCE((SELECT rc.id::text FROM cxp_recepcion rc
 	          WHERE rc.documento_id = d.id AND rc.xml_crudo IS NOT NULL
-	          ORDER BY rc.creado_en DESC LIMIT 1), '')`
+	          ORDER BY rc.creado_en DESC LIMIT 1), ''),
+	-- El movimiento bancario con el que se pagó, si la conciliación por huella los enlazó.
+	-- Va por idx_mov_documento_cxp (índice único parcial): a lo sumo una fila, y la enorme
+	-- mayoría de las facturas no tienen enlace, así que no paga nada quien no lo usa.
+	-- El enlace directo manda sobre el de la remesa cuando existieran los dos. El COALESCE elige el
+	-- MISMO movimiento en las tres columnas y no mezcla una fecha con un débito ajeno: id, fecha y
+	-- debito son NOT NULL en la tabla, así que o viene todo de mdoc o viene todo de mrem.
+	COALESCE(mdoc.id::text, mrem.id::text, ''),
+	COALESCE(to_char(COALESCE(mdoc.fecha, mrem.fecha), 'YYYY-MM-DD'), ''),
+	COALESCE(cbx.alias, ''), COALESCE(bx.nombre, ''),
+	COALESCE(mdoc.debito::text, mrem.debito::text, ''),
+	-- La remesa dentro de la que se fue esta factura, cuando el lote se cortó por proveedor. Es lo
+	-- que de verdad viaja al banco en ese caso, así que sin esto la pantalla muestra un código que
+	-- el estado de cuenta nunca va a traer.
+	COALESCE(rcxp.id::text, ''), COALESCE(rcxp.huella, ''),
+	CASE WHEN rcxp.id IS NOT NULL THEN ` + referenciaRemesaSQL + ` ELSE '' END,
+	CASE WHEN rcxp.id IS NOT NULL
+	     THEN (SELECT count(*) FROM documento_cxp dr WHERE dr.remesa_id = rcxp.id)
+	     ELSE 0 END`
 
 // contabilidadOrigenSQL resuelve la marca «de Contabilidad» en UNA expresión, y la resuelve acá
 // —en el SELECT común— para que la Bandeja, el detalle y el candado de aprobación lean todos el
@@ -72,10 +90,32 @@ const documentoFrom = `FROM documento_cxp d
 	LEFT JOIN lote_pago lp ON lp.id = d.lote_id
 	LEFT JOIN comprobante_pago cpz ON cpz.documento_id = d.id
 	LEFT JOIN departamento dep ON dep.id = d.departamento_id
-	LEFT JOIN usuario uv ON uv.id = d.validado_depto_por`
+	LEFT JOIN usuario uv ON uv.id = d.validado_depto_por
+	LEFT JOIN remesa_pago rcxp ON rcxp.id = d.remesa_id
+	LEFT JOIN lote_pago lrem ON lrem.id = rcxp.lote_id
+	-- El movimiento que pagó esta factura, por CUALQUIERA de los dos caminos: el enlace directo
+	-- (pago suelto, columna de la mig 0043) o el de la remesa (pago agrupado, mig 0089). Antes solo
+	-- se miraba el directo, así que una factura pagada dentro de una remesa decía «sin enlazar al
+	-- banco» para siempre, por más que el débito estuviera conciliado.
+	--
+	-- Dos JOIN y no uno con OR —ni un LATERAL—, por dos razones:
+	--
+	--   · No multiplican. idx_mov_documento_cxp e idx_mov_remesa son únicos parciales, así que
+	--     cada LEFT JOIN aporta a lo sumo una fila; dos de ellos siguen dando una sola fila de
+	--     salida, con las columnas del que no calzó en NULL.
+	--   · Un LATERAL con LIMIT 1 también sería correcto, pero le impide al planner aplicar el
+	--     ORDER BY ... LIMIT antes: se ejecutaba una vez por cada factura de la empresa y el
+	--     listado pasó de 2 ms a 183 ms (medido sobre 4.542 facturas). Esta es la consulta de la
+	--     pantalla principal del módulo.
+	LEFT JOIN movimiento_bancario mdoc ON mdoc.documento_cxp_id = d.id
+	LEFT JOIN movimiento_bancario mrem ON mrem.remesa_id = d.remesa_id
+	LEFT JOIN cuenta_bancaria cbx ON cbx.id = COALESCE(mdoc.cuenta_bancaria_id, mrem.cuenta_bancaria_id)
+	LEFT JOIN banco bx ON bx.id = cbx.banco_id`
 
 func scanDocumento(row scanner) (Documento, error) {
 	var d Documento
+	var pago PagoBancoDelDocumento
+	var rem RemesaDelDocumento
 	err := row.Scan(&d.ID, &d.ProveedorID, &d.Proveedor, &d.Clave, &d.Consecutivo, &d.Tipo, &d.FechaEmision,
 		&d.Moneda, &d.Subtotal, &d.IVA, &d.Retencion, &d.Total, &d.TotalCRC, &d.Estado,
 		&d.FechaPagoProgramada, &d.Huella, &d.Descripcion,
@@ -86,7 +126,18 @@ func scanDocumento(row scanner) (Documento, error) {
 		&d.ValidadoDeptoPorNombre, &d.AnticiposAplicados, &d.ProveedorAnticipoDisponible,
 		&d.ContabilidadOrigen, &d.ContabilidadMotivo, &d.ContabilidadMarcadoPor,
 		&d.RequiereValidacion, &d.ValidacionMotivo,
-		&d.BloqueadoParaPago, &d.BloqueoMotivo, &d.RecepcionID)
+		&d.BloqueadoParaPago, &d.BloqueoMotivo, &d.RecepcionID,
+		&pago.MovimientoID, &pago.Fecha, &pago.Cuenta, &pago.Banco, &pago.Debito,
+		&rem.ID, &rem.Huella, &rem.Referencia, &rem.Facturas)
+	// Solo si hay enlace de verdad: el id es la prueba, no el alias ni la fecha.
+	if pago.MovimientoID != "" {
+		p := pago
+		d.PagoBanco = &p
+	}
+	if rem.ID != "" {
+		r := rem
+		d.Remesa = &r
+	}
 	if err == nil {
 		d.NetoCRC = netoCRC(d.TotalCRC, d.AnticiposAplicados)
 		// Derivado del origen, nunca consultado aparte: así el booleano y el «por qué» no pueden
@@ -181,6 +232,48 @@ func (r *pgRepository) DocumentoPorClave(ctx context.Context, empresaID, clave s
 	return d, nil
 }
 
+// ordenesDocumento es la lista CERRADA de ordenamientos del listado. El valor es SQL y se
+// concatena, así que nunca puede salir de lo que llegó del cliente: la clave se busca en el mapa y
+// un orden desconocido cae en el default. Un `ORDER BY` armado con texto libre es una inyección.
+//
+// Todos terminan en `d.id` a propósito: sin un desempate estable, dos facturas con la misma fecha
+// (o el mismo monto) pueden salir en distinto orden en cada página y la misma factura aparecer dos
+// veces, o ninguna, al paginar. Con 4.400 documentos eso no es teórico.
+var ordenesDocumento = map[string]string{
+	// Default: lo más reciente primero.
+	"": "d.fecha_emision DESC, d.id",
+	// Bandeja: prioridad interna primero (AA, luego A), después lo que vence primero. Es la
+	// política del corte y por eso sigue siendo el orden con el que abre «Por pagar».
+	"vencimiento":      "CASE d.prioridad WHEN 'AA' THEN 0 WHEN 'A' THEN 1 ELSE 2 END, d.fecha_vencimiento ASC NULLS LAST, d.id",
+	"vencimiento_desc": "CASE d.prioridad WHEN 'AA' THEN 0 WHEN 'A' THEN 1 ELSE 2 END, d.fecha_vencimiento DESC NULLS LAST, d.id",
+	// Por fecha de vencimiento PURA, sin la prioridad adelante: para ver la cola real del mes.
+	"vence":      "d.fecha_vencimiento ASC NULLS LAST, d.id",
+	"vence_desc": "d.fecha_vencimiento DESC NULLS LAST, d.id",
+	"emision":    "d.fecha_emision ASC, d.id",
+	// `emision_desc` es el default con nombre: existe para que el encabezado pueda alternar.
+	"emision_desc":   "d.fecha_emision DESC, d.id",
+	"proveedor":      "p.nombre ASC, d.fecha_vencimiento ASC NULLS LAST, d.id",
+	"proveedor_desc": "p.nombre DESC, d.fecha_vencimiento ASC NULLS LAST, d.id",
+	// Monto: el NETO no, el total; es lo que la fila muestra. Ordenar por una cifra distinta de la
+	// que se ve haría parecer que el orden está roto.
+	"monto":      "d.total_crc ASC, d.id",
+	"monto_desc": "d.total_crc DESC, d.id",
+	// Prioridad sola: AA, A, sin prioridad. El desempate por vencimiento mantiene útil la lista.
+	"prioridad":      "CASE d.prioridad WHEN 'AA' THEN 0 WHEN 'A' THEN 1 ELSE 2 END, d.fecha_vencimiento ASC NULLS LAST, d.id",
+	"prioridad_desc": "CASE d.prioridad WHEN 'AA' THEN 2 WHEN 'A' THEN 1 ELSE 0 END, d.fecha_vencimiento ASC NULLS LAST, d.id",
+	"departamento":   "dep.nombre ASC NULLS LAST, d.fecha_vencimiento ASC NULLS LAST, d.id",
+	"gasto":          "c.nombre ASC NULLS LAST, cl.nombre ASC NULLS LAST, d.id",
+}
+
+// ordenDocumentos traduce el orden pedido a SQL. Un valor desconocido NO es un error: cae en el
+// default, porque un orden que no se entiende no justifica negarle la lista a nadie.
+func ordenDocumentos(orden string) string {
+	if sql, ok := ordenesDocumento[orden]; ok {
+		return sql
+	}
+	return ordenesDocumento[""]
+}
+
 func (r *pgRepository) ListarDocumentos(ctx context.Context, empresaID string, f FiltrosDocumentos) (ListaDocumentos, error) {
 	conds := []string{"d.empresa_id = $1::uuid"}
 	args := []any{empresaID}
@@ -197,8 +290,37 @@ func (r *pgRepository) ListarDocumentos(ctx context.Context, empresaID string, f
 		conds = append(conds, fmt.Sprintf("d.estado = ANY($%d)", len(args)))
 	}
 	if f.Q != "" {
+		// Buscar también por los CÓDIGOS DE PAGO, no solo por proveedor y factura.
+		//
+		// El camino natural es al revés del que estaba cubierto: se ve un débito en el estado de
+		// cuenta y se quiere saber a qué factura corresponde. Quien hacía eso copiaba el código de
+		// la descripción del banco, lo pegaba acá y no encontraba NADA —la huella no se buscaba por
+		// ningún lado— así que la respuesta de la pantalla era indistinguible de «esa factura no
+		// existe».
+		//
+		// Los dos códigos entran: el de la factura («CXP-…», pago suelto) y el de la remesa
+		// («CXPR-…», pago agrupado), más la referencia legible («REM 0035-01»). Las huellas se
+		// comparan SIN guion de los dos lados porque el banco lo borra en el camino: lo emitido es
+		// «CXP-B397CFFF40AD» y lo que vuelve —y lo que la persona copia— es «CXPB397CFFF40AD».
 		args = append(args, "%"+f.Q+"%")
-		conds = append(conds, fmt.Sprintf("(p.nombre ILIKE $%d OR d.consecutivo ILIKE $%d OR d.clave ILIKE $%d)", len(args), len(args), len(args)))
+		like := len(args)
+		args = append(args, "%"+strings.ReplaceAll(f.Q, "-", "")+"%")
+		sinGuion := len(args)
+		busqueda := fmt.Sprintf(
+			`p.nombre ILIKE $%[1]d OR d.consecutivo ILIKE $%[1]d OR d.clave ILIKE $%[1]d
+			 OR replace(d.huella, '-', '') ILIKE $%[2]d
+			 OR replace(rcxp.huella, '-', '') ILIKE $%[2]d
+			 OR %[3]s ILIKE $%[1]d`, like, sinGuion, referenciaRemesaSQL)
+		// «FC 000487», la otra mitad de la nomenclatura: la referencia legible del pago POR FACTURA,
+		// igual que «REM 0035-01» lo es del pago agrupado. Son los últimos 6 dígitos del consecutivo
+		// con ceros de relleno (ver macroDescripcion), así que se reconstruyen del mismo modo del
+		// lado de la base; un LIKE no serviría porque esos ceros pueden no estar en el consecutivo.
+		if fc := clavePagoFC(f.Q); fc != "" {
+			args = append(args, fc)
+			busqueda += fmt.Sprintf(
+				` OR lpad(right(regexp_replace(d.consecutivo, '\D', '', 'g'), 6), 6, '0') = $%d`, len(args))
+		}
+		conds = append(conds, "("+busqueda+")")
 	}
 	if f.ConceptoID != "" {
 		args = append(args, f.ConceptoID)
@@ -298,11 +420,7 @@ func (r *pgRepository) ListarDocumentos(ctx context.Context, empresaID string, f
 	if f.Page <= 0 {
 		f.Page = 1
 	}
-	orderBy := "d.fecha_emision DESC, d.id"
-	if f.Orden == "vencimiento" {
-		// Bandeja: prioridad interna primero (AA, luego A), después lo que vence primero.
-		orderBy = "CASE d.prioridad WHEN 'AA' THEN 0 WHEN 'A' THEN 1 ELSE 2 END, d.fecha_vencimiento ASC NULLS LAST, d.id"
-	}
+	orderBy := ordenDocumentos(f.Orden)
 	args = append(args, f.PageSize, (f.Page-1)*f.PageSize)
 	listQ := "SELECT " + documentoCols + " " + documentoFrom + " WHERE " + where +
 		fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", orderBy, len(args)-1, len(args))

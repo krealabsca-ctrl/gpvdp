@@ -424,5 +424,8 @@ func (c conciliadorCxP) ConciliarHuella(ctx context.Context, empresaID, descripc
 		DocumentoID: r.DocumentoID, Consecutivo: r.Consecutivo, Proveedor: r.Proveedor,
 		ConceptoID: r.ConceptoID, ClasificacionID: r.ClasificacionID,
 		MontoEsperado: r.MontoEsperado, MontoBanco: r.MontoBanco,
+		// Un pago agrupado trae la remesa en vez del documento: Bancos enlaza contra una u otra.
+		// Si esta línea se olvidara, el pago se conciliaría en CxP y el movimiento quedaría suelto.
+		RemesaID: r.RemesaID, Facturas: r.Facturas,
 	}, nil
 }

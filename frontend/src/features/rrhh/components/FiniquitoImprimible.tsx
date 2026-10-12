@@ -61,6 +61,13 @@ export function abrirFiniquitoImprimible(f: Finiquito, empresa: string): boolean
 <style>
   @page { size: letter; margin: 18mm 16mm; }
   * { box-sizing: border-box; }
+  /* Papel BLANCO y declarado. Sin esto el fondo lo pone el sistema: en un equipo con tema oscuro el
+     finiquito sale NEGRO con el texto gris encima, ilegible justo cuando el empleado lo lee antes
+     de firmarlo. Al imprimir saldría blanco igual, así que el defecto solo se ve en pantalla y
+     ninguna prueba de contenido lo detecta. El color-scheme evita además que el navegador
+     reinterprete los colores por su cuenta. */
+  :root { color-scheme: light; }
+  html, body { background: #FFFFFF; }
   body { font: 12px/1.55 ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif; color: #1E2A24; margin: 0; }
   h1 { font-size: 17px; margin: 0 0 2px; letter-spacing: -.01em; }
   h2 { font-size: 12px; margin: 22px 0 6px; text-transform: uppercase; letter-spacing: .07em; color: #55645C; }

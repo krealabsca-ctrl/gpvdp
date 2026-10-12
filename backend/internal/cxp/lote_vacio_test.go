@@ -29,6 +29,13 @@ var tablasDelLote = []string{
 	"empresa", "usuario", "proveedor", "lote_pago", "concepto", "clasificacion",
 	"subclasificacion", "departamento", "documento_cxp", "anticipo_aplicacion",
 	"comprobante_pago", "cxp_recepcion",
+	// El listado de documentos muestra el MOVIMIENTO BANCARIO con el que se pagó cada factura
+	// (ver PagoBanco en Documento), así que la consulta toca estas tres. Sin ellas el esquema
+	// temporal da «relation movimiento_bancario does not exist», que es lo correcto: el pool solo
+	// ve este esquema, así que una tabla olvidada falla en vez de leer la de producción.
+	"movimiento_bancario", "cuenta_bancaria", "banco",
+	// Los pagos agrupados por proveedor (mig 0088).
+	"remesa_pago",
 }
 
 const (
@@ -129,8 +136,7 @@ func TestNoSeCreaUnLoteVacio(t *testing.T) {
 	enRevision := factura(t, repo, "F-REV", "REVISADO", "60000", false, empresaLote)
 	ajena := factura(t, repo, "F-AJENA", "APROBADO", "70000", false, otraEmpLote)
 
-	_, err := repo.CrearLote(ctx, empresaLote, "2026-08-07",
-		[]string{bloqueada, enRevision, ajena}, usuarioLote)
+	_, err := repo.CrearLote(ctx, empresaLote, "2026-08-07", ModoFactura, []string{bloqueada, enRevision, ajena}, usuarioLote)
 
 	var vacio *LoteVacioError
 	if !asLoteVacio(err, &vacio) {
@@ -178,7 +184,7 @@ func TestLoteParcialDiceQueQuedoAfuera(t *testing.T) {
 	if _, err := repo.ProgramarAprobados(ctx, empresaLote, []string{buena, bloqueada}, "2026-08-07"); err != nil {
 		t.Fatalf("programar: %v", err)
 	}
-	lote, err := repo.CrearLote(ctx, empresaLote, "2026-08-07", []string{buena, bloqueada}, usuarioLote)
+	lote, err := repo.CrearLote(ctx, empresaLote, "2026-08-07", ModoFactura, []string{buena, bloqueada}, usuarioLote)
 	if err != nil {
 		t.Fatalf("no esperaba error con una factura buena: %v", err)
 	}
@@ -204,7 +210,7 @@ func TestLoteParcialDiceQueQuedoAfuera(t *testing.T) {
 			t.Fatalf("programar: %v", err)
 		}
 		// `buena` ya está en el lote de arriba: se pide junto a una nueva.
-		l2, err := repo.CrearLote(ctx, empresaLote, "2026-08-08", []string{buena, otra}, usuarioLote)
+		l2, err := repo.CrearLote(ctx, empresaLote, "2026-08-08", ModoFactura, []string{buena, otra}, usuarioLote)
 		if err != nil {
 			t.Fatalf("no esperaba error: %v", err)
 		}
@@ -229,7 +235,7 @@ func TestUnLoteNormalNoReportaNadaAfuera(t *testing.T) {
 		t.Fatalf("programar: %v", err)
 	}
 
-	lote, err := repo.CrearLote(ctx, empresaLote, "2026-08-07", []string{a, b}, usuarioLote)
+	lote, err := repo.CrearLote(ctx, empresaLote, "2026-08-07", ModoFactura, []string{a, b}, usuarioLote)
 	if err != nil {
 		t.Fatalf("no esperaba error: %v", err)
 	}

@@ -5,11 +5,16 @@ import "context"
 // CrearLote arma un lote de pago (corte) con las facturas seleccionadas. Las APROBADAS del corte
 // se programan automáticamente (fecha de pago = fecha de corte, con su huella) para que "aprobar
 // y cortar" sea un solo paso en la Bandeja; las ya PROGRAMADAS sin lote entran directo.
-func (s *Service) CrearLote(ctx context.Context, empresaID, fechaCorte string, ids []string, usuarioID string) (LotePago, error) {
+func (s *Service) CrearLote(ctx context.Context, empresaID, fechaCorte, modo string, ids []string, usuarioID string) (LotePago, error) {
+	// Vacío = el modo de siempre. Es el único default que se acepta: un modo escrito y desconocido
+	// se rechaza, porque decide cuántas transferencias salen y por cuánto.
+	if modo == "" {
+		modo = ModoFactura
+	}
 	if _, err := s.repo.ProgramarAprobados(ctx, empresaID, ids, fechaCorte); err != nil {
 		return LotePago{}, err
 	}
-	lote, err := s.repo.CrearLote(ctx, empresaID, fechaCorte, ids, usuarioID)
+	lote, err := s.repo.CrearLote(ctx, empresaID, fechaCorte, modo, ids, usuarioID)
 	if err != nil {
 		return LotePago{}, err
 	}

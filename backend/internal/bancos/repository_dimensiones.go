@@ -198,11 +198,16 @@ func (r *pgRepository) PartidasDeDimension(ctx context.Context, empresaID, desde
 	// column», porque agrupar por `COALESCE(cl.id::text, '')` no le prueba que `cl.id` esté agrupado.
 	// Se suma solo sobre las filas CON clasificación: las de clasificacion_id NULL son el total del
 	// departamento y contarlas acá duplicaría el dinero.
+	// El gasto se agrupa PRIMERO por mes y después se suma, en vez de agregarlo de una. Así la misma
+	// pasada contesta las dos preguntas que se hacen juntas: «¿en qué partida se fue la plata?» y
+	// «¿en qué mes?». Antes la fila traía un solo número por todo el rango, y un trimestre donde una
+	// partida bajó de 1,7 M a 294 K se veía igual que uno parejo: el total los esconde a los dos.
 	q := `
-		WITH gasto AS (
+		WITH por_mes AS (
 			SELECT COALESCE(cl.id::text, '')            AS clasificacion_id,
 			       COALESCE(co.nombre, '(sin concepto)') AS concepto,
 			       COALESCE(cl.nombre, '(sin clasificar)') AS clasificacion,
+			       to_char(m.fecha, 'YYYY-MM')          AS periodo,
 			       count(*)::int                        AS movs,
 			       COALESCE(SUM(CASE WHEN m.debito > 0 THEN m.monto_crc ELSE -m.monto_crc END), 0) AS gasto,
 			       ` + sqlOrigenDimension + ` AS origen,
@@ -222,6 +227,21 @@ func (r *pgRepository) PartidasDeDimension(ctx context.Context, empresaID, desde
 			  AND co.naturaleza = 'GASTO'
 			  AND to_char(m.fecha, 'YYYY-MM') BETWEEN $2 AND $3
 			  AND ` + condicion + `
+			-- Por POSICIÓN y no por nombre: clasificacion_id y departamento_id existen también como
+			-- columnas de m, y agrupar por el nombre da «column reference is ambiguous».
+			GROUP BY 1, 2, 3, 4, 7, 8, 9, 10, 11
+		),
+		gasto AS (
+			SELECT clasificacion_id, concepto, clasificacion,
+			       SUM(movs)::int AS movs,
+			       SUM(gasto)     AS gasto,
+			       origen, empresa_id, departamento_id, partida_departamento_id, partida_sede_id,
+			       -- Los meses CON movimiento, en orden. Los que no tuvieron gasto no viajan: un cero
+			       -- y «no hubo nada» son lo mismo acá, y mandarlos engorda la respuesta sin decir más.
+			       jsonb_agg(jsonb_build_object(
+			           'periodo', periodo, 'movs', movs, 'gasto', gasto::text
+			       ) ORDER BY periodo) AS meses
+			FROM por_mes
 			GROUP BY 1, 2, 3, 6, 7, 8, 9, 10
 		)
 		SELECT g.clasificacion_id, g.concepto, g.clasificacion, g.movs, g.gasto::text, g.origen,
@@ -231,7 +251,8 @@ func (r *pgRepository) PartidasDeDimension(ctx context.Context, empresaID, desde
 		                   AND pp.clasificacion_id::text = g.clasificacion_id
 		                   AND pp.periodo BETWEEN $2 AND $3), 0)::text,
 		       COALESCE(g.partida_departamento_id::text, ''),
-		       COALESCE(g.partida_sede_id::text, '')
+		       COALESCE(g.partida_sede_id::text, ''),
+		       g.meses
 		FROM gasto g
 		ORDER BY g.gasto DESC`
 
@@ -248,7 +269,7 @@ func (r *pgRepository) PartidasDeDimension(ctx context.Context, empresaID, desde
 	for rows.Next() {
 		var g GastoPartidaDimension
 		if err := rows.Scan(&g.ClasificacionID, &g.Concepto, &g.Clasificacion, &g.Movs, &g.Gasto,
-			&g.Origen, &g.Subpresupuesto, &g.PartidaDepartamentoID, &g.PartidaSedeID); err != nil {
+			&g.Origen, &g.Subpresupuesto, &g.PartidaDepartamentoID, &g.PartidaSedeID, &g.Meses); err != nil {
 			return nil, fmt.Errorf("bancos: scan partida de dimensión: %w", err)
 		}
 		out = append(out, g)

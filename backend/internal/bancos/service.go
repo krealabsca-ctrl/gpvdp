@@ -224,6 +224,16 @@ type Repository interface {
 	AvisosResueltosDeMovimientos(ctx context.Context, empresaID, usuarioID string, movIDs []string) (map[string]AvisoResuelto, error)
 	MisAvisos(ctx context.Context, empresaID, usuarioID string, page, pageSize int) (ListaMisAvisos, error)
 	CargaDeCuentasDelSegmento(ctx context.Context, empresaID string, alcance []string) ([]CuentaCargadaHasta, error)
+	// CoincidenciasEnOtrosMeses: dónde más está lo que se buscó, fuera del filtro de fecha. Toma
+	// el filtro COMPLETO (con su alcance) para no delatar partidas que el rol no puede ver.
+	CoincidenciasEnOtrosMeses(ctx context.Context, empresaID string, f FiltrosMovimientos) ([]CoincidenciaEnOtroMes, error)
+	// Sello «aplicado en el sistema anterior» (mig 0091): los débitos candidatos a explicarse con
+	// un reporte externo, la escritura de las marcas y su reversa por carga.
+	DebitosParaCruzar(ctx context.Context, empresaID string) ([]DebitoCandidato, error)
+	SellarPagosExternos(ctx context.Context, empresaID, usuarioID string, sellos []SelloPagoExterno) (cargaID string, n int, err error)
+	SellosDeMovimientos(ctx context.Context, empresaID string, movIDs []string) (map[string]SelloVisible, error)
+	RevertirCargaDeSellos(ctx context.Context, empresaID, cargaID string) (int, error)
+	ResumenSellos(ctx context.Context, empresaID string) (ResumenPagosExternos, error)
 	// CambiarNaturaleza declara si el concepto es INGRESO, GASTO o NEUTRO y devuelve el valor viejo.
 	CambiarNaturaleza(ctx context.Context, empresaID, conceptoID, naturaleza string) (anterior string, err error)
 	EliminarConcepto(ctx context.Context, empresaID, conceptoID string) error
@@ -310,6 +320,9 @@ type Repository interface {
 	// Huella Bancos↔CxP (barrido de pagos)
 	MovimientosConHuella(ctx context.Context, empresaID, prefijo, importacionID string) ([]MovimientoConHuella, error)
 	EnlazarPagoCxP(ctx context.Context, empresaID, movimientoID, documentoID, conceptoID, clasificacionID string) (bool, bool, error)
+	// EnlazarPagoRemesa: el movimiento pagó una REMESA (varias facturas de un proveedor), no una
+	// factura suelta. Columnas distintas y excluyentes en la base (CHECK de la migración 0089).
+	EnlazarPagoRemesa(ctx context.Context, empresaID, movimientoID, remesaID, conceptoID, clasificacionID string) (bool, bool, error)
 
 	// Descubridor de patrones sin clasificar
 	LineasSinClasificar(ctx context.Context, empresaID, periodo string) ([]LineaSinClasificar, error)

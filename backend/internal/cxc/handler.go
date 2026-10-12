@@ -97,6 +97,33 @@ func (h *Handler) Contrato(c *gin.Context) {
 
 // PrevisualizarImportacion POST /v1/cxc/importaciones/contratos/previsualizar
 // Lee el archivo y devuelve el reporte de conciliación SIN escribir en la cartera.
+// PlantillaCartera GET /v1/cxc/importaciones/contratos/plantilla (cxc.importar)
+//
+// Baja el machote del archivo de cartera: los encabezados que el lector reconoce, la ayuda de cada
+// columna y los valores válidos del catálogo de la empresa.
+//
+// Existe porque un archivo con los encabezados equivocados NO falla: entra con los campos vacíos y
+// cae en cuarentena en bloque, que es lo que pasó con una corrida de 23.144 contratos.
+func (h *Handler) PlantillaCartera(c *gin.Context) {
+	empresaID, _, _, ok := h.claims(c)
+	if !ok {
+		return
+	}
+	cat, err := h.svc.Catalogos(c.Request.Context(), empresaID)
+	if err != nil {
+		h.error(c, err, "plantilla-cartera")
+		return
+	}
+	buf, err := PlantillaCartera(cat)
+	if err != nil {
+		h.error(c, err, "plantilla-cartera")
+		return
+	}
+	c.Header("Content-Disposition", `attachment; filename="plantilla-cartera.xlsx"`)
+	c.Data(http.StatusOK,
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buf)
+}
+
 func (h *Handler) PrevisualizarImportacion(c *gin.Context) {
 	empresaID, _, usuarioID, ok := h.claims(c)
 	if !ok {

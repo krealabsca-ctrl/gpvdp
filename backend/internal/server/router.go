@@ -176,6 +176,17 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			// Cargar HISTÓRICO (mig 0087): UN archivo con varias cuentas y varios meses. Es el mismo
 			// permiso que importar —es la misma acción, cargar movimientos— y los mismos dos pasos.
 			scoped.POST("/bancos/importaciones/historico", P("bancos.importar"), bancosH.SubirHistorico)
+
+			// Pagos que el sistema ANTERIOR ya tenía aplicados (mig 0091). El movimiento queda
+			// sellado y sigue visible; esto NO lo enlaza a una factura del ERP.
+			//
+			// Leer el resumen pide el permiso de la conciliación —es una cifra de cuadre, no de
+			// importación—; cargar pide `bancos.importar`; y revertir una carga entera pide el
+			// mismo permiso que revertir una carga de banco, porque las dos deshacen en bloque.
+			scoped.GET("/bancos/pagos-externos", P("bancos.ver_conciliacion"), bancosH.ResumenPagosExternos)
+			scoped.POST("/bancos/pagos-externos/previsualizar", P("bancos.importar"), bancosH.PrevisualizarPagosExternos)
+			scoped.POST("/bancos/pagos-externos/confirmar", P("bancos.importar"), bancosH.ConfirmarPagosExternos)
+			scoped.POST("/bancos/pagos-externos/:carga/revertir", P("bancos.revertir_importacion"), bancosH.RevertirPagosExternos)
 			scoped.GET("/bancos/importaciones/historico/:id", P("bancos.importar"), bancosH.PreviewHistorico)
 			scoped.POST("/bancos/importaciones/historico/:id/confirmar", P("bancos.importar"), bancosH.ConfirmarHistorico)
 			// Revertir una CARGA entera (mig 0085): el historial de cargas lo ve quien importa, pero
@@ -314,6 +325,17 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.POST("/cxp/conciliacion/match", P("cxp.tesoreria"), cxpH.ConciliarMatch)
 			scoped.POST("/cxp/lotes", P("cxp.tesoreria"), cxpH.CrearLote)
 			scoped.GET("/cxp/lotes/:id/macro", P("cxp.tesoreria"), cxpH.MacroLote)
+			// El reporte de «lo que se va a pagar» se LEE: permiso de ver, no de tesorería. Quien
+			// revisa un corte antes de que se pague no siempre es quien lo sube al banco.
+			scoped.GET("/cxp/lotes/:id/reporte", P("cxp.ver"), cxpH.ReporteLote)
+			scoped.GET("/cxp/lotes/:id/remesas", P("cxp.ver"), cxpH.RemesasLote)
+			scoped.GET("/cxp/remesas/:id/aviso", P("cxp.ver"), cxpH.AvisoRemesa)
+			// Nomenclatura interna del pago (A8, A9…). Se LEE con «ver» —cualquiera que lea el
+			// estado de cuenta necesita la tabla de equivalencias— y se CAMBIA con el permiso del
+			// catálogo: un código es un acuerdo de toda la empresa, no una preferencia de una
+			// pantalla.
+			scoped.GET("/cxp/nomenclaturas", P("cxp.ver"), cxpH.Nomenclaturas)
+			scoped.PUT("/cxp/nomenclaturas", P("cxp.catalogo"), cxpH.AsignarNomenclatura)
 			// Comprobantes
 			scoped.POST("/cxp/documentos/:id/comprobante", P("cxp.comprobante"), cxpH.AdjuntarComprobante)
 			scoped.POST("/cxp/documentos/:id/comprobante/enviar", P("cxp.comprobante"), cxpH.EnviarComprobante)
@@ -540,6 +562,8 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.PATCH("/cxc/contratos/:numero", P("cxc.importar"), cxcH.CorregirContrato)
 			scoped.GET("/cxc/cargos/plan", P("cxc.ver"), cxcH.PlanCargos)
 			scoped.POST("/cxc/cargos/generar", P("cxc.importar"), cxcH.GenerarCargos)
+			// El machote del archivo de cartera: se baja, se llena y se sube por el mismo camino.
+			scoped.GET("/cxc/importaciones/contratos/plantilla", P("cxc.importar"), cxcH.PlantillaCartera)
 			scoped.POST("/cxc/importaciones/contratos/previsualizar", P("cxc.importar"), cxcH.PrevisualizarImportacion)
 			scoped.POST("/cxc/importaciones/contratos/confirmar", P("cxc.importar"), cxcH.ConfirmarImportacion)
 			// Cobros (fase 2): archivo, API idempotente, reversa e identificación.

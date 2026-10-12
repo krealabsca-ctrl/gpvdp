@@ -38,6 +38,7 @@ import {
   usePrevisualizarCobros,
   usePrevisualizarContratos,
 } from "@/features/cxc/hooks";
+import { cxcApi } from "@/api/cxc";
 import type { ConciliacionCobros, ConciliacionCxc } from "@/api/cxc";
 
 export function ImportarCxcPage() {
@@ -45,6 +46,7 @@ export function ImportarCxcPage() {
 
   // ── Paso 1: cartera
   const [archivo, setArchivo] = useState<File | null>(null);
+  const [bajando, setBajando] = useState(false);
   const [importacionId, setImportacionId] = useState("");
   const [reporte, setReporte] = useState<ConciliacionCxc | null>(null);
   const previsualizar = usePrevisualizarContratos();
@@ -58,6 +60,27 @@ export function ImportarCxcPage() {
   const planQ = usePlanCargos(pedirPlan ? desde : "", hasta);
   const generar = useGenerarCargos();
   const [generando, setGenerando] = useState(false);
+
+  /** Baja el machote del archivo de cartera. */
+  async function bajarPlantilla() {
+    setBajando(true);
+    try {
+      const blob = await cxcApi.plantillaContratos();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "plantilla-cartera.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      // Decir «descargado» cuando no se descargó es peor que no descargarlo.
+      toast.error(mensajeError(err));
+    } finally {
+      setBajando(false);
+    }
+  }
 
   function elegirArchivo(f: File | null) {
     setArchivo(f);
@@ -155,7 +178,15 @@ export function ImportarCxcPage() {
         <CardContent className="flex flex-col gap-3 py-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-sm font-semibold">1 · Contratos</h3>
-            <Badge tone="neutral">las columnas se resuelven por encabezado, no por posición</Badge>
+            <div className="flex items-center gap-2">
+              {/* El machote primero: un archivo con los encabezados equivocados NO falla, entra con
+                  los campos vacíos y cae en cuarentena en bloque. Bajar la plantilla es el paso
+                  que evita eso, así que va JUNTO al selector y no escondido en otra pantalla. */}
+              <Button size="sm" variant="secondary" onClick={() => void bajarPlantilla()} loading={bajando}>
+                ⬇ Plantilla
+              </Button>
+              <Badge tone="neutral">las columnas se resuelven por encabezado, no por posición</Badge>
+            </div>
           </div>
           <input
             type="file"

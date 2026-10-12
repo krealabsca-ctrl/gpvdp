@@ -856,6 +856,51 @@ function MovsTab({
                         <span className="block whitespace-normal break-words text-[13px] leading-snug">
                           {m.descripcion}
                         </span>
+                        {/* La factura que este débito pagó. El código interno viaja DENTRO del
+                            texto del banco (y sin el guion, porque el banco lo borra), así que a
+                            ojo es ilegible: acá se traduce a proveedor y número de factura. */}
+                        {m.pago_cxp && (
+                          <span
+                            className="mt-0.5 block text-[11px] font-medium text-accent"
+                            title={
+                              m.pago_cxp.facturas > 1
+                                ? `Pago agrupado de ${m.pago_cxp.facturas} facturas · referencia ${m.pago_cxp.consecutivo} · código interno ${m.pago_cxp.huella}`
+                                : `Conciliado con la factura ${m.pago_cxp.consecutivo} · código interno ${m.pago_cxp.huella}`
+                            }
+                          >
+                            🔗 Pago de CxP — {m.pago_cxp.proveedor || "proveedor sin nombre"}
+                            {/* Un pago agrupado trae la referencia del grupo, no un número de
+                                factura: recortarle los 6 últimos dígitos la volvería ilegible. */}
+                            {m.pago_cxp.facturas > 1
+                              ? ` · ${m.pago_cxp.consecutivo} (${m.pago_cxp.facturas} facturas)`
+                              : m.pago_cxp.consecutivo
+                                ? ` · FC ${m.pago_cxp.consecutivo.slice(-6)}`
+                                : ""}
+                          </span>
+                        )}
+                        {/* El sello del sistema ANTERIOR. Dice «esto ya está resuelto afuera», que
+                            es más débil que el enlace de arriba: no hay una factura del ERP detrás.
+                            El movimiento sigue visible a propósito —decisión del Director
+                            Financiero—: la plata salió del banco igual, y lo que desaparece de la
+                            lista no se revisa más. En color apagado, no en el del enlace real. */}
+                        {m.sello_externo && (
+                          <span
+                            className="mt-0.5 block text-[11px] text-content-muted"
+                            title={[
+                              "Ya estaba aplicado en el sistema anterior. No está enlazado a una factura del ERP.",
+                              m.sello_externo.referencia && `Referencia: ${m.sello_externo.referencia}`,
+                              m.sello_externo.documento && `Documento: ${m.sello_externo.documento}`,
+                              m.sello_externo.fecha_aplicado &&
+                                `Aplicado el ${formatFecha(m.sello_externo.fecha_aplicado)}`,
+                            ]
+                              .filter(Boolean)
+                              .join("\n")}
+                          >
+                            🗄 Aplicado en el sistema anterior
+                            {m.sello_externo.tercero ? ` — ${m.sello_externo.tercero}` : ""}
+                            {m.sello_externo.referencia ? ` · ref. ${m.sello_externo.referencia}` : ""}
+                          </span>
+                        )}
                         {m.es_traslado && <Badge tone="accent">Traslado</Badge>}
                       </TD>
                       <TD className="text-right tabular-nums text-negativo">

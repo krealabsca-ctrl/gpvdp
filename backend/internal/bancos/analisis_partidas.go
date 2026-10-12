@@ -20,6 +20,7 @@ package bancos
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/shopspring/decimal"
 )
@@ -86,6 +87,19 @@ const umbralClasificadoComparable = 90.0
 // maxMesesAnalisis acota el rango que se puede pedir: cada mes multiplica por el número de
 // partidas, y un rango de años arma una tabla que ninguna pantalla puede mostrar.
 const maxMesesAnalisis = 24
+
+// MesesDelRango cuenta los meses de CALENDARIO entre dos períodos, con las dos puntas incluidas:
+// de 2026-09 a 2026-09 es 1, y de 2024-10 a 2026-09 son 24.
+//
+// Antes se contaba dividiendo los días entre 28 (`horas/24/28 + 1`), y 28 es el mes MÁS CORTO que
+// existe, así que todo rango largo salía inflado: los 24 meses que pedía el botón de la pantalla se
+// contaban como 26 y el servidor los rechazaba con «el rango no puede pasar de 24 meses». El botón
+// de 24 meses nunca funcionó, y el de 23 pasaba raspando porque se contaba como 24.
+//
+// Un mes no dura una cantidad fija de días; esto no se aproxima, se cuenta.
+func MesesDelRango(desde, hasta time.Time) int {
+	return (hasta.Year()-desde.Year())*12 + int(hasta.Month()-desde.Month()) + 1
+}
 
 // AnalisisPartidas devuelve la serie mensual de cada partida en el rango, con su promedio y su
 // desvío, más la salud de cada mes.

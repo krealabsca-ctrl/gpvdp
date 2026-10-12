@@ -48,7 +48,7 @@ func (h *Handler) AnalisisPartidas(c *gin.Context) {
 	}
 	// Tope de rango: cada mes multiplica por el número de partidas (168 en la empresa más grande).
 	// Sin tope, un rango de años arma una tabla que ninguna pantalla puede mostrar.
-	if meses := int(tHasta.Sub(tDesde).Hours()/24/28) + 1; meses > maxMesesAnalisis {
+	if MesesDelRango(tDesde, tHasta) > maxMesesAnalisis {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion,
 			"el rango no puede pasar de 24 meses")
 		return
@@ -95,7 +95,7 @@ func (h *Handler) SerieDiariaPartidas(c *gin.Context) {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "desde no puede ser posterior a hasta")
 		return
 	}
-	if meses := int(tHasta.Sub(tDesde).Hours()/24/28) + 1; meses > maxMesesAnalisis {
+	if MesesDelRango(tDesde, tHasta) > maxMesesAnalisis {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion,
 			"el rango no puede pasar de 24 meses")
 		return

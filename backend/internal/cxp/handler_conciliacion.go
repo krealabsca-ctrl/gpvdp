@@ -50,7 +50,7 @@ func escribirMacroTxt(c *gin.Context, rows []PagoRow) {
 	c.Header("Content-Disposition", `attachment; filename="macro-pagos.txt"`)
 	var b strings.Builder
 	for _, r := range rows {
-		desc := macroDescripcion(r.Consecutivo, r.Descripcion)
+		desc := descripcionDePago(r)
 		// El nombre se limpia con la regla del banco: sin tildes, sin eñes y sin caracteres
 		// especiales. Antes solo se cambiaban las comas, así que «PETRÓLEOS DELTA S.A.» viajaba con
 		// la tilde y «X; S.A.» partía la línea en dos campos.
@@ -87,6 +87,69 @@ func macroDescripcion(consecutivo, huella string) string {
 		desc += " " + h
 	}
 	return desc
+}
+
+// clavePagoFC lee al revés lo que escribió macroDescripcion: de «FC 000487», que es lo que la
+// persona copia del estado de cuenta, saca los «000487» con los que se puede volver a la factura.
+// Devuelve "" cuando la búsqueda no tiene esa forma.
+//
+// Solo con el prefijo FC a propósito. Unos dígitos sueltos ya los encuentra el ILIKE sobre el
+// consecutivo; lo que no encontraba NADA era justo el texto completo, porque «FC » no vive en
+// ningún campo de la factura: lo agrega la macro al salir. Quien tenía el estado de cuenta delante
+// copiaba lo que veía y la Bandeja le respondía igual que si la factura no existiera.
+func clavePagoFC(q string) string {
+	t := strings.ToUpper(strings.TrimSpace(q))
+	if !strings.HasPrefix(t, "FC") {
+		return ""
+	}
+	n := soloDigitos(t[2:])
+	// Lo que queda entre «FC» y los dígitos tiene que ser separación, no otro texto: así «FACTURA
+	// 12» no se lee como un código de pago.
+	if n == "" || len(n) > 6 || strings.Trim(soloLetras(t[2:]), " ") != "" {
+		return ""
+	}
+	for len(n) < 6 {
+		n = "0" + n
+	}
+	return n
+}
+
+// soloLetras deja las letras de un texto; sirve para comprobar que no hay nada más que el código.
+func soloLetras(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// descripcionDePago arma lo que viaja al banco para UNA transferencia, sea de una factura o de una
+// remesa. Las dos formas terminan igual —referencia legible + código interno al final— porque la
+// conciliación lee el código y no le importa qué hay delante:
+//
+//	A8 FC 000487 CXP-54A4281AE49A      (una factura, rubro con nomenclatura)
+//	FC 000487 CXP-54A4281AE49A         (la misma, si su gasto todavía no tiene código)
+//	A9 REM 0043-07 CXPR-7K2M9P4XQ1BT   (varias facturas de un proveedor, todas del mismo rubro)
+//
+// LA NOMENCLATURA VA PRIMERO y el código interno último, a propósito: es lo primero que el ojo
+// busca al recorrer un estado de cuenta, y si algún día un banco truncara el campo, lo que se
+// pierde es el automatismo —que se resuelve a mano— y no el sentido del pago.
+func descripcionDePago(r PagoRow) string {
+	partes := make([]string, 0, 3)
+	if cod := NormalizarCodigoPago(r.CodigoPago); cod != "" {
+		partes = append(partes, cod)
+	}
+	if ref := strings.TrimSpace(r.Referencia); ref != "" {
+		partes = append(partes, ref)
+		if h := strings.TrimSpace(r.Descripcion); h != "" {
+			partes = append(partes, h)
+		}
+	} else {
+		partes = append(partes, macroDescripcion(r.Consecutivo, r.Descripcion))
+	}
+	return strings.Join(partes, " ")
 }
 
 func soloDigitos(s string) string {

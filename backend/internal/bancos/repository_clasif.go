@@ -96,6 +96,19 @@ func condicionesMovimientos(empresaID string, f FiltrosMovimientos) (string, []a
 			conds = append(conds, fmt.Sprintf("m.clasificacion_id = ANY($%d::uuid[])", addArg(f.Alcance)))
 		}
 	}
+	// Rango de MONTO. Se compara contra `monto_crc` —el valor en colones— y no contra
+	// debito/credito, que vienen en la moneda de la cuenta: con 15 cuentas y dos de ellas en
+	// dólares, filtrar «desde 1.000.000» sobre la columna cruda dejaría afuera un depósito de
+	// USD 2.000 y adentro uno de ₡1.500. Es el mismo criterio con el que se suman los totales.
+	//
+	// En VALOR ABSOLUTO: un débito y un crédito del mismo tamaño son «el mismo monto» para quien
+	// busca. Sin esto, buscar «hasta 50.000» en una vista de débitos no devolvería nada.
+	if f.MontoMin != "" {
+		conds = append(conds, fmt.Sprintf("ABS(m.monto_crc) >= $%d::numeric", addArg(f.MontoMin)))
+	}
+	if f.MontoMax != "" {
+		conds = append(conds, fmt.Sprintf("ABS(m.monto_crc) <= $%d::numeric", addArg(f.MontoMax)))
+	}
 	// La cuenta se resuelve directo sobre el movimiento; el banco, por subconsulta a sus cuentas,
 	// para no obligar al JOIN de `cuenta_bancaria` en las consultas que no lo traen (los totales).
 	if f.CuentaID != "" {
@@ -200,12 +213,34 @@ func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, 
 		       m.concepto_id::text, COALESCE(co.nombre,''),
 		       m.clasificacion_id::text, COALESCE(cl.nombre,''),
 		       m.estado_clasificacion, m.confianza, m.es_traslado, m.incluido,
-		       COALESCE(b.nombre,''), COALESCE(cb.alias,'')
+		       COALESCE(b.nombre,''), COALESCE(cb.alias,''),
+		       -- Lo que este movimiento pagó, si la conciliación lo enlazó. Son DOS caminos
+		       -- excluyentes (CHECK de la migración 0089): una factura suelta, o una REMESA que
+		       -- cubre varias de un proveedor. Mirar solo el primero dejaba al pago agrupado
+		       -- enlazado en la base y mudo en la pantalla, que es el defecto que se venía de
+		       -- arreglar. Los JOIN son por PK y la enorme mayoría de los movimientos no tienen
+		       -- enlace, así que no cambian el plan: salen NULL y la fila no los lleva.
+		       COALESCE(dcxp.id::text, rcxp.id::text, ''),
+		       COALESCE(dcxp.consecutivo, remref.referencia, ''),
+		       COALESCE(pcxp.nombre, prem.nombre, ''),
+		       COALESCE(dcxp.huella, rcxp.huella, ''),
+		       CASE WHEN rcxp.id IS NOT NULL
+		            THEN (SELECT COUNT(*) FROM documento_cxp dr WHERE dr.remesa_id = rcxp.id)
+		            WHEN dcxp.id IS NOT NULL THEN 1 ELSE 0 END
 		FROM movimiento_bancario m
 		LEFT JOIN concepto co ON co.id = m.concepto_id
 		LEFT JOIN clasificacion cl ON cl.id = m.clasificacion_id
 		LEFT JOIN cuenta_bancaria cb ON cb.id = m.cuenta_bancaria_id
 		LEFT JOIN banco b ON b.id = cb.banco_id
+		LEFT JOIN documento_cxp dcxp ON dcxp.id = m.documento_cxp_id
+		LEFT JOIN proveedor pcxp ON pcxp.id = dcxp.proveedor_id
+		LEFT JOIN remesa_pago rcxp ON rcxp.id = m.remesa_id
+		LEFT JOIN proveedor prem ON prem.id = rcxp.proveedor_id
+		-- La referencia legible del grupo, con el MISMO formato que viajó al banco.
+		LEFT JOIN LATERAL (
+		    SELECT 'REM ' || to_char(lr.numero, 'FM0000') || '-' || to_char(rcxp.numero, 'FM00') AS referencia
+		    FROM lote_pago lr WHERE lr.id = rcxp.lote_id
+		) remref ON rcxp.id IS NOT NULL
 		WHERE ` + where + fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", ordenSQL(f.Orden), limIdx, offIdx)
 
 	rows, err := r.pool.Query(ctx, listQ, args...)
@@ -222,14 +257,23 @@ func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, 
 			deb, cred decimal.Decimal
 			mcrc      decimal.Decimal
 			confianza decimal.NullDecimal
+			pago      PagoCxPDeMovimiento
 		)
 		if err := rows.Scan(&row.ID, &fecha, &row.Documento, &row.Descripcion,
 			&deb, &cred, &row.Moneda, &mcrc,
 			&row.ConceptoID, &row.Concepto,
 			&row.ClasificacionID, &row.Clasificacion,
 			&row.Estado, &confianza, &row.EsTraslado, &row.Incluido,
-			&row.Banco, &row.Cuenta); err != nil {
+			&row.Banco, &row.Cuenta,
+			&pago.DocumentoID, &pago.Consecutivo, &pago.Proveedor, &pago.Huella,
+			&pago.Facturas); err != nil {
 			return ListaMovimientos{}, fmt.Errorf("bancos: scan movimiento: %w", err)
+		}
+		// Solo cuando hay enlace de verdad. El id es la prueba: el consecutivo o el proveedor
+		// pueden venir vacíos en una factura cargada a mano y eso no significa que no esté enlazada.
+		if pago.DocumentoID != "" {
+			p := pago
+			row.PagoCxP = &p
 		}
 		row.Fecha = fecha.Format("2006-01-02")
 		row.Debito = deb.String()

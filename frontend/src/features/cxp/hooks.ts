@@ -19,6 +19,8 @@ import {
   type FondoInput,
   type ValeInput,
   type FiltrosProveedores,
+  type ModoPago,
+  type NivelCatalogo,
   type ProveedorInput,
   type TipoFactura,
   type CierrePeriodo,
@@ -636,11 +638,56 @@ export function useLotes() {
   });
 }
 
+/**
+ * «Lo que se va a pagar» de un corte, para revisarlo ANTES de subir el archivo al banco.
+ *
+ * Deshabilitado sin lote: con `loteId` vacío la consulta pediría /cxp/lotes//reporte, que no es
+ * una ruta y vuelve como error de red en la pantalla.
+ */
+export function useReporteLote(loteId: string) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: [...queryKeys.cxp.lotes(empresaId), "reporte", loteId],
+    queryFn: () => cxpApi.reporteLote(loteId),
+    enabled: loteId !== "",
+  });
+}
+
+/** El catálogo de gasto con la nomenclatura de pago de cada rubro. */
+export function useNomenclaturas() {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: ["cxp", empresaId, "nomenclaturas"],
+    queryFn: () => cxpApi.nomenclaturas(),
+  });
+}
+
+/**
+ * Asigna o quita el código de un rubro.
+ *
+ * Invalida también los DOCUMENTOS: el código viaja en la descripción del pago, así que cambiarlo
+ * cambia lo que va a salir en la próxima macro. Dejar la lista vieja haría creer que el cambio no
+ * se aplicó justo donde importa.
+ */
+export function useAsignarNomenclatura() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { nivel: NivelCatalogo; id: string; codigo: string }) =>
+      cxpApi.asignarNomenclatura(vars.nivel, vars.id, vars.codigo),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["cxp", empresaId, "nomenclaturas"] });
+      void qc.invalidateQueries({ queryKey: queryKeys.cxp.documentosRaiz(empresaId) });
+    },
+  });
+}
+
 export function useCrearLote() {
   const empresaId = useEmpresaId();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { fechaCorte: string; ids: string[] }) => cxpApi.crearLote(vars.fechaCorte, vars.ids),
+    mutationFn: (vars: { fechaCorte: string; ids: string[]; modo?: ModoPago }) =>
+      cxpApi.crearLote(vars.fechaCorte, vars.ids, vars.modo),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.cxp.lotes(empresaId) });
       void qc.invalidateQueries({ queryKey: queryKeys.cxp.documentosRaiz(empresaId) });

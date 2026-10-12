@@ -65,8 +65,12 @@ func TestCatalogoSinDuplicados(t *testing.T) {
 	// `bancos.importar` porque importar es el trabajo diario de la auxiliar y sacar millones de los
 	// libros no lo es: decisión del Director Financiero, «solo el Admin o el Financiero». Listar las
 	// cargas NO estrena permiso —es el historial de lo que ya se puede hacer con `bancos.importar`—.
-	if len(Catalogo) != 80 {
-		t.Errorf("catálogo tiene %d permisos, se esperaban 80", len(Catalogo))
+	// → 85 con el calendario de responsabilidades (5-oct-2026). Los cinco NO son nuevos: existían
+	// en la tabla `permiso` desde su migración y el router los exigía en nueve rutas; lo que faltaba
+	// era nombrarlos acá, que es de donde se dibuja la matriz de Seguridad. Sin eso no había check
+	// que marcar y la función quedaba apagada para todo rol que no fuera ADMIN.
+	if len(Catalogo) != 85 {
+		t.Errorf("catálogo tiene %d permisos, se esperaban 85", len(Catalogo))
 	}
 }
 

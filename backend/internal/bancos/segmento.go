@@ -88,9 +88,26 @@ type AlcanceConsulta struct {
 // `Partidas` no es decorativo: contesta «¿esto es todo lo que me toca?» sin que el equipo tenga que
 // adivinar por qué no aparece algo. Vacío = a su rol no le asignaron ninguna partida, que es un
 // estado legítimo y distinto de «no hay movimientos este mes».
+// CoincidenciaEnOtroMes: un mes DISTINTO al consultado donde la búsqueda sí encuentra algo.
+//
+// Existe porque buscar y no encontrar es ambiguo: «no hay ningún depósito de SOLIDARIS» y «no hay
+// ninguno EN ESTE MES» se ven exactamente igual —una lista vacía—, y la segunda es la respuesta
+// correcta nueve de cada diez veces. Quien consulta su partida busca un depósito que le avisaron,
+// no sabe de qué mes es, y la pantalla lo dejaba concluir que no entró.
+type CoincidenciaEnOtroMes struct {
+	// Periodo en YYYY-MM.
+	Periodo string `json:"periodo"`
+	Cuantos int    `json:"cuantos"`
+}
+
 type MiSegmento struct {
 	Partidas    []PartidaDelSegmento `json:"partidas"`
 	Movimientos ListaMovimientos     `json:"movimientos"`
+	// OtrosMeses son los meses FUERA del filtro de fecha donde la misma búsqueda encuentra algo.
+	// Solo se llena cuando hay texto buscado: sin búsqueda, «hay movimientos en otros meses» es
+	// una obviedad. Vacío = la búsqueda no encuentra nada en ningún otro mes, y entonces sí se
+	// puede decir que no existe.
+	OtrosMeses []CoincidenciaEnOtroMes `json:"otros_meses,omitempty"`
 	// Cuentas donde SU segmento recibe plata, para el filtro de la pantalla.
 	//
 	// Sale de sus propios movimientos y no del catálogo de cuentas: este rol no tiene `bancos.ver`,

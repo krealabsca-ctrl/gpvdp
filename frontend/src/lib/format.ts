@@ -217,6 +217,21 @@ export function etiquetaPeriodo(periodo: string): string {
 }
 
 /**
+ * Último día de un período «YYYY-MM», en ISO. Sirve para convertir un mes en un rango cerrado.
+ *
+ * `new Date(anio, mes, 0)` da el último día del mes ANTERIOR al índice, y como `mes` ya viene en
+ * base 1, eso es exactamente el último del mes pedido — incluidos febrero y los bisiestos, sin
+ * tabla de 30/31 que mantener. Se arma con partes locales y no con `toISOString()`, que convierte
+ * a UTC y en Costa Rica (−06) devolvería el día anterior.
+ */
+export function finDeMes(periodo: string): string {
+  const { anio, mes } = partesPeriodo(periodo);
+  const dia = new Date(anio, mes, 0).getDate();
+  return `${String(anio).padStart(4, "0")}-${String(mes).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
+}
+
+
+/**
  * Normaliza texto para buscar y comparar: minúsculas y sin tildes ("Depósito" ≡ "deposito").
  * Lo usan los filtros del catálogo y de la bandeja: nadie escribe las tildes al buscar.
  */

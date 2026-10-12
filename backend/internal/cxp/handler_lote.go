@@ -12,6 +12,10 @@ import (
 type crearLoteRequest struct {
 	FechaCorte string   `json:"fecha_corte" validate:"required,datetime=2006-01-02"`
 	IDs        []string `json:"ids" validate:"required,min=1,max=1000,dive,uuid"`
+	// ModoPago: "" o "FACTURA" = una transferencia por factura (el de siempre); "PROVEEDOR" = una
+	// por proveedor, cubriendo todas sus facturas del lote. Se valida en el service con
+	// ModoPagoValido, no con un tag, para que el mensaje explique las dos opciones.
+	ModoPago string `json:"modo_pago"`
 }
 
 // CrearLote POST /v1/cxp/lotes — arma un lote de pago con las facturas seleccionadas.
@@ -29,7 +33,7 @@ func (h *Handler) CrearLote(c *gin.Context) {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, err.Error())
 		return
 	}
-	lote, err := h.svc.CrearLote(c.Request.Context(), empresaID, req.FechaCorte, req.IDs, usuarioID)
+	lote, err := h.svc.CrearLote(c.Request.Context(), empresaID, req.FechaCorte, req.ModoPago, req.IDs, usuarioID)
 	// Ninguna de las seleccionadas se pudo cortar. Va con el detalle factura por factura y NO por
 	// responderError, que solo sabe mandar un mensaje: acá lo que sirve es la lista.
 	var vacio *LoteVacioError
@@ -93,11 +97,17 @@ func (h *Handler) MacroLote(c *gin.Context) {
 	if sin := FaltanIBAN(rows); len(sin) > 0 && c.Query("igual") != "si" {
 		faltantes := make([]gin.H, 0, len(sin))
 		for _, r := range sin {
-			faltantes = append(faltantes, gin.H{"proveedor": r.Nombre, "consecutivo": r.Consecutivo, "monto": r.MontoNeto})
+			faltantes = append(faltantes, gin.H{
+				"proveedor": r.Nombre, "consecutivo": r.Consecutivo, "monto": r.MontoNeto,
+				// El PORQUÉ de cada uno. Sin esto el mensaje decía «sin cuenta IBAN» también
+				// cuando la cuenta estaba cargada pero mal escrita, y mandaba a mirar una ficha
+				// donde el dato sí está.
+				"motivo": MotivoIBANInvalido(r.IBAN),
+			})
 		}
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"code":      "IBAN_FALTANTE",
-			"message":   "Hay pagos sin cuenta IBAN: el banco rechazaría esas líneas. Cargá el IBAN de estos proveedores y volvé a generar la macro.",
+			"message":   mensajeIBAN(sin),
 			"faltantes": faltantes,
 		})
 		return

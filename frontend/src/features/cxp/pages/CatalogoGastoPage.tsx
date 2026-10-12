@@ -42,6 +42,8 @@ import {
   useRenombrarConceptoGasto,
 } from "@/features/cxp/hooks";
 import type { ClasificacionCatalogo, ConceptoCatalogo } from "@/api/bancos";
+import { useTienePermiso } from "@/features/auth/permisos";
+import { NomenclaturasPanel } from "@/features/cxp/components/NomenclaturasPanel";
 
 export function CatalogoGastoPage() {
   const toast = useToast();
@@ -51,6 +53,10 @@ export function CatalogoGastoPage() {
 
   const [nuevoRubro, setNuevoRubro] = useState("");
   const [mostrarForm, setMostrarForm] = useState(false);
+  const [verNomenclaturas, setVerNomenclaturas] = useState(false);
+  // Mismo permiso que exige el endpoint: un código es un acuerdo de toda la empresa, no una
+  // preferencia de pantalla. Sin él la tabla se ve (sirve para leer el banco) pero no se edita.
+  const puedeCatalogo = useTienePermiso()("cxp.catalogo");
 
   const conceptos = conceptosQ.data ?? [];
   const clasifs = clasifsQ.data ?? [];
@@ -90,17 +96,28 @@ export function CatalogoGastoPage() {
         title="Catálogo de gasto"
         description="Los rubros con los que Contabilidad clasifica las facturas. Una factura sin rubro no se puede clasificar y queda trancada."
         actions={
-          <Button
-            variant={mostrarForm ? "secondary" : "primary"}
-            onClick={() => {
-              setMostrarForm((v) => !v);
-              setNuevoRubro("");
-            }}
-          >
-            {mostrarForm ? "Cerrar" : "+ Nuevo rubro"}
-          </Button>
+          <>
+            {/* La nomenclatura de pago vive en el catálogo porque se hereda del rubro; se
+                administra acá y no en una pantalla aparte, que obligaría a mantener dos listas
+                del mismo árbol. */}
+            <Button variant="secondary" onClick={() => setVerNomenclaturas(true)}>
+              Nomenclaturas de pago
+            </Button>
+            <Button
+              variant={mostrarForm ? "secondary" : "primary"}
+              onClick={() => {
+                setMostrarForm((v) => !v);
+                setNuevoRubro("");
+              }}
+            >
+              {mostrarForm ? "Cerrar" : "+ Nuevo rubro"}
+            </Button>
+          </>
         }
       />
+      {verNomenclaturas && (
+        <NomenclaturasPanel onCerrar={() => setVerNomenclaturas(false)} puedeEditar={puedeCatalogo} />
+      )}
 
       <div className="flex items-start gap-2 rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-content-muted">
         📚{" "}

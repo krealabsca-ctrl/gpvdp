@@ -99,6 +99,17 @@ type fakeRepo struct {
 	misAvisosPagina    [2]int
 	cargaCuentas       []CuentaCargadaHasta
 	cargaCuentasPedida bool
+	// Aviso de «está en otro mes»: lo que devuelve y con qué se pidió.
+	otrosMeses           []CoincidenciaEnOtroMes
+	capAlcanceOtrosMeses []string
+	capQOtrosMeses       string
+	// Sello «aplicado en el sistema anterior» (mig 0091): lo sembrado y lo que se le mandó escribir.
+	debitosCandidatos []DebitoCandidato
+	sellosEscritos    []SelloPagoExterno
+	sellosVisibles    map[string]SelloVisible
+	cargaRevertida    string
+	quitadosEnReversa int
+	resumenSellos     ResumenPagosExternos
 	// Tesorería (saldos diarios y checklist de carga)
 	saldosDia       []SaldoDelDia
 	serieSaldos     []PuntoSaldo

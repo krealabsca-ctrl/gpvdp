@@ -54,10 +54,13 @@ import { useEmpresaId } from "@/features/bancos/useEmpresaId";
 import { cn } from "@/lib/cn";
 import {
   etiquetaPeriodo,
+  finDeMes,
   formatFecha,
   formatFechaHora,
   formatMoneda,
   formatMonto,
+  montoLegible,
+  montoParaApi,
 } from "@/lib/format";
 import { mensajeError } from "@/lib/apiError";
 import {
@@ -107,12 +110,17 @@ export function MiSegmentoPage() {
   const [verAvisos, setVerAvisos] = useState(false);
   const [q, setQ] = useState("");
   const [buscado, setBuscado] = useState("");
-  // Filtros propios de la pantalla, los mismos que la hoja de trabajo: cuenta, rango de fechas y
-  // orden. NO hay filtro de partida: el alcance ya la fija y ofrecer un selector con una sola
-  // opción es ruido.
+  // Filtros propios de la pantalla: cuenta, partida, rango de fechas, rango de monto y orden.
+  //
+  // El de PARTIDA se agregó el 2-oct-2026 y solo aparece con más de una: un equipo con Depósitos y
+  // Asociaciones asignadas las veía juntas y no podía trabajar una sola. Recorta DENTRO del
+  // alcance —nunca lo ensancha—, porque el servidor suma las dos condiciones con AND.
   const [cuentaId, setCuentaId] = useState("");
+  const [partidaId, setPartidaId] = useState("");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
+  const [montoMin, setMontoMin] = useState("");
+  const [montoMax, setMontoMax] = useState("");
   const [orden, setOrden] = useState("");
   // Paginado: antes la pantalla pedía 200 filas fijas y no lo decía. En setiembre de 2026 hay 2.108
   // créditos en el alcance de un rol de consulta, o sea que se veía el 9,5% y el pie afirmaba
@@ -136,6 +144,9 @@ export function MiSegmentoPage() {
     desde: rango.desde,
     hasta: rango.hasta,
     cuenta_bancaria_id: cuentaId || undefined,
+    clasificacion_id: partidaId || undefined,
+    monto_min: montoParaApi(montoMin) || undefined,
+    monto_max: montoParaApi(montoMax) || undefined,
     orden: orden || undefined,
     q: buscado || undefined,
   };
@@ -300,6 +311,28 @@ export function MiSegmentoPage() {
                   ]}
                   className="min-w-48"
                 />
+                {/* Trabajar UNA partida a la vez. Un equipo con dos o tres asignadas —Depósitos y
+                    Asociaciones, por ejemplo— las ve todas juntas y no puede concentrarse en una.
+                    Las opciones salen de SU alcance, así que elegir acá nunca ensancha lo que el
+                    rol puede ver: solo recorta dentro de lo suyo. Con una sola partida el
+                    desplegable no aparece: no hay nada que elegir. */}
+                {(cabecera?.partidas ?? []).length > 1 && (
+                  <Select
+                    label="Partida"
+                    value={partidaId}
+                    onChange={(e) => setPartidaId(e.target.value)}
+                    options={[
+                      { value: "", label: "Todas mis partidas" },
+                      ...(cabecera?.partidas ?? []).map((p) => ({
+                        value: p.clasificacion_id,
+                        // Con el concepto delante: dos partidas pueden llamarse igual bajo
+                        // conceptos distintos, y el nombre solo no alcanza para elegir.
+                        label: `${p.concepto} · ${p.clasificacion}`,
+                      })),
+                    ]}
+                    className="min-w-48"
+                  />
+                )}
                 {/* El error va PEGADO al campo y la consulta no sale: una fecha a medio teclear no
                     puede terminar en un «error interno» que se lleve puesta la pantalla. */}
                 <Input
@@ -317,6 +350,31 @@ export function MiSegmentoPage() {
                   onChange={(e) => setHasta(e.target.value)}
                   error={rango.errorHasta || undefined}
                   className="w-36"
+                />
+                {/* Rango de MONTO. Es la forma más rápida de encontrar un depósito concreto
+                    cuando no se recuerda la referencia pero sí la cifra. Van como número pelado:
+                    el servidor rechaza cualquier otra cosa antes de tocar la base. */}
+                {/* Se escribe como se escribe acá —«1.000.000», «50 000,50»— y `montoParaApi` lo
+                    traduce al decimal plano que espera el servidor. NO se inventa un normalizador
+                    propio: hacerlo en la pantalla de saldos mandó a la base montos cien veces
+                    mayores sin un solo error a la vista (ver format.test.ts). */}
+                <Input
+                  label="Monto desde"
+                  inputMode="decimal"
+                  value={montoMin}
+                  onChange={(e) => setMontoMin(e.target.value)}
+                  onBlur={() => setMontoMin(montoLegible(montoMin))}
+                  placeholder="0"
+                  className="w-32"
+                />
+                <Input
+                  label="Monto hasta"
+                  inputMode="decimal"
+                  value={montoMax}
+                  onChange={(e) => setMontoMax(e.target.value)}
+                  onBlur={() => setMontoMax(montoLegible(montoMax))}
+                  placeholder="sin tope"
+                  className="w-32"
                 />
                 <Select
                   label="Ordenar por"
@@ -372,6 +430,34 @@ export function MiSegmentoPage() {
                       </button>
                     </>
                   )}
+                </p>
+              )}
+              {/* DÓNDE MÁS ESTÁ LO QUE BUSCASTE.
+                  Sin esto, «no hay ningún depósito de SOLIDARIS» y «no hay ninguno en este mes» se
+                  ven igual: una lista vacía. Quien consulta su partida busca algo que le avisaron
+                  y no sabe de qué mes es, así que la segunda es la respuesta correcta casi
+                  siempre. Cada mes es un botón: lleva ahí en un clic. */}
+              {(cabecera?.otros_meses ?? []).length > 0 && (
+                <p className="text-xs text-content">
+                  🔎 «{buscado}» también aparece en{" "}
+                  {(cabecera?.otros_meses ?? []).map((m, i, todos) => (
+                    <span key={m.periodo}>
+                      <button
+                        type="button"
+                        className="font-medium underline hover:text-accent"
+                        onClick={() => {
+                          // Se mueve el RANGO, no el período global: el mes activo es de toda la
+                          // aplicación y cambiarlo desde acá movería también las otras pantallas.
+                          setDesde(`${m.periodo}-01`);
+                          setHasta(finDeMes(m.periodo));
+                          setPagina(1);
+                        }}
+                      >
+                        {etiquetaPeriodo(m.periodo)} ({m.cuantos})
+                      </button>
+                      {i < todos.length - 1 ? " · " : ""}
+                    </span>
+                  ))}
                 </p>
               )}
 

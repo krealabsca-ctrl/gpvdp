@@ -32,6 +32,12 @@ type ResultadoHuella struct {
 	ClasificacionID string
 	MontoEsperado   string
 	MontoBanco      string
+	// RemesaID: el pago cubre VARIAS facturas de un proveedor. En ese caso DocumentoID viene vacío
+	// —no hay UNA factura a la que enlazar el movimiento— y el enlace se escribe contra la remesa.
+	RemesaID string
+	// Facturas es cuántas cerró este pago (1 en el pago suelto). Va al reporte: «un movimiento,
+	// cinco facturas» es lo que alguien quiere ver al cuadrar.
+	Facturas int
 }
 
 // ConciliadorCxP es el puerto hacia CxP.
@@ -69,12 +75,19 @@ type PagoConciliado struct {
 
 // ReporteConciliacionCxP es el resultado del barrido.
 type ReporteConciliacionCxP struct {
-	// Examinados: movimientos con huella que todavía no estaban enlazados a una factura.
-	Examinados     int              `json:"examinados"`
-	Conciliados    int              `json:"conciliados"`
-	MontoDiferente int              `json:"monto_diferente"`
-	SinDocumento   int              `json:"sin_documento"`
-	Detalle        []PagoConciliado `json:"detalle"`
+	// Examinados: CANDIDATOS que trajo el pre-filtro (descripciones que contienen «CXP» y todavía
+	// no están enlazadas). No todos son pagos nuestros: ver SinHuella.
+	Examinados  int `json:"examinados"`
+	Conciliados int `json:"conciliados"`
+	// MontoDiferente: el código calzó pero el banco debitó otra cifra. NO se concilia a propósito.
+	MontoDiferente int `json:"monto_diferente"`
+	// SinDocumento: hay código de CxP pero ninguna factura pagable lo reclama.
+	SinDocumento int `json:"sin_documento"`
+	// SinHuella: candidatos que NO son pagos de CxP (el pre-filtro trae de más a propósito, porque
+	// el banco borra el guion del código y un filtro estricto no traería ninguno de los buenos).
+	// Se informan para que el total cuadre, pero no son un problema que nadie tenga que mirar.
+	SinHuella int              `json:"sin_huella"`
+	Detalle   []PagoConciliado `json:"detalle"`
 	// Disponible: false cuando CxP no está conectado (nada que hacer, no es un error).
 	Disponible bool `json:"disponible"`
 }

@@ -43,11 +43,23 @@ type ResultadoHuella struct {
 	// MontoEsperado es el neto que la factura mandaba pagar; MontoBanco lo que el banco debitó.
 	MontoEsperado string
 	MontoBanco    string
+	// RemesaID no está vacío cuando el pago cubre VARIAS facturas de un proveedor. En ese caso
+	// DocumentoID queda vacío a propósito: no hay UNA factura a la que enlazar el movimiento, y
+	// elegir la primera diría que esa factura costó lo que costó el grupo entero.
+	RemesaID string
+	// Facturas es cuántas cerró este pago (1 en el pago suelto). Va al reporte del barrido: «un
+	// movimiento, cinco facturas» es justo lo que alguien quiere ver al cuadrar.
+	Facturas int
 }
 
 // PrefijoHuella es el literal por el que Bancos puede filtrar en SQL sin conocer el formato
 // completo de la huella (que es asunto de CxP).
-func (s *Service) PrefijoHuella() string { return "CXP-" }
+//
+// Va SIN el guion: el banco lo borra en el camino (ver reHuella), y un filtro con guion descarta
+// justo los movimientos que hay que examinar. Es un pre-filtro barato, no el reconocedor: trae de
+// más —una descripción ajena como «FIDE 1937 CXP 430581» entra— y el patrón decide después. Traer
+// de más cuesta unas filas; traer de menos cuesta la conciliación entera, en silencio.
+func (s *Service) PrefijoHuella() string { return "CXP" }
 
 // HuellaEnDescripcion extrae la huella de una descripción bancaria.
 func (s *Service) HuellaEnDescripcion(descripcion string) (string, bool) {
@@ -62,6 +74,12 @@ func (s *Service) ConciliarHuella(ctx context.Context, empresaID, descripcion, m
 	huella, ok := extraerHuella(descripcion)
 	if !ok {
 		return ResultadoHuella{Veredicto: HuellaSinHuella}, nil
+	}
+	// Un pago agrupado cierra VARIAS facturas y se verifica contra el monto de la remesa, no contra
+	// el de ninguna de ellas. Es otro camino desde el primer paso: buscar una factura con este
+	// código no encontraría nada y el veredicto sería «sin documento» con el pago bien hecho.
+	if EsRemesa(huella) {
+		return s.conciliarRemesa(ctx, empresaID, huella, montoBanco, usuarioID)
 	}
 	doc, err := s.repo.DocumentoPorHuella(ctx, empresaID, huella)
 	if err != nil {
@@ -117,6 +135,59 @@ func (s *Service) ConciliarHuella(ctx context.Context, empresaID, descripcion, m
 	}
 	s.auditarDoc(ctx, empresaID, doc.ID, "CONCILIAR_AUTO", usuarioID)
 	res.Veredicto = HuellaConciliado
+	res.Facturas = 1
+	return res, nil
+}
+
+// conciliarRemesa empareja un débito con un pago agrupado y cierra TODAS sus facturas.
+//
+// La verificación del monto es contra lo que declaró la remesa, que es lo que se le mandó pagar al
+// banco. Si difiere, no se concilia nada: con cinco facturas adentro, conciliar «casi» sería dejar
+// un grupo cerrado por una cifra que nadie mandó pagar.
+func (s *Service) conciliarRemesa(ctx context.Context, empresaID, huella, montoBanco, usuarioID string) (ResultadoHuella, error) {
+	rem, err := s.repo.RemesaPorHuella(ctx, empresaID, huella)
+	if err != nil {
+		if errors.Is(err, ErrRemesaNoEncontrada) {
+			return ResultadoHuella{Veredicto: HuellaSinDocumento, Huella: huella}, nil
+		}
+		return ResultadoHuella{}, err
+	}
+	res := ResultadoHuella{
+		Huella:        huella,
+		RemesaID:      rem.ID,
+		Proveedor:     rem.Proveedor,
+		MontoEsperado: rem.MontoCRC,
+		MontoBanco:    montoBanco,
+		// El consecutivo de UNA factura no describe el pago. Lo que lo describe es su referencia,
+		// con el número REAL del lote: es lo que trae el estado de cuenta y con lo que se cruza.
+		Consecutivo: ReferenciaRemesa(rem.LoteNumero, rem.Numero),
+	}
+	if montoBanco != "" {
+		banco, errB := decimal.NewFromString(montoBanco)
+		if errB != nil {
+			return ResultadoHuella{}, errB
+		}
+		if !banco.Equal(decOrCero(rem.MontoCRC)) {
+			res.Veredicto = HuellaMontoDiferente
+			return res, nil
+		}
+	}
+
+	cerradas, conceptoID, clasificacionID, err := s.repo.CerrarRemesa(ctx, empresaID, rem.ID)
+	if err != nil {
+		return ResultadoHuella{}, err
+	}
+	if cerradas == 0 {
+		// Ninguna factura cambió: ya estaban cerradas, o se anularon entre el corte y hoy. No se
+		// declara conciliado lo que no se movió.
+		res.Veredicto = HuellaSinDocumento
+		return res, nil
+	}
+	res.ConceptoID = conceptoID
+	res.ClasificacionID = clasificacionID
+	res.Facturas = cerradas
+	res.Veredicto = HuellaConciliado
+	s.auditarDoc(ctx, empresaID, rem.ID, "CONCILIAR_REMESA", usuarioID)
 	return res, nil
 }
 

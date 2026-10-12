@@ -9,6 +9,7 @@ package cxp
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"unicode"
@@ -200,6 +201,59 @@ func FaltanIBAN(rows []PagoRow) []PagoRow {
 		}
 	}
 	return sin
+}
+
+// MotivoIBANInvalido explica POR QUÉ un IBAN no sirve, en los términos de quien lo va a corregir.
+// Devuelve "" cuando el IBAN está bien.
+//
+// Existe porque el guardarraíl no mira si el campo está vacío: valida la FORMA. El 1 de octubre de
+// 2026 un lote se trancó con el mensaje «Hay pagos sin cuenta IBAN» y el proveedor SÍ tenía una
+// cargada — con 21 dígitos en vez de 20. Decir «falta» cuando lo que pasa es «está mal escrito»
+// manda a la persona a mirar una ficha donde el dato está, y ahí se queda.
+func MotivoIBANInvalido(iban string) string {
+	n, ok := ValidarIBANCR(iban)
+	switch {
+	case ok:
+		return ""
+	case n == "":
+		return "no tiene IBAN registrado"
+	case !strings.HasPrefix(n, "CR"):
+		return fmt.Sprintf("el IBAN «%s» no empieza con CR", n)
+	case len(n) != largoIBANCR:
+		// El caso real y el más difícil de ver a ojo: un dígito de más o de menos.
+		return fmt.Sprintf("el IBAN «%s» tiene %d caracteres y debe tener %d (CR + 20 dígitos)",
+			n, len(n), largoIBANCR)
+	default:
+		return fmt.Sprintf("el IBAN «%s» tiene algo que no es un dígito después de CR", n)
+	}
+}
+
+// mensajeIBAN arma el aviso del guardarraíl distinguiendo los dos casos, porque se arreglan en
+// lugares distintos: el que no tiene cuenta hay que pedírsela al proveedor; el que la tiene mal
+// escrita se corrige en la ficha, en treinta segundos, y la persona ni siquiera sabe que está mal
+// porque al mirarla ve un IBAN.
+func mensajeIBAN(sin []PagoRow) string {
+	faltan, malos := 0, 0
+	for _, r := range sin {
+		if NormalizarIBAN(r.IBAN) == "" {
+			faltan++
+		} else {
+			malos++
+		}
+	}
+	switch {
+	case malos == 0:
+		return "Hay pagos sin cuenta IBAN: el banco rechazaría esas líneas. Cargá el IBAN de estos " +
+			"proveedores y volvé a generar la macro."
+	case faltan == 0:
+		return fmt.Sprintf("El IBAN de %d proveedor(es) está MAL ESCRITO: la cuenta está cargada "+
+			"pero no tiene la forma de un IBAN de Costa Rica (CR + 20 dígitos), y el banco la "+
+			"rechazaría. Corregilo en la ficha del proveedor y volvé a generar la macro.", malos)
+	default:
+		return fmt.Sprintf("%d proveedor(es) sin IBAN y %d con el IBAN mal escrito: el banco "+
+			"rechazaría esas líneas. Revisá el detalle, corregí las fichas y volvé a generar la macro.",
+			faltan, malos)
+	}
 }
 
 // ProveedoresSinIBAN son los proveedores activos que todavía no se pueden pagar por transferencia.

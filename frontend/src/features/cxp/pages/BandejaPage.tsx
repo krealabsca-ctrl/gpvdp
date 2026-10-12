@@ -37,8 +37,9 @@ import {
 import { cn } from "@/lib/cn";
 import { formatFecha, formatFechaHora, formatMoneda, hoyCR, toNumber } from "@/lib/format";
 import { mensajeError } from "@/lib/apiError";
+import { copiarAlPortapapeles } from "@/lib/portapapeles";
 import { useTienePermiso } from "@/features/auth/permisos";
-import { ETIQUETA_ESTADO, ETIQUETA_TIPO, PERMISO_COMPROBANTE, TONO_ESTADO, esViaExpresa, puedeAccion, textoRequisitoAprobacion } from "@/features/cxp/dominio";
+import { ETIQUETA_ESTADO, ETIQUETA_TIPO, PERMISO_COMPROBANTE, TONO_ESTADO, esViaExpresa, puedeAccion, sePuedeCortar, textoRequisitoAprobacion } from "@/features/cxp/dominio";
 import { fraseEnvioOK } from "@/features/cxp/comprobanteDominio";
 import {
   useAdjuntarComprobante,
@@ -64,16 +65,51 @@ import {
 import { useClasificaciones } from "@/features/bancos/hooks";
 import { GastoCombobox, type GastoElegido } from "@/features/cxp/components/GastoCombobox";
 import { VisorComprobante } from "@/features/cxp/components/VisorComprobante";
+import { ReporteLotePanel } from "@/features/cxp/components/ReporteLotePanel";
 import {
   cxpApi,
   etiquetaOrigenContabilidad,
   etiquetaMotivoValidacion,
   type AccionMasiva,
   type Documento,
+  type DocumentoFueraDelLote,
   type FiltrosDocumentos,
   type LotePago,
+  type ModoPago,
   type TipoFactura,
 } from "@/api/cxp";
+import { ApiError } from "@/api/client";
+
+/**
+ * Lee la lista `fuera` del cuerpo de un error 422 sin confiar en su forma.
+ *
+ * `ApiError.body` es el JSON crudo del servidor tipado como `Record<string, unknown>`: un backend
+ * más viejo —o un proxy que se coma el cuerpo— no trae el campo, y ahí el toast tiene que mostrar
+ * el mensaje igual en vez de reventar la pantalla del corte.
+ */
+function leerFuera(body: Record<string, unknown> | null): DocumentoFueraDelLote[] {
+  const fuera = body?.["fuera"];
+  return Array.isArray(fuera) ? (fuera as DocumentoFueraDelLote[]) : [];
+}
+
+/**
+ * Nombra a los proveedores que trabaron la macro, con el porqué de cada uno.
+ *
+ * El 422 IBAN_FALTANTE siempre trajo la lista en `faltantes` y el cliente la tiraba: el toast decía
+ * «hay pagos sin cuenta IBAN» y no decía de quién, así que había que ir a buscarlos a mano entre
+ * las facturas del lote. Y el motivo importa tanto como el nombre: una cuenta que FALTA se le pide
+ * al proveedor, una MAL ESCRITA se corrige en la ficha.
+ */
+function detalleIBAN(err: unknown): string {
+  if (!(err instanceof ApiError)) return "";
+  const filas = err.body?.["faltantes"];
+  if (!Array.isArray(filas) || filas.length === 0) return "";
+  const texto = (filas as { proveedor?: string; motivo?: string }[])
+    .slice(0, 3)
+    .map((f) => `${f.proveedor ?? "proveedor sin nombre"}${f.motivo ? ` — ${f.motivo}` : ""}`)
+    .join(" · ");
+  return ` ${texto}${filas.length > 3 ? ` y ${filas.length - 3} más` : ""}`;
+}
 
 type FaseKey = "rec" | "val" | "apr" | "cnt" | "pag" | "bco" | "pgd" | "arc" | "abi";
 
@@ -214,9 +250,18 @@ export function BandejaPage() {
   const [prioFiltro, setPrioFiltro] = useState("");
   // La recepción cuyo comprobante se está mirando. null = el visor está cerrado.
   const [viendoComprobante, setViendoComprobante] = useState<string | null>(null);
+  /** El lote cuyo detalle de pago se está mirando (null = ninguno). */
+  const [viendoReporte, setViendoReporte] = useState<{ loteId: string; numero: string } | null>(null);
   // Paginado. Antes la Bandeja pedía 200 fijas y no ofrecía pasar de página: con 4.471 facturas
   // abiertas eso mostraba el 4,5 % y el resto era inalcanzable.
   const [pagina, setPagina] = useState(1);
+  /**
+   * Orden del listado. Lo resuelve el SERVIDOR, no la pantalla: con miles de documentos, reordenar
+   * las 100 filas visibles entre ellas no es ordenar la lista — es reacomodar una muestra y
+   * llamarla resultado. El valor sale de una lista cerrada del backend; uno desconocido cae en el
+   * default en vez de fallar.
+   */
+  const [orden, setOrden] = useState("vencimiento");
   const [porPagina, setPorPagina] = useState(100);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const preselRef = useRef(false);
@@ -358,7 +403,7 @@ export function BandejaPage() {
     campo_fecha: desde || hasta ? campoFecha : undefined,
     vencimiento: vencFiltro || undefined,
     prioridad: (prioFiltro || undefined) as FiltrosDocumentos["prioridad"],
-    orden: "vencimiento",
+    orden,
     page: pagina,
     page_size: porPagina,
   });
@@ -395,7 +440,7 @@ export function BandejaPage() {
   // muestra una lista vacía que se lee como «no hay nada».
   useEffect(() => {
     setPagina(1);
-  }, [fase, q, provFiltro, gastoFiltro, montoMin, montoMax, estadoFiltro, vencFiltro, prioFiltro, porPagina]);
+  }, [fase, q, provFiltro, gastoFiltro, montoMin, montoMax, estadoFiltro, vencFiltro, prioFiltro, porPagina, orden]);
   // El filtro de estado es por pestaña: al cambiar de fase se limpia.
   useEffect(() => {
     setEstadoFiltro("");
@@ -642,8 +687,11 @@ export function BandejaPage() {
           label="Buscar"
           value={qInput}
           onChange={(e) => setQInput(e.target.value)}
-          placeholder="Proveedor, consecutivo o clave…"
-          className="min-w-56"
+          // Los códigos de pago entran acá a propósito: el camino más frecuente es al revés del que
+          // se ve, de un débito del estado de cuenta hacia la factura que lo explica. Se puede pegar
+          // lo copiado del banco tal cual, con guion o sin él.
+          placeholder="Proveedor, consecutivo, clave o código de pago…"
+          className="min-w-64"
         />
         <Select
           label="Proveedor"
@@ -833,9 +881,30 @@ export function BandejaPage() {
             if (viat.length) pedirMotivo("liquidar", viat, `Liquidar ${viat.length} viáticos`, "{n} viáticos liquidados");
             if (norm.length) accion(norm, "revisar", "{n} revisadas → Por aprobar");
           }}
+          onBulkViaticos={() => {
+            const ids = [...sel];
+            tipoM.mutate(
+              { ids, tipo: "VIATICOS" },
+              {
+                onSuccess: () => {
+                  setSel(new Set());
+                  // Marcar el tipo NO las archiva: quedan como viáticos y después se liquidan.
+                  // Decirlo evita que alguien las dé por cerradas y las deje ahí.
+                  toast.success(
+                    `${ids.length} marcada(s) como viáticos — no se pagan por banco; archivalas con «Liquidar»`,
+                  );
+                },
+                onError: (err) => toast.error(mensajeError(err)),
+              },
+            );
+          }}
+          onBulkLiquidar={() =>
+            pedirMotivo("liquidar", [...sel], `Liquidar ${sel.size} factura(s)`, "{n} liquidadas")
+          }
+          onBulkAnular={() => pedirMotivo("anular", [...sel], `Anular ${sel.size} factura(s)`, "{n} anuladas")}
           onAccionFila={(id, acc, ok) =>
             acc === "denegar" || acc === "anular" || acc === "liquidar"
-              ? pedirMotivo(acc, [id], acc === "denegar" ? "Denegar factura" : acc === "anular" ? "Anular factura" : "Liquidar viáticos (sin pago)", ok)
+              ? pedirMotivo(acc, [id], tituloMotivo(acc), ok)
               : accion([id], acc, ok)
           }
           onVer={(id) => navigate(`/cxp/documentos/${id}`)}
@@ -912,8 +981,12 @@ export function BandejaPage() {
           }}
           onVer={(id) => navigate(`/cxp/documentos/${id}`)}
           onVerComprobante={setViendoComprobante}
+          onGasto={elegirGasto}
+          onAccionFila={(id, acc, ok) => pedirMotivo(acc, [id], tituloMotivo(acc), ok)}
           puedeAprobar={puedeAprobarConta}
           puedeMarcar={puedeMarcarConta}
+          puedeClasificar={tiene("cxp.clasificar")}
+          puedeRevision={puedeRevision}
           pendiente={aprobarContaM.isPending || quitarMarcaM.isPending}
         />
       ) : fase === "pag" ? (
@@ -923,10 +996,12 @@ export function BandejaPage() {
           preselRef={preselRef}
           setSel={setSel}
           onToggle={toggle}
-          crearLote={(fecha) => {
+          orden={orden}
+          onOrden={setOrden}
+          crearLote={(fecha, modo) => {
             const ids = [...sel];
             crearLote.mutate(
-              { fechaCorte: fecha, ids },
+              { fechaCorte: fecha, ids, modo },
               {
                 onSuccess: async (lote) => {
                   setSel(new Set());
@@ -958,16 +1033,38 @@ export function BandejaPage() {
                   } catch (err) {
                     // Antes esto se tragaba en silencio y el toast decía «macro descargada» igual.
                     // Decir que se bajó un archivo que no se bajó es peor que no bajarlo.
-                    toast.error(`Lote #${lote.numero} creado, pero la macro no se pudo generar: ${mensajeError(err)}`);
+                    toast.error(
+                      `Lote #${lote.numero} creado, pero la macro no se pudo generar: ${mensajeError(err)}` +
+                        detalleIBAN(err),
+                    );
                   }
                   if (bajada) {
+                    // `cantidad` son FACTURAS. En el modo agrupado no son lo mismo que los pagos, y
+                    // decir «3 pagos» cuando sale una sola transferencia haría cuadrar mal el banco.
                     toast.success(
-                      `Lote #${lote.numero} creado (${lote.cantidad} pagos) · macro descargada — subila al banco`,
+                      `Lote #${lote.numero} creado (${lote.cantidad} factura(s)` +
+                        (lote.modo_pago === "PROVEEDOR" ? ", agrupadas por proveedor" : "") +
+                        `) · macro descargada — subila al banco`,
                     );
                   }
                   setFase("bco");
                 },
-                onError: (err) => toast.error(mensajeError(err)),
+                // El 422 LOTE_VACIO trae la lista factura por factura en `fuera`, y hasta ahora el
+                // cliente la tiraba: el toast decía «ninguna de las 3 se puede cortar» y nadie sabía
+                // cuál ni por qué. El mensaje del servidor ya resume los motivos; acá se le agregan
+                // los nombres, que es lo que el usuario está mirando en la pantalla.
+                onError: (err) => {
+                  const fuera = err instanceof ApiError ? leerFuera(err.body) : [];
+                  toast.error(
+                    mensajeError(err) +
+                      (fuera.length > 0
+                        ? ` — ${fuera
+                            .slice(0, 3)
+                            .map((f) => f.proveedor || f.consecutivo)
+                            .join(", ")}${fuera.length > 3 ? ` y ${fuera.length - 3} más` : ""}`
+                        : ""),
+                  );
+                },
               },
             );
           }}
@@ -988,6 +1085,7 @@ export function BandejaPage() {
           onPagada={(id) => accion([id], "pagar", "Pagada ✓ — adjuntá el comprobante en Pagadas")}
           onRebota={(id) => pedirMotivo("rebotar", [id], "Motivo del rebote (banco)", "Rebotada — podés reintentarla en otro corte")}
           onReintentar={(id) => accion([id], "reintentar", "De vuelta en Por pagar")}
+          onReporte={(loteId, numero) => setViendoReporte({ loteId, numero })}
           onMacro={async (loteId, numero) => {
             try {
               const blob = await cxpApi.descargarMacroLote(loteId);
@@ -1000,7 +1098,7 @@ export function BandejaPage() {
               a.remove();
               URL.revokeObjectURL(url);
             } catch (err) {
-              toast.error(mensajeError(err));
+              toast.error(mensajeError(err) + detalleIBAN(err));
             }
           }}
           puedePagar={puedePagar}
@@ -1057,6 +1155,15 @@ export function BandejaPage() {
           recepción elegida, para no pedir el XML de fondo. */}
       {viendoComprobante && (
         <VisorComprobante recepcionId={viendoComprobante} onCerrar={() => setViendoComprobante(null)} />
+      )}
+      {/* Qué cubre cada transferencia del lote. Solo se monta cuando se pide: el reporte recorre
+          las facturas del corte y no tiene por qué cargarse de fondo. */}
+      {viendoReporte && (
+        <ReporteLotePanel
+          loteId={viendoReporte.loteId}
+          numero={viendoReporte.numero}
+          onCerrar={() => setViendoReporte(null)}
+        />
       )}
     </div>
   );
@@ -1188,18 +1295,167 @@ function Dots({ items }: { items: MenuItem[] }) {
   );
 }
 
+/**
+ * Título del diálogo que pide el motivo. Una sola definición: el mismo diálogo se abre ahora desde
+ * dos colas distintas (Recibidas y De Contabilidad) y no puede llamarse distinto según de dónde
+ * venga — es la misma acción y la misma contrapartida.
+ */
+function tituloMotivo(acc: AccionMasiva): string {
+  switch (acc) {
+    case "denegar":
+      return "Denegar factura";
+    case "anular":
+      return "Anular factura";
+    case "liquidar":
+      return "Liquidar viáticos (sin pago)";
+    default:
+      return "Motivo";
+  }
+}
+
+/**
+ * Cómo se llama el orden vigente, para rotular la lista cuando deja de agruparse por vencimiento.
+ * Sin rótulo, la tabla pierde sus tres tramos y no queda nada que diga por qué.
+ */
+function etiquetaOrden(orden: string): string {
+  const base = orden.replace(/_desc$/, "");
+  const dir = orden.endsWith("_desc") ? " (de mayor a menor)" : "";
+  const nombres: Record<string, string> = {
+    proveedor: "Ordenadas por proveedor",
+    departamento: "Ordenadas por departamento",
+    gasto: "Ordenadas por tipo de gasto",
+    prioridad: "Ordenadas por prioridad",
+    vence: "Ordenadas por vencimiento",
+    monto: "Ordenadas por monto",
+    emision: "Ordenadas por fecha de emisión",
+  };
+  return (nombres[base] ?? "Todas") + dir;
+}
+
+/**
+ * Encabezado que ordena. El primer clic ordena ascendente; el segundo, descendente.
+ *
+ * `clave` es la del catálogo del servidor («proveedor», «monto», «prioridad»…), y la variante
+ * descendente es la misma con el sufijo `_desc`. La flecha no es decoración: sin ella, dos clics
+ * seguidos se ven igual y nadie sabe en qué sentido quedó.
+ */
+function THOrden({
+  clave,
+  orden,
+  onOrden,
+  children,
+  className,
+}: {
+  clave: string;
+  orden: string;
+  onOrden: (o: string) => void;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const activo = orden === clave || orden === `${clave}_desc`;
+  const desc = orden === `${clave}_desc`;
+  return (
+    <TH className={className}>
+      <button
+        type="button"
+        onClick={() => onOrden(desc ? clave : activo ? `${clave}_desc` : clave)}
+        className={cn(
+          "inline-flex items-center gap-1 hover:text-content",
+          activo ? "font-bold text-content" : "text-content-muted",
+        )}
+        title={`Ordenar por ${String(children)}`}
+      >
+        {children}
+        <span aria-hidden className={cn("text-[9px]", !activo && "opacity-30")}>
+          {activo ? (desc ? "▼" : "▲") : "▲"}
+        </span>
+      </button>
+    </TH>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Celdas compartidas
 // ---------------------------------------------------------------------------
+
+/**
+ * El código con el que ESTE pago sale en el estado de cuenta, para copiarlo de un clic.
+ *
+ * ── POR QUÉ ES UN BOTÓN Y NO TEXTO ─────────────────────────────────────────────────────────────
+ *
+ * El código son 12 caracteres hexadecimales en letra chica, y transcribirlos a ojo falla: entre
+ * «CXP-12B8CF71477D» y «CXP-1288CF71477D» hay un carácter de diferencia y las dos se leen igual en
+ * pantalla. Quien escribe el código mal no recibe «te equivocaste»: recibe CERO resultados, que es
+ * indistinguible de «esa factura no existe». Copiarlo es la única forma de que el cruce funcione
+ * siempre, así que el código se copia, no se lee.
+ *
+ * Cuál código: el de la REMESA si la factura se pagó agrupada, porque es el que viaja al banco; el
+ * propio si se pagó sola. Es la misma regla de CeldaPagoBanco.
+ */
+function CodigoDePago({ d, className }: { d: Documento; className?: string }) {
+  const [copiado, setCopiado] = useState(false);
+  const codigo = d.remesa ? d.remesa.huella : d.huella;
+  if (!codigo) return null;
+  const referencia = d.remesa ? d.remesa.referencia : d.consecutivo ? `FC ${d.consecutivo.slice(-6)}` : "";
+  // Lo que se copia es lo mismo que la macro mandó al banco: la referencia legible y el código.
+  const aCopiar = [referencia, codigo].filter(Boolean).join(" ");
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        void copiarAlPortapapeles(aCopiar).then((ok) => {
+          if (!ok) return;
+          setCopiado(true);
+          window.setTimeout(() => setCopiado(false), 1500);
+        });
+      }}
+      title={`Copiar «${aCopiar}» para buscarlo en el estado de cuenta. El banco devuelve el código sin el guion (${codigo.replace("-", "")}).`}
+      className={cn(
+        "group inline-flex max-w-full items-center gap-1 rounded font-mono text-[11px] text-content-muted hover:text-accent",
+        className,
+      )}
+    >
+      <span className="truncate">{copiado ? "copiado ✓" : codigo}</span>
+      {!copiado && <span className="opacity-0 transition-opacity group-hover:opacity-100">⧉</span>}
+    </button>
+  );
+}
+
+/**
+ * Código interno del pago: lo que permite seguirlo de punta a punta.
+ *
+ * Dos datos distintos y los dos hacen falta. `FC 000093` son los últimos 6 dígitos del consecutivo
+ * y es lo que el PROVEEDOR ve en su estado de cuenta; la huella `CXP-…` es lo que el sistema usa
+ * para conciliar, y solo existe desde que la factura se programa. Una factura todavía aprobada no
+ * tiene huella, y eso no es una falla: se dice, en vez de dejar un blanco que parezca un error.
+ */
+function CeldaCodigoInterno({ d }: { d: Documento }) {
+  const fc = d.consecutivo ? `FC ${d.consecutivo.slice(-6)}` : "";
+  return (
+    <TD className="whitespace-nowrap font-mono text-[11px]">
+      {fc ? <span className="block text-content">{fc}</span> : <span className="block text-content-muted">—</span>}
+      {d.huella ? (
+        <CodigoDePago d={d} className="block" />
+      ) : (
+        <span className="block text-[10px] text-content-muted">se asigna al cortar</span>
+      )}
+    </TD>
+  );
+}
+
 function CeldaProveedor({
   d,
   onTipo,
   mostrarDepto,
+  sinConsecutivo,
 }: {
   d: Documento;
   onTipo?: (d: Documento) => void;
   /** Muestra el departamento (centro de costo) bajo el proveedor — seguimiento tras la validación. */
   mostrarDepto?: boolean;
+  /** La tabla ya tiene columna «Código»: no repetir el consecutivo bajo el nombre. */
+  sinConsecutivo?: boolean;
 }) {
   const devuelta = d.estado === "RECIBIDO" && !!d.nota_revision;
   const anticipoDisp =
@@ -1246,7 +1502,17 @@ function CeldaProveedor({
           </span>
         )}
       </div>
-      <div className="font-mono text-[11px] text-content-muted">{d.consecutivo || d.clave.slice(0, 14) + "…"}</div>
+      {/* El consecutivo va acá en las pestañas que NO tienen columna propia para él. Donde sí la
+          hay («Por pagar»), repetirlo en la misma fila es ruido justo donde se pidió claridad. */}
+      {!sinConsecutivo && (
+        <div className="font-mono text-[11px] text-content-muted">{d.consecutivo || d.clave.slice(0, 14) + "…"}</div>
+      )}
+      {/* El código de pago, en TODA pestaña donde la factura ya tiene uno.
+          Vivía solo en «Por pagar» y «Pagadas», y faltaba justo en «En banco» —la pestaña donde se
+          acaba de subir la macro y donde se cruza contra el estado de cuenta— y en «Cartera
+          abierta». Va acá, pegado al consecutivo, y no como columna propia: así aparece en todas sin
+          ensanchar ninguna tabla, y calla solo cuando la factura todavía no tiene código. */}
+      <CodigoDePago d={d} className="mt-0.5" />
       {mostrarDepto && d.departamento && (
         <div className="mt-0.5 text-[11px] text-content-muted">🏢 {d.departamento}</div>
       )}
@@ -1280,6 +1546,52 @@ function CeldaMonto({ d }: { d: Documento }) {
   return <TD className="text-right tabular-nums">{formatMoneda(d.total_crc, "CRC")}</TD>;
 }
 
+/**
+ * Celda «Pago»: el código con el que este pago sale en el estado de cuenta y, si ya se conció, el
+ * movimiento del banco.
+ *
+ * El código se muestra SIEMPRE que exista, conciliado o no: es el texto que viaja dentro de la
+ * descripción del pago, así que es con lo que se busca a mano mientras el enlace no está. Ojo con
+ * una trampa real: el banco devuelve la huella SIN el guion («CXP54A4281AE49A»), de modo que
+ * buscarla tal cual no siempre calza. Por eso la celda ofrece las dos formas en el `title`.
+ *
+ * CUÁL código es la decisión que importa. Cuando la factura va dentro de un pago agrupado, su
+ * propia huella NO viaja a ninguna parte: lo que sale en la macro, y lo único que vuelve del banco,
+ * es el de la remesa («REM 0035-01 CXPR-…»). Mostrar la huella de la factura ahí era darle a quien
+ * cuadra un código que el estado de cuenta jamás iba a traer —y encima recomendárselo para buscar—.
+ * Así que manda el de la remesa, y la huella propia queda en el `title`, que es donde sirve: para
+ * reconocer la factura por dentro, no para cruzarla contra el banco.
+ */
+function CeldaPagoBanco({ d }: { d: Documento }) {
+  const p = d.pago_banco;
+  const r = d.remesa;
+  const codigo = r ? r.huella : d.huella;
+  return (
+    <TD className="whitespace-nowrap text-sm">
+      {p ? (
+        <span className="block">
+          {formatFecha(p.fecha)} · {p.cuenta || p.banco || "—"}
+        </span>
+      ) : (
+        <span className="block text-content-muted">Sin enlazar al banco</span>
+      )}
+      {r ? (
+        <span
+          className="block text-[10.5px] text-content-muted"
+          title={`Pago agrupado: una sola transferencia cubre ${r.facturas} ${r.facturas === 1 ? "factura" : "facturas"} de este proveedor. La huella propia de esta factura (${d.huella || "—"}) no viaja al banco.`}
+        >
+          {r.referencia} · {r.facturas} {r.facturas === 1 ? "factura" : "facturas"}
+        </span>
+      ) : null}
+      {codigo ? (
+        <CodigoDePago d={d} className="block" />
+      ) : (
+        <span className="block text-[10.5px] text-content-muted">sin código todavía</span>
+      )}
+    </TD>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Pestaña: Recibidas
 // ---------------------------------------------------------------------------
@@ -1293,6 +1605,12 @@ function TabRecibidas(props: {
   onTipo: (d: Documento) => void;
   onBulkGasto: (g: GastoElegido) => void;
   onBulkRevisar: () => void;
+  /** Cambia el TIPO de las seleccionadas a VIATICOS (no las liquida: eso es el paso siguiente). */
+  onBulkViaticos: () => void;
+  /** Archiva las seleccionadas como ya desembolsadas. Pide motivo. */
+  onBulkLiquidar: () => void;
+  /** Anula las seleccionadas. Pide motivo: queda como contrapartida. */
+  onBulkAnular: () => void;
   onAccionFila: (id: string, acc: AccionMasiva, ok: string) => void;
   onVer: (id: string) => void;
   onVerComprobante: (recepcionId: string) => void;
@@ -1323,6 +1641,25 @@ function TabRecibidas(props: {
             <Button size="sm" onClick={props.onBulkRevisar} loading={props.pendiente}>
               Revisar todas ✓
             </Button>
+          )}
+          {/* Lo que antes solo se podía hacer de a una, factura por factura, desde el menú de la
+              fila. Con un buzón que recibe decenas por día, marcar veinte viáticos de a uno es
+              media mañana. Las tres piden confirmación o motivo, así que nada se dispara de un
+              clic distraído. */}
+          {props.puedeRevisar && (
+            <Button size="sm" variant="secondary" onClick={props.onBulkViaticos} loading={props.pendiente}>
+              Marcar como viáticos
+            </Button>
+          )}
+          {props.puedeRevision && (
+            <>
+              <Button size="sm" variant="secondary" onClick={props.onBulkLiquidar} loading={props.pendiente}>
+                Liquidar
+              </Button>
+              <Button size="sm" variant="ghost" onClick={props.onBulkAnular} loading={props.pendiente}>
+                Anular
+              </Button>
+            </>
           )}
         </div>
       )}
@@ -1667,8 +2004,14 @@ function TabContabilidad(props: {
   onQuitarMarca: (d: Documento) => void;
   onVer: (id: string) => void;
   onVerComprobante: (recepcionId: string) => void;
+  /** Asigna el gasto sin salir de la cola: muchas llegan sin clasificar por su propia vía. */
+  onGasto: (d: Documento, g: GastoElegido) => void;
+  /** Denegar / anular. Las dos piden motivo antes de ejecutarse. */
+  onAccionFila: (id: string, acc: AccionMasiva, ok: string) => void;
   puedeAprobar: boolean;
   puedeMarcar: boolean;
+  puedeClasificar: boolean;
+  puedeRevision: boolean;
   pendiente: boolean;
 }) {
   const { items, totalFiltro, montoTotal } = props;
@@ -1699,7 +2042,16 @@ function TabContabilidad(props: {
             {items.map((d) => (
               <TR key={d.id}>
                 <CeldaProveedor d={d} />
-                <TD className="text-sm">{gastoRuta(d) || "—"}</TD>
+                {/* El gasto se puede ASIGNAR acá. Estas facturas llegan por una vía que se salta
+                    la validación de área, así que muchas entran sin clasificar y antes había que
+                    salir a la pestaña Recibidas a buscarlas de a una para ponerles el gasto. */}
+                <TD>
+                  {props.puedeClasificar ? (
+                    <GastoCombobox actual={gastoRuta(d)} onElegir={(g) => props.onGasto(d, g)} />
+                  ) : (
+                    <span className="text-sm">{gastoRuta(d) || "—"}</span>
+                  )}
+                </TD>
                 <TD className="text-xs">
                   <MarcaContabilidadChip d={d} />
                 </TD>
@@ -1727,6 +2079,23 @@ function TabContabilidad(props: {
                                     ? "Quitar la marca"
                                     : "Que la valide el área",
                                 onClick: () => props.onQuitarMarca(d),
+                              },
+                            ]
+                          : []),
+                        // Denegar y anular faltaban: una factura de Contabilidad que no corresponde
+                        // pagar no tenía salida desde acá, y había que ir a buscarla a otra
+                        // pestaña. Las dos piden motivo, que queda como contrapartida.
+                        ...(props.puedeRevision
+                          ? [
+                              {
+                                label: "Denegar",
+                                tono: "neg" as const,
+                                onClick: () => props.onAccionFila(d.id, "denegar", "Denegada"),
+                              },
+                              {
+                                label: "Anular",
+                                tono: "neg" as const,
+                                onClick: () => props.onAccionFila(d.id, "anular", "Anulada"),
                               },
                             ]
                           : []),
@@ -1900,7 +2269,10 @@ function TabPagar(props: {
   preselRef: { current: boolean };
   setSel: (s: Set<string>) => void;
   onToggle: (id: string) => void;
-  crearLote: (fecha: string) => void;
+  crearLote: (fecha: string, modo: ModoPago) => void;
+  /** Orden vigente y cómo cambiarlo. Lo resuelve el servidor sobre TODO el conjunto filtrado. */
+  orden: string;
+  onOrden: (o: string) => void;
   onPrioridad: (d: Documento) => void;
   onAccionFila: (id: string, acc: AccionMasiva, ok: string) => void;
   onVer: (id: string) => void;
@@ -1911,6 +2283,8 @@ function TabPagar(props: {
 }) {
   const { items, sel } = props;
   const [corte, setCorte] = useState(VIERNES); // política: corrida semanal los viernes
+  // Arranca en el modo de siempre: agrupar es una decisión, no un default silencioso.
+  const [modo, setModo] = useState<ModoPago>("FACTURA");
 
   // ── LA PANTALLA YA NO MARCA NADA POR SU CUENTA ──────────────────────────
   //
@@ -1924,13 +2298,28 @@ function TabPagar(props: {
   // con el filtro de prioridad y el botón «Marcar las N visibles» para armar el corte rápido.
   // Nada entra al archivo del banco sin que alguien lo haya tildado a propósito.
 
-  const grupos: [string, Documento[]][] = [
-    ["Vencidas", items.filter((d) => (d.fecha_vencimiento ?? "") < HOY)],
-    ["Hasta el corte", items.filter((d) => (d.fecha_vencimiento ?? "") >= HOY && (d.fecha_vencimiento ?? "9999") <= corte)],
-    ["Después del corte", items.filter((d) => (d.fecha_vencimiento ?? "9999") > corte)],
-  ];
+  // Los tres tramos por vencimiento solo tienen sentido cuando la lista ESTÁ ordenada por
+  // vencimiento. Si se pidió ordenar por proveedor o por monto, agrupar por fecha parte la lista
+  // en tres y el orden pedido se ve roto: cada tramo queda ordenado por dentro y la columna que se
+  // clicó parece no haber hecho nada. Con otro orden se muestra una sola lista, como se pidió.
+  const porVencimiento = props.orden === "vencimiento" || props.orden === "vencimiento_desc";
+  const grupos: [string, Documento[]][] = porVencimiento
+    ? [
+        ["Vencidas", items.filter((d) => (d.fecha_vencimiento ?? "") < HOY)],
+        ["Hasta el corte", items.filter((d) => (d.fecha_vencimiento ?? "") >= HOY && (d.fecha_vencimiento ?? "9999") <= corte)],
+        ["Después del corte", items.filter((d) => (d.fecha_vencimiento ?? "9999") > corte)],
+      ]
+    : [[etiquetaOrden(props.orden), items]];
   const selDocs = items.filter((d) => sel.has(d.id));
   const total = selDocs.reduce((a, d) => a + toNumber(d.total_crc), 0);
+  // Cuántas transferencias saldrían si se agrupa: es el número que hace valer la pena el modo.
+  const proveedoresMarcados = new Set(selDocs.map((d) => d.proveedor_id)).size;
+
+  // Cortables = las que el servidor va a aceptar. Una factura bloqueada para pago se sigue VIENDO
+  // acá —es plata que se debe y esconderla sería peor— pero no se puede marcar: el 25 de setiembre
+  // de 2026 se marcaron tres bloqueadas, el corte se abortó entero y el mensaje no decía por qué.
+  const cortables = items.filter(sePuedeCortar);
+  const bloqueadas = items.length - cortables.length;
 
   return (
     <div className="flex flex-col gap-3">
@@ -1956,10 +2345,10 @@ function TabPagar(props: {
         <Button
           size="sm"
           variant="secondary"
-          disabled={items.length === 0}
-          onClick={() => props.setSel(new Set(items.map((d) => d.id)))}
+          disabled={cortables.length === 0}
+          onClick={() => props.setSel(new Set(cortables.map((d) => d.id)))}
         >
-          Marcar las {items.length} visibles
+          Marcar las {cortables.length} visibles
         </Button>
         <Button size="sm" variant="ghost" disabled={sel.size === 0} onClick={() => props.setSel(new Set())}>
           Desmarcar todo
@@ -1967,19 +2356,42 @@ function TabPagar(props: {
         <span className="text-content-muted">
           {sel.size === 0
             ? "Nada marcado todavía."
-            : `${sel.size} marcada(s) de ${items.length} visible(s).`}
+            : `${sel.size} marcada(s) de ${cortables.length} que se pueden cortar.`}
         </span>
+        {bloqueadas > 0 && (
+          <span className="text-negativo">
+            🔒 {bloqueadas} no se pagan por banco y no se pueden marcar (mirá el motivo en su fila).
+          </span>
+        )}
       </div>
       <TableContainer>
         <Table>
           <THead>
             <TR>
               <TH className="w-9"></TH>
-              <TH>Proveedor</TH>
-              <TH>Gasto</TH>
-              <TH>Prio</TH>
-              <TH>Vence</TH>
-              <TH className="text-right">Monto</TH>
+              <THOrden clave="proveedor" orden={props.orden} onOrden={props.onOrden}>
+                Proveedor
+              </THOrden>
+              <THOrden clave="departamento" orden={props.orden} onOrden={props.onOrden}>
+                Departamento
+              </THOrden>
+              {/* Código = el consecutivo de la factura electrónica. Código interno = lo que viaja
+                  al banco y con lo que después se concilia. Son dos cosas distintas y por eso van
+                  en dos columnas: cruzarlas es justo lo que costaba seguir un pago. */}
+              <TH>Código</TH>
+              <TH>Código interno</TH>
+              <THOrden clave="gasto" orden={props.orden} onOrden={props.onOrden}>
+                Tipo de gasto
+              </THOrden>
+              <THOrden clave="prioridad" orden={props.orden} onOrden={props.onOrden}>
+                Prio
+              </THOrden>
+              <THOrden clave="vence" orden={props.orden} onOrden={props.onOrden}>
+                Vence
+              </THOrden>
+              <THOrden clave="monto" orden={props.orden} onOrden={props.onOrden} className="text-right">
+                Monto
+              </THOrden>
               <TH></TH>
             </TR>
           </THead>
@@ -1988,17 +2400,48 @@ function TabPagar(props: {
               g.length === 0 ? null : (
                 [
                   <TR key={titulo}>
-                    <TD colSpan={7} className="bg-surface-muted/60 py-1.5 text-[11px] font-bold uppercase tracking-wider text-content-muted">
+                    {/* 10 columnas: tilde · proveedor · departamento · código · código interno ·
+                        gasto · prioridad · vence · monto · acciones. */}
+                    <TD colSpan={10} className="bg-surface-muted/60 py-1.5 text-[11px] font-bold uppercase tracking-wider text-content-muted">
                       {titulo} ({g.length})
                     </TD>
                   </TR>,
                   ...g.map((d) => (
-                    <TR key={d.id} className={cn(sel.has(d.id) && "bg-accent/5")}>
+                    <TR key={d.id} className={cn(sel.has(d.id) && "bg-accent/5", d.bloqueado_para_pago && "opacity-70")}>
                       <TD>
-                        <input type="checkbox" checked={sel.has(d.id)} onChange={() => props.onToggle(d.id)} aria-label={`Incluir ${d.proveedor}`} className="h-4 w-4 rounded accent-accent" />
+                        {/* Bloqueada = el servidor NUNCA la va a dejar entrar al lote. Ofrecer el
+                            tilde es prometer un pago que se va a caer: se deshabilita acá y el
+                            motivo se lee en la fila, no en un toast después de dar «Generar». */}
+                        <input
+                          type="checkbox"
+                          checked={sel.has(d.id)}
+                          disabled={!sePuedeCortar(d)}
+                          onChange={() => props.onToggle(d.id)}
+                          aria-label={
+                            d.bloqueado_para_pago
+                              ? `${d.proveedor} no se puede cortar: ${d.bloqueo_motivo}`
+                              : `Incluir ${d.proveedor}`
+                          }
+                          title={d.bloqueado_para_pago ? d.bloqueo_motivo : undefined}
+                          className="h-4 w-4 rounded accent-accent disabled:cursor-not-allowed disabled:opacity-40"
+                        />
                       </TD>
-                      <CeldaProveedor d={d} mostrarDepto />
-                      <TD className="text-sm">{gastoRuta(d) || "—"}</TD>
+                      {/* El departamento tiene columna propia: dentro del proveedor no se podía
+                          ordenar ni leer en diagonal, que es como se revisa un corte. */}
+                      <CeldaProveedor d={d} sinConsecutivo />
+                      <TD className="whitespace-nowrap text-sm">{d.departamento || "—"}</TD>
+                      <TD className="whitespace-nowrap font-mono text-[11px] text-content-muted">
+                        {d.consecutivo || "—"}
+                      </TD>
+                      <CeldaCodigoInterno d={d} />
+                      <TD className="text-sm">
+                        {gastoRuta(d) || "—"}
+                        {d.bloqueado_para_pago && (
+                          <span className="mt-0.5 block text-xs font-medium text-negativo">
+                            🔒 No se paga por banco — {d.bloqueo_motivo}
+                          </span>
+                        )}
+                      </TD>
                       <TD>
                         <PrioChip doc={d} onCiclar={props.onPrioridad} />
                       </TD>
@@ -2038,8 +2481,33 @@ function TabPagar(props: {
           </p>
         </div>
         <Input label="Fecha de corte" type="date" value={corte} onChange={(e) => setCorte(e.target.value)} className="max-w-40" />
+        {/* CÓMO se parte el corte en transferencias. Se elige acá y no en una preferencia porque
+            cambia de corte a corte: agrupar conviene cuando hay varias facturas del mismo
+            proveedor, y el selector dice CUÁNTAS transferencias van a salir con lo que hay
+            marcado, que es el número que decide. */}
+        <div>
+          <label className="block text-[11px] font-bold uppercase tracking-wider text-content-muted" htmlFor="modo-pago">
+            Cómo pagar
+          </label>
+          <select
+            id="modo-pago"
+            value={modo}
+            onChange={(e) => setModo(e.target.value as ModoPago)}
+            className="mt-1 rounded-lg border border-border bg-surface px-2 py-1.5 text-sm text-content"
+          >
+            <option value="FACTURA">Una transferencia por factura</option>
+            <option value="PROVEEDOR">Una por proveedor (agrupa)</option>
+          </select>
+        </div>
+        <p className="self-center text-xs text-content-muted">
+          {sel.size === 0
+            ? "—"
+            : modo === "PROVEEDOR"
+              ? `${sel.size} factura(s) → ${proveedoresMarcados} transferencia(s)`
+              : `${sel.size} transferencia(s)`}
+        </p>
         {props.puedePagar ? (
-          <Button className="ml-auto" onClick={() => props.crearLote(corte)} loading={props.creando} disabled={sel.size === 0 || !corte}>
+          <Button className="ml-auto" onClick={() => props.crearLote(corte, modo)} loading={props.creando} disabled={sel.size === 0 || !corte}>
             Generar lote + macro (.txt) →
           </Button>
         ) : (
@@ -2060,6 +2528,8 @@ function TabBanco(props: {
   onRebota: (id: string) => void;
   onReintentar: (id: string) => void;
   onMacro: (loteId: string, numero: string) => void;
+  /** Abre el detalle de qué cubre cada transferencia del lote (y permite bajarlo como planilla). */
+  onReporte: (loteId: string, numero: string) => void;
   puedePagar: boolean;
   pendiente: boolean;
 }) {
@@ -2093,12 +2563,19 @@ function TabBanco(props: {
                 <TD colSpan={4} className="bg-surface-muted/60 py-1.5">
                   <div className="flex items-center gap-3">
                     <span className="text-[11px] font-bold uppercase tracking-wider text-content-muted">
-                      Lote #{numero} · {docs.length} pagos · {formatMoneda(String(docs.reduce((a, d) => a + toNumber(d.total_crc), 0)), "CRC")}
+                      {/* FACTURAS, no «pagos»: cuando el corte se agrupó por proveedor, varias de
+                          estas salieron en una sola transferencia. El detalle está en el reporte. */}
+                      Lote #{numero} · {docs.length} factura(s) · {formatMoneda(String(docs.reduce((a, d) => a + toNumber(d.total_crc), 0)), "CRC")}
                     </span>
                     {docs[0] && (
-                      <Button size="sm" variant="ghost" onClick={() => props.onMacro(docs[0]!.lote_id, numero)}>
-                        ⬇ Macro
-                      </Button>
+                      <>
+                        <Button size="sm" variant="ghost" onClick={() => props.onMacro(docs[0]!.lote_id, numero)}>
+                          ⬇ Macro
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => props.onReporte(docs[0]!.lote_id, numero)}>
+                          📄 Qué se paga
+                        </Button>
+                      </>
                     )}
                   </div>
                 </TD>
@@ -2169,6 +2646,12 @@ function TabBanco(props: {
                       {l.pendientes > 0 && <span className="text-pendiente"> · {l.pendientes} en banco</span>}
                     </td>
                     <td className="py-1.5 text-right">
+                      {/* El documento también acá. Un lote del histórico es justo el que alguien va
+                          a querer respaldar o volver a firmar, y hasta ahora solo se podía bajar la
+                          macro —el archivo del banco—, que no es un documento que se lea. */}
+                      <Button size="sm" variant="ghost" onClick={() => props.onReporte(l.id, String(l.numero))}>
+                        📄 Qué se paga
+                      </Button>
                       <Button size="sm" variant="ghost" onClick={() => props.onMacro(l.id, String(l.numero))}>
                         ⬇ Macro
                       </Button>
@@ -2224,6 +2707,9 @@ function TabPagadas(props: {
               <TH>Proveedor</TH>
               <TH>Gasto</TH>
               <TH className="text-right">Monto</TH>
+              {/* Con qué movimiento se cerró y cuál es su código interno: sin esto, una factura
+                  «pagada» no dice de cuál cuenta salió el dinero ni cómo encontrarlo en el banco. */}
+              <TH>Pago</TH>
               <TH>Comprobante</TH>
               <TH className="text-right">Acción</TH>
             </TR>
@@ -2234,6 +2720,7 @@ function TabPagadas(props: {
                 <CeldaProveedor d={d} mostrarDepto />
                 <TD className="text-sm">{gastoRuta(d) || "—"}</TD>
                 <CeldaMonto d={d} />
+                <CeldaPagoBanco d={d} />
                 <TD>
                   {d.comprobante_enviado_en ? (
                     <div className="flex flex-col gap-0.5">

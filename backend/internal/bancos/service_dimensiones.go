@@ -100,6 +100,28 @@ type GastoPartidaDimension struct {
 	// BORRARÍA la sede a la partida sin que nadie lo pidiera.
 	PartidaDepartamentoID string `json:"partida_departamento_id"`
 	PartidaSedeID         string `json:"partida_sede_id"`
+
+	// ── Cuándo se gastó ────────────────────────────────────────────────────
+	//
+	// El rango puede ser de hasta 12 meses y la fila traía UN solo número. Con eso, «¿en qué partida
+	// se fue la plata?» se contestaba y «¿en qué mes?» no: un trimestre donde el gas cayó de 1,7 M a
+	// 294 K se veía idéntico a uno parejo. Las dos preguntas se hacen juntas al mirar un gasto.
+	//
+	// Solo los meses CON movimiento, en orden. Un mes sin gasto no viaja: acá «cero» y «no hubo
+	// nada» son lo mismo.
+	Meses []GastoMes `json:"meses"`
+	// MesPico es el mes que concentró más gasto, derivado de Meses. Va resuelto desde el servidor
+	// para que la tabla lo muestre sin abrir la fila y sin que cada pantalla lo recalcule distinto.
+	// Vacío cuando el rango es de un solo mes: ahí «el mes más alto» no dice nada.
+	MesPico string `json:"mes_pico,omitempty"`
+}
+
+// GastoMes es lo que una partida gastó en UN mes.
+type GastoMes struct {
+	// Periodo en YYYY-MM.
+	Periodo string `json:"periodo"`
+	Movs    int    `json:"movs"`
+	Gasto   string `json:"gasto"`
 }
 
 // PresupuestoLinea es un monto autorizado en un mes: del departamento completo o de una de sus
@@ -353,6 +375,7 @@ func (s *Service) PartidasDeDimension(ctx context.Context, empresaID, desde, has
 	for i := range filas {
 		filas[i].OrigenLegible = EtiquetaOrigenDimension(filas[i].Origen)
 		filas[i].Estado = CtrlSinPresupuesto
+		filas[i].MesPico = mesPico(filas[i].Meses)
 
 		// Vacío se lee como «no hay subpresupuesto», igual que el cero: es lo mismo para el usuario y
 		// no vale un 500. El SQL manda "0.00" por COALESCE, pero la ausencia no puede depender de eso.
@@ -380,6 +403,28 @@ func (s *Service) PartidasDeDimension(ctx context.Context, empresaID, desde, has
 		filas[i].Estado = estadoDeConsumo(gasto, sub, consumido, umbralPct)
 	}
 	return filas, nil
+}
+
+// mesPico devuelve el período con más gasto de la lista. "" con uno o ningún mes: cuando el rango
+// es de un solo mes, decir «el mes más alto es ése» no informa nada y ensucia la tabla.
+//
+// Ante un empate gana el más RECIENTE: si dos meses gastaron igual, el que importa para decidir es
+// el último, no el primero.
+func mesPico(meses []GastoMes) string {
+	if len(meses) < 2 {
+		return ""
+	}
+	pico, mayor := "", decimal.Zero
+	for _, m := range meses {
+		v, err := decimal.NewFromString(m.Gasto)
+		if err != nil {
+			continue // un mes ilegible no puede tumbar la fila entera; simplemente no compite
+		}
+		if pico == "" || v.GreaterThanOrEqual(mayor) {
+			pico, mayor = m.Periodo, v
+		}
+	}
+	return pico
 }
 
 // umbralDeAlerta resuelve el % de consumo que dispara la ALERTA. Se comparte entre el control por

@@ -198,11 +198,59 @@ export interface Documento {
   requiere_validacion: boolean | null;
   validacion_motivo: MotivoValidacion;
   /**
+   * Bloqueada para pago: NO puede entrar a un lote ni al archivo del banco, aunque su estado sea
+   * APROBADO. Lo usa el corte para no ofrecer lo que después va a rechazar (un viático, por
+   * ejemplo, ya se desembolsó y se archiva con «liquidar»). El servidor lo reverifica igual.
+   */
+  bloqueado_para_pago: boolean;
+  /** Por qué está bloqueada, escrito para leerse en la fila. */
+  bloqueo_motivo: string;
+  /**
    * La recepción de la que salió esta factura, si entró por el buzón y conserva su XML.
    * Vacío = entró por Excel o a mano: por ese camino el XML nunca llegó al ERP, así que NO HAY
    * comprobante que mostrar. Es lo que decide si la fila ofrece «Ver factura».
    */
   recepcion_id?: string;
+  /**
+   * El MOVIMIENTO BANCARIO con el que esta factura se pagó, cuando la conciliación por huella los
+   * enlazó. Es la otra mitad de `pago_cxp` en Bancos: con los dos, el pago se sigue de punta a
+   * punta sin salir de la pantalla.
+   *
+   * Ausente = todavía no hay enlace. Puede ser que el estado de cuenta no se haya importado, o que
+   * el monto del banco no coincidiera con el neto (eso NO concilia a propósito: es un hallazgo).
+   */
+  pago_banco?: PagoBancoDelDocumento;
+  /**
+   * El pago AGRUPADO dentro del que se fue esta factura, cuando el lote se cortó por proveedor.
+   * Ausente = se paga sola, y entonces su propia huella es la que viaja al banco.
+   *
+   * Es lo que hace que la pantalla y la macro digan lo mismo: en un pago agrupado la huella de la
+   * factura no sale en ninguna parte del estado de cuenta —lo que sale es «REM 0035-01 CXPR-…»— y
+   * mostrarla ahí mandaba a buscar un código que el banco nunca devuelve.
+   */
+  remesa?: RemesaDelDocumento;
+}
+
+/** El pago agrupado visto desde la fila de una de sus facturas. */
+export interface RemesaDelDocumento {
+  id: string;
+  /** Código interno del pago agrupado («CXPR-…»), el que vuelve del banco. */
+  huella: string;
+  /** La mitad legible («REM 0035-01»), la que una persona lee y busca. */
+  referencia: string;
+  /** Cuántas facturas cubre la transferencia, contando esta. Siempre ≥ 1. */
+  facturas: number;
+}
+
+/** El movimiento bancario que pagó una factura, con lo mínimo para reconocerlo. */
+export interface PagoBancoDelDocumento {
+  movimiento_id: string;
+  fecha: string;
+  /** Alias de la cuenta («BN Jardines Colones»), no el IBAN. */
+  cuenta: string;
+  banco: string;
+  /** Lo que el banco debitó de verdad, que puede diferir del neto de la factura. */
+  debito: string;
 }
 
 export type MotivoValidacion = "" | "MONTO" | "PROVEEDOR_NUEVO" | "DESVIO";
@@ -434,6 +482,11 @@ export interface LotePago {
   rebotadas: number;
   pendientes: number;
   /**
+   * Cómo se armó el corte: una transferencia por FACTURA (el de siempre) o una por PROVEEDOR,
+   * cubriendo todas sus facturas del lote. Decide cuántas líneas tiene la macro.
+   */
+  modo_pago: ModoPago;
+  /**
    * Las facturas que se pidieron cortar y NO entraron a este lote, con el porqué de cada una.
    * Ausente en el caso normal. Si viene, el corte salió más chico de lo que se pidió y hay que
    * decirlo: lo que no entró no se paga, y antes eso desaparecía sin una palabra.
@@ -448,6 +501,102 @@ export interface DocumentoFueraDelLote {
   proveedor: string;
   estado: string;
   motivo: string;
+}
+
+/**
+ * Cómo se parte el corte en transferencias.
+ *
+ * FACTURA: una por factura, cada una con su propio código. PROVEEDOR: una por proveedor, que cubre
+ * todas sus facturas del lote (menos comisiones, menos líneas que cuadrar, y el proveedor recibe
+ * un solo depósito). Medido sobre los 28 lotes reales: 9 tenían más de una factura del mismo
+ * proveedor.
+ */
+export type ModoPago = "FACTURA" | "PROVEEDOR";
+
+/** Un pago agrupado: lo que sale del banco en UNA transferencia. */
+export interface Remesa {
+  id: string;
+  lote_id: string;
+  proveedor_id: string;
+  proveedor: string;
+  /** Consecutivo dentro del lote: la mitad legible de la referencia («REM 0043-07»). */
+  numero: number;
+  /** Código interno («CXPR-…»), lo que vuelve del banco. */
+  huella: string;
+  monto_crc: string;
+  /** Cuántas facturas cubre. */
+  facturas: number;
+}
+
+/** Una factura dentro del aviso de pago. */
+export interface LineaDeAviso {
+  consecutivo: string;
+  gasto: string;
+  fecha_emision: string;
+  fecha_vencimiento: string;
+  total_crc: string;
+  anticipos_crc: string;
+  neto_crc: string;
+}
+
+/**
+ * El detalle de UNA transferencia: qué facturas cubre y por cuánto.
+ *
+ * Es lo que las entidades grandes llaman «aviso de pago» (remittance advice) y resuelve el problema
+ * del pago agrupado: el banco lleva una referencia corta, y el detalle —que no cabe ahí— viaja por
+ * este lado, para el proveedor y como respaldo de qué cubrió esa transferencia.
+ */
+export interface AvisoDePago {
+  /** Lo que aparece en el banco: «REM 0043-07», o «FC 000487» si se pagó suelta. */
+  referencia: string;
+  huella: string;
+  lote_numero: number;
+  fecha_corte: string;
+  proveedor: string;
+  proveedor_id: string;
+  /** Vacío = el proveedor no tiene cuenta registrada y el banco rechazaría la línea. */
+  iban: string;
+  lineas: LineaDeAviso[];
+  total_crc: string;
+}
+
+/** Dónde vive un código: en el concepto (lo heredan sus clasificaciones) o en una clasificación. */
+export type NivelCatalogo = "CONCEPTO" | "CLASIFICACION";
+
+/**
+ * Un rubro del catálogo con su nomenclatura de pago («A8», «A9»).
+ *
+ * El código se HEREDA del concepto: con 124 clasificaciones bajo «Gastos», cargar una por una sería
+ * inviable y lo que hay que hacer a mano termina sin hacerse. La clasificación lleva el suyo solo
+ * cuando necesita distinguirse de su concepto, y entonces manda sobre él.
+ */
+export interface RubroConCodigo {
+  id: string;
+  nombre: string;
+  nivel: NivelCatalogo;
+  /** El concepto padre cuando `nivel` es CLASIFICACION. */
+  concepto: string;
+  /** El código EFECTIVO: el propio, o el que hereda del concepto. */
+  codigo: string;
+  /** true = no tiene código propio y usa el del concepto. Borrarlo acá no haría nada. */
+  heredado: boolean;
+  /** Cuántas facturas usan este rubro: dice qué conviene codificar primero. */
+  facturas: number;
+}
+
+/** «Lo que se va a pagar» de un corte: una entrada por transferencia, con su detalle. */
+export interface ReporteLote {
+  lote_id: string;
+  lote_numero: number;
+  fecha_corte: string;
+  modo_pago: ModoPago;
+  pagos: AvisoDePago[];
+  /** Facturas cubiertas y transferencias que salen: la diferencia ES el ahorro del modo agrupado. */
+  facturas: number;
+  transferencias: number;
+  total_crc: string;
+  /** Transferencias cuyo proveedor no tiene IBAN: el banco las rechaza. Hay que arreglarlo ANTES. */
+  sin_iban: number;
 }
 
 /** 3er nivel del catálogo de gasto (cuelga de una Clasificación). Exclusivo de CxP. */
@@ -1231,9 +1380,18 @@ export const cxpApi = {
   },
 
   // --- Lotes de pago (corte) ---
-  /** Arma un lote de pago (corte) con las facturas seleccionadas. */
-  crearLote(fechaCorte: string, ids: string[]): Promise<LotePago> {
-    return apiFetch<LotePago>("/cxp/lotes", { method: "POST", json: { fecha_corte: fechaCorte, ids } });
+  /**
+   * Arma un lote de pago (corte) con las facturas seleccionadas.
+   *
+   * `modo` decide cuántas transferencias salen; omitirlo deja el de siempre (una por factura). Un
+   * modo escrito mal NO cae en el default: el servidor lo rechaza, porque decide cuánta plata sale
+   * en cada transferencia.
+   */
+  crearLote(fechaCorte: string, ids: string[], modo?: ModoPago): Promise<LotePago> {
+    return apiFetch<LotePago>("/cxp/lotes", {
+      method: "POST",
+      json: { fecha_corte: fechaCorte, ids, modo_pago: modo ?? "FACTURA" },
+    });
   },
   /** Lista los lotes de pago de la empresa. */
   lotes(): Promise<LotePago[]> {
@@ -1242,6 +1400,28 @@ export const cxpApi = {
   /** Descarga la macro (.txt) de un lote. */
   descargarMacroLote(loteId: string): Promise<Blob> {
     return apiFetch<Blob>(`/cxp/lotes/${loteId}/macro`, { method: "GET", blob: true });
+  },
+  /** «Lo que se va a pagar»: una entrada por transferencia, con el detalle de sus facturas. */
+  reporteLote(loteId: string): Promise<ReporteLote> {
+    return apiFetch<ReporteLote>(`/cxp/lotes/${loteId}/reporte`, { method: "GET" });
+  },
+  /** El mismo reporte como planilla, una fila por factura (para filtrar y sumar en Excel). */
+  descargarReporteLote(loteId: string): Promise<Blob> {
+    return apiFetch<Blob>(`/cxp/lotes/${loteId}/reporte`, {
+      method: "GET",
+      query: { formato: "csv" },
+      blob: true,
+    });
+  },
+
+  // --- Nomenclatura interna del pago (A8, A9…) ---
+  /** El catálogo de gasto con el código de cada rubro, incluidos los que todavía no tienen. */
+  nomenclaturas(): Promise<RubroConCodigo[]> {
+    return apiFetch<RubroConCodigo[]>("/cxp/nomenclaturas", { method: "GET" });
+  },
+  /** Pone el código de un rubro. Un `codigo` vacío lo quita. */
+  asignarNomenclatura(nivel: NivelCatalogo, id: string, codigo: string): Promise<void> {
+    return apiFetch<void>("/cxp/nomenclaturas", { method: "PUT", json: { nivel, id, codigo } });
   },
 
   // --- Comprobante de pago ---

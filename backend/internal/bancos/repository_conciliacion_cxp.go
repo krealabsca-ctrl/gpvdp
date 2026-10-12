@@ -53,11 +53,37 @@ func (r *pgRepository) MovimientosConHuella(ctx context.Context, empresaID, pref
 // El CTE `previo` fija el estado ANTES del UPDATE (y bloquea la fila): sin eso, el RETURNING
 // vería el estado nuevo y reportaría como «clasificado por el enlace» algo que ya venía del motor.
 func (r *pgRepository) EnlazarPagoCxP(ctx context.Context, empresaID, movimientoID, documentoID, conceptoID, clasificacionID string) (bool, bool, error) {
-	const q = `
+	return r.enlazarPago(ctx, empresaID, movimientoID, columnaDocumento, documentoID, conceptoID, clasificacionID)
+}
+
+// EnlazarPagoRemesa hace lo mismo para un pago AGRUPADO: el movimiento no apunta a una factura
+// sino a la remesa que cubre varias. Son columnas distintas y excluyentes (ver el CHECK de la
+// migración 0089): un movimiento es el pago de una factura, o de una remesa, o de nada.
+func (r *pgRepository) EnlazarPagoRemesa(ctx context.Context, empresaID, movimientoID, remesaID, conceptoID, clasificacionID string) (bool, bool, error) {
+	return r.enlazarPago(ctx, empresaID, movimientoID, columnaRemesa, remesaID, conceptoID, clasificacionID)
+}
+
+// Las DOS únicas columnas de enlace. Son constantes del paquete y nunca llegan del cliente: acá se
+// concatena SQL, y un nombre de columna que viniera de afuera sería una inyección con forma de
+// parámetro.
+const (
+	columnaDocumento = "documento_cxp_id"
+	columnaRemesa    = "remesa_id"
+)
+
+func (r *pgRepository) enlazarPago(ctx context.Context, empresaID, movimientoID, columna, destinoID, conceptoID, clasificacionID string) (bool, bool, error) {
+	if columna != columnaDocumento && columna != columnaRemesa {
+		return false, false, fmt.Errorf("bancos: columna de enlace desconocida: %q", columna)
+	}
+	q := `
 		WITH previo AS (
 			SELECT id, estado_clasificacion
 			FROM movimiento_bancario
-			WHERE empresa_id = $1::uuid AND id = $2::uuid AND documento_cxp_id IS NULL
+			-- Las DOS columnas tienen que estar libres, no solo la que se va a escribir: el CHECK
+			-- de la 0089 las hace excluyentes, así que escribir una sobre un movimiento que ya
+			-- tiene la otra reventaría la transacción en vez de reportar la carrera.
+			WHERE empresa_id = $1::uuid AND id = $2::uuid
+			  AND documento_cxp_id IS NULL AND remesa_id IS NULL
 			FOR UPDATE
 		),
 		-- El par (concepto, clasificación) se DERIVA de la clasificación en vez de copiarse:
@@ -76,7 +102,7 @@ func (r *pgRepository) EnlazarPagoCxP(ctx context.Context, empresaID, movimiento
 			FROM previo p CROSS JOIN elegido e
 		)
 		UPDATE movimiento_bancario m
-		SET documento_cxp_id = $3::uuid,
+		SET ` + columna + ` = $3::uuid,
 		    concepto_id = CASE WHEN pl.aplica THEN pl.concepto_id ELSE m.concepto_id END,
 		    clasificacion_id = CASE WHEN pl.aplica THEN pl.clasif_id ELSE m.clasificacion_id END,
 		    estado_clasificacion = CASE WHEN pl.aplica THEN 'AUTO' ELSE m.estado_clasificacion END,
@@ -86,7 +112,7 @@ func (r *pgRepository) EnlazarPagoCxP(ctx context.Context, empresaID, movimiento
 		WHERE m.id = pl.id
 		RETURNING pl.aplica`
 	var clasificado bool
-	err := r.pool.QueryRow(ctx, q, empresaID, movimientoID, documentoID, conceptoID, clasificacionID).Scan(&clasificado)
+	err := r.pool.QueryRow(ctx, q, empresaID, movimientoID, destinoID, conceptoID, clasificacionID).Scan(&clasificado)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, false, nil
 	}

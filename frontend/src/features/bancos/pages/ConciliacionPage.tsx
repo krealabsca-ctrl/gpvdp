@@ -39,6 +39,9 @@ import {
   useFirmarActa,
   useRegistrarPartida,
 } from "@/features/bancos/hooksTesoreria";
+// El barrido vive en el módulo general de Bancos porque invalida lo mismo que una reversa (mueve
+// plata de «No identificado» a su gasto), no solo lo de tesorería.
+import { useConciliarCxP } from "@/features/bancos/hooks";
 import { abrirActaImprimible } from "@/features/bancos/components/ActaImprimible";
 import type { ActaConciliacion, TipoPartida } from "@/api/bancos";
 
@@ -107,12 +110,16 @@ export function ConciliacionPage() {
   const { empresaActiva } = useAuth();
   const tienePermiso = useTienePermiso();
   const puedeConciliar = tienePermiso("bancos.conciliar");
+  // El barrido cambia el estado de un PAGO, así que su permiso es el de tesorería de CxP: es el
+  // mismo que exige el endpoint. Sin él el botón no aparece (y si apareciera, daría 403).
+  const puedeTesoreria = tienePermiso("cxp.tesoreria");
 
   const [abierta, setAbierta] = useState<string | null>(null);
   const [porFirmar, setPorFirmar] = useState<ActaConciliacion | null>(null);
 
   const concQ = useConciliacion(periodo);
   const firmar = useFirmarActa();
+  const conciliarCxP = useConciliarCxP();
 
   const c = concQ.data;
   const actas = useMemo(() => {
@@ -147,6 +154,44 @@ export function ConciliacionPage() {
       <PageHeader
         title="Actas de conciliación"
         description={`Lo que dice el banco contra lo que dicen los libros, cuenta por cuenta, en ${etiquetaPeriodo(periodo)}.`}
+        actions={
+          puedeTesoreria ? (
+            <Button
+              variant="secondary"
+              loading={conciliarCxP.isPending}
+              onClick={() =>
+                conciliarCxP.mutate(undefined, {
+                  onSuccess: (r) => {
+                    if (!r.disponible) {
+                      toast.error("CxP no está conectado en este servidor: no hay pagos que buscar.");
+                      return;
+                    }
+                    // Los pagos DE VERDAD: el pre-filtro trae de más a propósito y lo ajeno no es
+                    // un pago nuestro. Contarlo como tal hacía ver cinco problemas inexistentes.
+                    const pagos = r.examinados - r.sin_huella;
+                    if (pagos === 0) {
+                      toast.success(
+                        "No quedó ningún pago de CxP sin enlazar: o ya están todos, o el estado de " +
+                          "cuenta con esos movimientos todavía no se importó.",
+                      );
+                      return;
+                    }
+                    // Las tres cifras, siempre. «12 enlazados» a secas esconde los que NO calzaron,
+                    // que son justo los que alguien tiene que mirar.
+                    toast.success(
+                      `${pagos} pago(s) de CxP: ${r.conciliados} enlazado(s)` +
+                        (r.monto_diferente > 0 ? ` · ${r.monto_diferente} con monto distinto (revisalos)` : "") +
+                        (r.sin_documento > 0 ? ` · ${r.sin_documento} sin factura que los reclame` : ""),
+                    );
+                  },
+                  onError: (err) => toast.error(mensajeError(err)),
+                })
+              }
+            >
+              Buscar pagos de CxP
+            </Button>
+          ) : undefined
+        }
       />
 
       {concQ.isPending ? (

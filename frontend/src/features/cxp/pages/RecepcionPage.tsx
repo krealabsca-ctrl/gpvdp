@@ -210,16 +210,18 @@ export function RecepcionPage() {
                 setBusqueda(q.trim());
               }}
             >
+              {/* El rango es por fecha de LLEGADA al buzón, y eso se dice en la etiqueta y no en un
+                  `hint`: el hint agrega una línea debajo de un solo campo, y como la barra alinea
+                  por abajo (`items-end`), ese campo quedaba un escalón más arriba que el resto. */}
               <Input
-                label="Desde"
+                label="Llegó desde"
                 type="date"
                 value={desde}
                 onChange={(e) => setDesde(e.target.value)}
-                hint="fecha de llegada"
                 className="w-36"
               />
               <Input
-                label="Hasta"
+                label="Llegó hasta"
                 type="date"
                 value={hasta}
                 onChange={(e) => setHasta(e.target.value)}
@@ -251,15 +253,16 @@ export function RecepcionPage() {
                   className="min-w-44"
                 />
               )}
-              <label className="flex flex-col gap-1 text-xs text-content-muted">
-                Buscar
-                <Input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Clave, proveedor, asunto…"
-                  className="w-60"
-                />
-              </label>
+              {/* Con el `label` del propio Input, igual que los demás campos. Envuelto en un
+                  <label> a mano, la etiqueta se dibujaba con otro tamaño y otro espaciado, y el
+                  campo no calzaba con la línea de la barra. */}
+              <Input
+                label="Buscar"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Clave, proveedor, asunto…"
+                className="w-60"
+              />
               <Button type="submit" variant="secondary" size="sm">
                 Buscar
               </Button>
