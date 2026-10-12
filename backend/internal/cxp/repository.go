@@ -153,6 +153,21 @@ type Repository interface {
 	RegistrarEnvio(ctx context.Context, empresaID, docID string, reg RegistroEnvio) (reenvio bool, enviadoEn time.Time, err error)
 	ListarEnvios(ctx context.Context, empresaID, docID string) ([]EnvioComprobante, error)
 
+	// Comprobantes de una corrida entera (la carpeta que se baja del banco).
+	//
+	// DestinosPorHuella resuelve de un viaje los códigos leídos en los nombres de archivo: los de
+	// factura contra `documento_cxp.huella` y los de remesa contra `remesa_pago.huella`, trayendo
+	// en este último caso TODAS las facturas que el pago agrupado cubre.
+	DestinosPorHuella(ctx context.Context, empresaID string, codigos []string) (map[string]HuellaDestino, error)
+	// GuardarComprobantesCarpeta adjunta varios archivos en UNA transacción y vuelve a verificar,
+	// documento por documento, que siga estando pagado: entre previsualizar y confirmar pasan
+	// minutos y el estado pudo moverse.
+	GuardarComprobantesCarpeta(ctx context.Context, empresaID string, items []ItemCarpeta, usuarioID string) (ResultadoCarpeta, error)
+	// PagosSinComprobante es el control inverso: de las transferencias ya pagadas, cuáles todavía
+	// no tienen recibo. Una fila por TRANSFERENCIA —la remesa cuenta una sola vez— porque es lo
+	// que corresponde uno a uno con un archivo del banco.
+	PagosSinComprobante(ctx context.Context, empresaID, loteID string, soloFaltantes bool) ([]PagoConRecibo, error)
+
 	// Recepción de facturas por buzón de correo (etapa 2 de la ingesta).
 	CedulasDeEmpresa(ctx context.Context, empresaID string) ([]string, error)
 	CrearFuente(ctx context.Context, empresaID string, in FuenteInput, tokenHash, usuarioID string) (FuenteRecepcion, error)

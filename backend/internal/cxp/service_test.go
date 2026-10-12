@@ -460,6 +460,21 @@ func (f *fakeRepo) ObtenerComprobante(context.Context, string, string) (Comproba
 	return Comprobante{}, nil
 }
 
+// La carpeta de comprobantes. Estos tres están acá SOLO para que el fake siga cumpliendo la
+// interfaz: el criterio del cruce se prueba sin base (es una función pura, ver
+// comprobante_carpeta_test.go) y las consultas se prueban contra PostgreSQL de verdad
+// (comprobante_carpeta_pg_test.go). Un repositorio probado detrás de un fake no está probado:
+// `MIN(uuid)` —que en PostgreSQL no existe— pasó catorce suites y reventó contra la base.
+func (f *fakeRepo) DestinosPorHuella(context.Context, string, []string) (map[string]HuellaDestino, error) {
+	return map[string]HuellaDestino{}, nil
+}
+func (f *fakeRepo) GuardarComprobantesCarpeta(context.Context, string, []ItemCarpeta, string) (ResultadoCarpeta, error) {
+	return ResultadoCarpeta{}, nil
+}
+func (f *fakeRepo) PagosSinComprobante(context.Context, string, string, bool) ([]PagoConRecibo, error) {
+	return nil, nil
+}
+
 // Comprobante: envío y bitácora. Lo que el fake captura se usa en comprobante_envio_test.go —
 // ahí está el detalle de por qué cada campo importa.
 func (f *fakeRepo) ObtenerComprobanteEnvio(context.Context, string, string) (ComprobanteEnvio, error) {

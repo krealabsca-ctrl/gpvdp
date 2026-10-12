@@ -9,21 +9,21 @@ import (
 // Alias del archivo de pagos del sistema de origen (28 columnas en la muestra real).
 var aliasCobro = map[string][]string{
 	"contrato":     {"contrato", "no. contrato", "numero de contrato"},
-	"documento":    {"cedula cliente", "cédula cliente", "documento", "cedula", "cédula"},
+	"documento":    {"cedula cliente", "documento", "cedula"},
 	"cliente":      {"cliente id", "cliente", "nombre del cliente"},
-	"sucursal":     {"sucursal_contrato", "sucursal", "sede"},
+	"sucursal":     {"sucursal contrato", "sucursal", "sede"},
 	"consecutivo":  {"consecutivo", "recibo", "no. recibo"},
 	"forma_pago":   {"forma pago", "forma de pago", "forma pago contrato"},
 	"medio_pago":   {"medio de pago", "medio pago"},
-	"asociacion":   {"asociacion", "asociación"},
+	"asociacion":   {"asociacion"},
 	"concepto":     {"concepto"},
 	"valor":        {"valor", "monto", "monto pagado"},
 	"fecha_pago":   {"fecha de pago", "fecha pago"},
-	"fecha_banco":  {"fecha de pago bancario de la asociacion", "fecha de pago bancario de la asociación", "fecha bancaria", "fecha de pago bancario"},
-	"fecha_creado": {"fecha creacion", "fecha creación", "fecha de creacion", "fecha de creación"},
+	"fecha_banco":  {"fecha de pago bancario de la asociacion", "fecha bancaria", "fecha de pago bancario"},
+	"fecha_creado": {"fecha creacion", "fecha de creacion"},
 	"referencia":   {"pago referencia", "referencia"},
 	"estado":       {"estado"},
-	"observacion":  {"observaciones", "observacion", "observación"},
+	"observacion":  {"observaciones", "observacion"},
 }
 
 // AplicacionLeida es un tramo de la aplicación que el sistema de origen ya había hecho,
@@ -74,7 +74,8 @@ type ReglasCobros struct {
 }
 
 // LeerCobros interpreta el archivo de pagos. No escribe nada.
-func LeerCobros(g Grid, r ReglasCobros) ([]FilaCobro, error) {
+func LeerCobros(h Hoja, r ReglasCobros) ([]FilaCobro, error) {
+	g := h.Valores
 	if len(g) == 0 {
 		return nil, ErrArchivoVacio
 	}
@@ -107,12 +108,21 @@ func LeerCobros(g Grid, r ReglasCobros) ([]FilaCobro, error) {
 			Concepto:    celda(fila, cols["concepto"]),
 			Observacion: celda(fila, cols["observacion"]),
 		}
-		f.FechaPago = fechaDe(celda(fila, cols["fecha_pago"]))
+		// Las fechas salen del número de serie cuando la celda es una fecha de Excel, y del
+		// texto (d/m/aaaa) cuando vino escrita así. Ver fechaDeCelda: leer solo el texto
+		// formateado perdía la fecha entera.
+		cruda := filaCruda(h.Crudos, i)
+		fecha := func(col string) string {
+			return fechaDeCelda(celda(fila, cols[col]), celda(cruda, cols[col]))
+		}
+		f.FechaPago = fecha("fecha_pago")
 		// La fecha bancaria puede traer DOS valores separados por «|» cuando la planilla de
 		// la asociación llegó en dos transferencias. `fechaDe` toma la primera; la segunda
 		// se conserva en la planilla, que es donde la conciliación del lote la necesita.
-		f.FechaBanco = fechaDe(celda(fila, cols["fecha_banco"]))
-		f.FechaCreado = fechaDe(celda(fila, cols["fecha_creado"]))
+		// Ese caso llega siempre como TEXTO —un número de serie no puede traer dos fechas—,
+		// así que lo resuelve el camino del texto.
+		f.FechaBanco = fecha("fecha_banco")
+		f.FechaCreado = fecha("fecha_creado")
 
 		monto, err := montoDe(celda(fila, cols["valor"]))
 		switch {
@@ -292,7 +302,10 @@ func columnasPor(g Grid, alias map[string][]string, obligatoria string) (map[str
 					continue
 				}
 				for _, a := range lista {
-					if enc == a {
+					// El alias se normaliza con la MISMA función que el encabezado. Si no,
+					// un alias escrito con tilde o con guion bajo no puede calzar nunca:
+					// queda en la lista, parece que cubre un caso, y no cubre ninguno.
+					if enc == normalizarEncabezado(a) {
 						cols[campo] = i
 						break
 					}

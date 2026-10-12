@@ -13,7 +13,7 @@ func TestLeerCobrosDelArchivoReal(t *testing.T) {
 	if len(g) != 12 {
 		t.Fatalf("filas del grid = %d, se esperaban 12", len(g))
 	}
-	filas, err := LeerCobros(g, ReglasCobros{CobroMaximo: decimal.NewFromInt(1000000)})
+	filas, err := LeerCobros(HojaDe(g), ReglasCobros{CobroMaximo: decimal.NewFromInt(1000000)})
 	if err != nil {
 		t.Fatalf("LeerCobros: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestLeerCobrosCuarentena(t *testing.T) {
 		{"CO6", "6", "5000.00", "1/7/2026", "M/JULIO - x2000.00", "Activo"},      // el detalle no cuadra
 		{"CO7", "7", "5000.00", "1/7/2026", "M/JULIO - x5000.00", "Activo"},      // bueno
 	}
-	filas, err := LeerCobros(g, ReglasCobros{CobroMaximo: decimal.NewFromInt(1000000)})
+	filas, err := LeerCobros(HojaDe(g), ReglasCobros{CobroMaximo: decimal.NewFromInt(1000000)})
 	if err != nil {
 		t.Fatalf("LeerCobros: %v", err)
 	}

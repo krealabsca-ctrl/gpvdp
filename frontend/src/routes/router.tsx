@@ -38,6 +38,7 @@ import { NuevoDocumentoPage } from "@/features/cxp/pages/NuevoDocumentoPage";
 import { DocumentoDetailPage } from "@/features/cxp/pages/DocumentoDetailPage";
 import { ImportarPage } from "@/features/cxp/pages/ImportarPage";
 import { RecepcionPage } from "@/features/cxp/pages/RecepcionPage";
+import { ComprobantesPage } from "@/features/cxp/pages/ComprobantesPage";
 import { FuentesRecepcionPage } from "@/features/cxp/pages/FuentesRecepcionPage";
 import { DashboardCxpPage } from "@/features/cxp/pages/DashboardCxpPage";
 import { ResponsabilidadesPage } from "@/features/cxp/pages/ResponsabilidadesPage";
@@ -132,6 +133,9 @@ export const router = createBrowserRouter([
           { path: "cxp/responsabilidades", element: <ResponsabilidadesPage /> },
           { path: "cxp/mis-responsabilidades", element: <MisResponsabilidadesPage /> },
           { path: "cxp/fuentes", element: <FuentesRecepcionPage /> },
+          // Los recibos del banco de una corrida entera: se sueltan los cien archivos y cada uno
+          // se pega solo a su factura leyendo el código del nombre.
+          { path: "cxp/comprobantes", element: <ComprobantesPage /> },
           { path: "cxp/proveedores", element: <ProveedoresPage /> },
           { path: "cxp/anticipos", element: <AnticiposPage /> },
           { path: "cxp/cajas", element: <CajaChicaPage /> },

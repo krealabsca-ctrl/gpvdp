@@ -1078,6 +1078,83 @@ export interface ResultadoEnvioComprobante {
   enviado_en: string;
 }
 
+// --- La carpeta de comprobantes de una corrida ---
+
+/** Veredicto de un archivo. Solo UNICO y REMESA se adjuntan. */
+export type EstadoArchivoCarpeta =
+  | "UNICO"
+  | "REMESA"
+  | "SIN_CODIGO"
+  | "VARIOS_CODIGOS"
+  | "DUPLICADO"
+  | "NO_ENCONTRADO"
+  | "NO_PAGADA";
+
+export interface DestinoComprobante {
+  documento_id: string;
+  consecutivo: string;
+  proveedor: string;
+  total: string;
+  moneda: string;
+  /** Esa factura ya tenía recibo y este lo reemplaza (y borra la marca de «enviado»). */
+  ya_tiene: boolean;
+}
+
+export interface ArchivoCruzado {
+  nombre: string;
+  estado: EstadoArchivoCarpeta;
+  codigo?: string;
+  /** Por qué no se puede adjuntar. Es lo único que permite arreglar la carpeta. */
+  motivo?: string;
+  destinos: DestinoComprobante[];
+}
+
+export interface ResumenCarpeta {
+  archivos: number;
+  se_adjuntan: number;
+  /** Cuántas FACTURAS tocan. No es igual a `se_adjuntan`: un recibo de remesa cubre varias. */
+  facturas: number;
+  reemplazan: number;
+  problemas: number;
+}
+
+export interface PreviewCarpeta {
+  resumen: ResumenCarpeta;
+  archivos: ArchivoCruzado[];
+}
+
+export interface ResultadoAdjuntarCarpeta {
+  ok: boolean;
+  adjuntados: number;
+  facturas: number;
+  /** Lo que la revalidación dejó afuera entre previsualizar y confirmar. */
+  rechazados: string[];
+  resumen: ResumenCarpeta;
+  archivos: ArchivoCruzado[];
+}
+
+/** Una TRANSFERENCIA del banco y si ya tiene su recibo. La remesa cuenta una sola vez. */
+export interface PagoConRecibo {
+  codigo: string;
+  referencia: string;
+  es_remesa: boolean;
+  proveedor: string;
+  lote_id: string;
+  lote_numero: number;
+  facturas: number;
+  monto_crc: string;
+  /** Cuántas de sus facturas ya tienen recibo. Entre 0 y `facturas`: el caso intermedio existe. */
+  con_recibo: number;
+  nombre_sugerido: string;
+}
+
+export interface PagosConRecibo {
+  pagos: PagoConRecibo[];
+  transferencias: number;
+  facturas: number;
+  faltan: number;
+}
+
 // ---------------------------------------------------------------------------
 // Endpoints
 // ---------------------------------------------------------------------------
@@ -1449,6 +1526,38 @@ export const cxpApi = {
   /** La bitácora de envíos de ese comprobante, del más reciente al más viejo. */
   enviosComprobante(id: string): Promise<EnvioComprobante[]> {
     return apiFetch<EnvioComprobante[]>(`/cxp/documentos/${id}/comprobante/envios`, { method: "GET" });
+  },
+
+  // --- La carpeta entera de una corrida ---
+  /**
+   * Cruza los NOMBRES de los archivos contra la cartera, sin subir nada.
+   *
+   * Solo los nombres a propósito: el código de pago viaja en el nombre, así que para decidir no
+   * hace falta el contenido. Cien nombres son unos kilobytes en vez de treinta megas, y quien
+   * bautizó mal un archivo lo corrige antes de esperar la subida.
+   */
+  previsualizarCarpeta(nombres: string[]): Promise<PreviewCarpeta> {
+    return apiFetch<PreviewCarpeta>("/cxp/comprobantes/carpeta/previsualizar", {
+      method: "POST",
+      json: { nombres },
+    });
+  },
+  /**
+   * Sube los archivos y los reparte. El servidor vuelve a cruzar: a qué factura va cada uno NO
+   * viaja en la petición, porque entonces bastaría con cambiarlo para pegarle a una factura el
+   * recibo de otra.
+   */
+  adjuntarCarpeta(archivos: File[]): Promise<ResultadoAdjuntarCarpeta> {
+    const fd = new FormData();
+    for (const a of archivos) fd.append("archivos", a);
+    return apiFetch<ResultadoAdjuntarCarpeta>("/cxp/comprobantes/carpeta", { method: "POST", raw: fd });
+  },
+  /** El control inverso: de lo que ya se pagó, qué tiene recibo y qué no. */
+  pagosConRecibo(opts: { lote?: string; soloFaltantes?: boolean } = {}): Promise<PagosConRecibo> {
+    return apiFetch<PagosConRecibo>("/cxp/comprobantes/pagos", {
+      method: "GET",
+      query: { lote: opts.lote || undefined, faltantes: opts.soloFaltantes ? 1 : undefined },
+    });
   },
 
   // --- Clasificación de gasto ---

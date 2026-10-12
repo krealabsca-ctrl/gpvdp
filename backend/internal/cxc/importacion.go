@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
+	"github.com/xuri/excelize/v2"
 )
 
 // Errores del importador.
@@ -25,30 +26,38 @@ var (
 // La resolución es POR ENCABEZADO, nunca por posición: la cicatriz del portal de Apps
 // Script fue justamente que una columna corrida desplazó todos los datos en silencio.
 var aliasContrato = map[string][]string{
-	"contrato":      {"contrato", "no. contrato", "numero de contrato", "número de contrato", "num contrato"},
+	// LOS ALIAS SE ESCRIBEN COMO SE COMPARAN: sin tildes y con espacios, porque el encabezado
+	// se normaliza así antes de buscarlo (ver normalizarEncabezado). Un alias con tilde o con
+	// guion bajo no puede calzar nunca; había quince acá —«cédula», «teléfonos», «día de
+	// pago»…— que parecían cubrir un caso y no cubrían ninguno, todos duplicando a su gemelo
+	// sin tilde, que es el que hacía el trabajo. Hay una prueba que lo exige.
+	"contrato":      {"contrato", "no. contrato", "numero de contrato", "num contrato"},
 	"cliente":       {"cliente", "nombre del cliente", "cliente id", "nombre"},
-	"documento":     {"documento", "cedula", "cédula", "identificacion", "identificación", "cedula cliente", "cédula cliente"},
-	"telefonos":     {"telefonos", "teléfonos", "telefono", "teléfono"},
-	"otro_telefono": {"otro telefono", "otro teléfono", "telefono 2"},
-	"correos":       {"correos", "correo", "email", "correo electronico", "correo electrónico"},
-	"sede":          {"sede", "sucursal", "sucursal_contrato", "sede operativa"},
-	"dia_pago":      {"dias de pagos", "días de pagos", "dia de pago", "día de pago", "dia pago"},
+	"documento":     {"documento", "cedula", "identificacion", "cedula cliente"},
+	"telefonos":     {"telefonos", "telefono"},
+	"otro_telefono": {"otro telefono", "telefono 2"},
+	"correos":       {"correos", "correo", "email", "correo electronico"},
+	"sede":          {"sede", "sucursal", "sucursal contrato", "sede operativa", "sede contrato"},
+	"dia_pago":      {"dias de pagos", "dia de pago", "dia pago"},
 	"servicio":      {"servicios", "servicio", "plan"},
 	"tipo_servicio": {"tipo de servicio", "tipo servicio"},
-	"asociacion":    {"asociacion", "asociación"},
+	// «asocaicion» NO es un error de tipeo de acá: así viene escrito el encabezado en el
+	// archivo que exporta el sistema de origen. Se reconoce tal cual porque corregirlo allá
+	// no está en nuestras manos, y sin esta línea la columna entra vacía.
+	"asociacion":    {"asociacion", "asociacion siglas", "asocaicion"},
 	"cuota":         {"cuota servicio", "cuota", "monto cuota", "cuota del servicio"},
 	"modalidad":     {"modalidad de cobro", "modalidad", "periodicidad"},
 	"forma_pago":    {"forma de pago", "forma pago", "medio de pago"},
-	"dias_vencidos": {"dias vencidos", "días vencidos"},
+	"dias_vencidos": {"dias vencidos"},
 	"score":         {"score", "puntaje"},
-	"estado":        {"estado", "estado del contrato"},
+	"estado":        {"estado", "estado del contrato", "contrato estado"},
 	"morosidad":     {"estatus de morosidad", "estatus morosidad", "morosidad"},
 	"saldo":         {"saldo pendiente", "saldo"},
-	"fecha_inicial": {"contrato fecha inicial", "fecha inicial", "fecha de inicio"},
+	"fecha_inicial": {"contrato fecha inicial", "fecha inicial", "fecha de inicio", "fecha inicio contrato"},
 	"primer_cobro":  {"contrato fecha primer cobro", "fecha primer cobro", "primer cobro"},
-	"proximo_pago":  {"fecha proximo pago", "fecha próximo pago", "proximo pago"},
+	"proximo_pago":  {"fecha proximo pago", "fecha del proximo pago", "proximo pago"},
 	"tarjeta_vence": {"fecha vencimiento tarjeta", "vencimiento tarjeta", "tarjeta vence"},
-	"mes_cobro":     {"mes cobro/año", "mes cobro/ano", "mes cobro", "mes de cobro"},
+	"mes_cobro":     {"mes cobro/ano", "mes cobro", "mes de cobro"},
 }
 
 // FilaContrato es una fila del archivo ya interpretada, con los motivos por los que
@@ -99,7 +108,8 @@ type ReglasImportacion struct {
 // LeerContratos interpreta el archivo de cartera. No toca la base y no decide nada
 // irreversible: devuelve lo que entendió y por qué dudaría de cada fila, para que la
 // pantalla lo muestre antes de confirmar.
-func LeerContratos(g Grid, r ReglasImportacion) ([]FilaContrato, error) {
+func LeerContratos(h Hoja, r ReglasImportacion) ([]FilaContrato, error) {
+	g := h.Valores
 	if len(g) == 0 {
 		return nil, ErrArchivoVacio
 	}
@@ -114,6 +124,14 @@ func LeerContratos(g Grid, r ReglasImportacion) ([]FilaContrato, error) {
 	out := make([]FilaContrato, 0, len(g)-encabezado-1)
 	for i := encabezado + 1; i < len(g); i++ {
 		fila := g[i]
+		// La MISMA fila sin el formato del libro, de donde salen las fechas. Se busca por
+		// número de fila y no se asume que las dos lecturas tengan el mismo largo: `cruda`
+		// puede venir vacía, y `celda` ya devuelve "" fuera de rango.
+		cruda := filaCruda(h.Crudos, i)
+		// fecha lee una columna por su nombre usando las dos versiones de la celda.
+		fecha := func(col string) string {
+			return fechaDeCelda(celda(fila, cols[col]), celda(cruda, cols[col]))
+		}
 		numero := celda(fila, cols["contrato"])
 		if numero == "" {
 			continue // fila de relleno o total: no es un contrato
@@ -162,21 +180,24 @@ func LeerContratos(g Grid, r ReglasImportacion) ([]FilaContrato, error) {
 			}
 		}
 
-		// ── Fechas (d/m/aaaa en los archivos reales)
-		f.FechaInicial = fechaDe(celda(fila, cols["fecha_inicial"]))
-		f.PrimerCobro = fechaDe(celda(fila, cols["primer_cobro"]))
+		// ── Fechas: del número de serie si la celda es una fecha de Excel, y del texto
+		// (d/m/aaaa) si vino escrita como tal. Ver fechaDeCelda.
+		f.FechaInicial = fecha("fecha_inicial")
+		f.PrimerCobro = fecha("primer_cobro")
 		if f.PrimerCobro == "" {
 			// Sin fecha de primer cobro no se puede generar ni un cargo, y no se
 			// inventa: la fila entra marcada y no estorba a las demás.
-			if pp := fechaDe(celda(fila, cols["proximo_pago"])); pp != "" {
+			if pp := fecha("proximo_pago"); pp != "" {
 				f.PrimerCobro = pp
 				f.Motivos = append(f.Motivos, "sin fecha de primer cobro: se tomó la de próximo pago")
 			} else {
 				f.Motivos = append(f.Motivos, "sin fecha de primer cobro ni de próximo pago")
 			}
 		}
-		// La tarjeta viene como mes-año («oct-28», «nov-29»): se toma el último día.
-		f.TarjetaVence = finDeMesDe(celda(fila, cols["tarjeta_vence"]))
+		// La tarjeta viene como mes-año («oct-28», «nov-29») y vale hasta el ÚLTIMO día de ese
+		// mes. Ver finDeMesDeCelda: Excel convierte «ago-23» en el 1 de agosto, y quedarse con
+		// ese día le quitaría a la tarjeta el mes de vigencia que la regla le da.
+		f.TarjetaVence = finDeMesDeCelda(celda(fila, cols["tarjeta_vence"]), celda(cruda, cols["tarjeta_vence"]))
 
 		// ── Datos informativos del origen
 		if s := celda(fila, cols["score"]); s != "" {
@@ -231,7 +252,7 @@ func columnasContrato(g Grid) (map[string]int, int) {
 					continue
 				}
 				for _, a := range alias {
-					if enc == a {
+					if enc == normalizarEncabezado(a) {
 						cols[campo] = i
 						break
 					}
@@ -253,6 +274,18 @@ func columnasContrato(g Grid) (map[string]int, int) {
 
 func normalizarEncabezado(s string) string {
 	s = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(s, bom)))
+	// El GUION BAJO y el guion son separadores de palabra, no letras. El sistema de origen
+	// exporta los encabezados en snake_case —«fecha_primer_cobro», «sede_contrato»,
+	// «modalidad_de_cobro»— y sin esto ninguno calza con su alias, que está escrito con
+	// espacios. Medido el 8-oct-2026 sobre el archivo real: de 31 columnas, las de fecha,
+	// sede, modalidad, forma de pago y día de pago entraban todas vacías, y las 23.144 filas
+	// caían en cuarentena por datos que el archivo traía puestos.
+	s = strings.Map(func(r rune) rune {
+		if r == '_' || r == '-' {
+			return ' '
+		}
+		return r
+	}, s)
 	s = strings.Join(strings.Fields(s), " ") // colapsa espacios dobles
 	return sinTildes(s)
 }
@@ -350,9 +383,68 @@ func montoDe(s string) (decimal.Decimal, error) {
 	return v, nil
 }
 
-// fechaDe lee las fechas del origen. El formato real es d/m/aaaa (3/8/2026 = 3 de
-// AGOSTO), así que el día va primero: interpretarlo al revés movería de mes miles de
-// vencimientos. Devuelve "" si no entiende, para que el llamador decida.
+// Rango en el que un número de serie de Excel se acepta como fecha: 1990-01-01 a
+// 2200-01-01.
+//
+// El tope de abajo es lo que importa. Sin él, un «4» —el día de pago de una columna mal
+// mapeada, o una celda corrida— se convertiría en el 4 de enero de 1900 y entraría como una
+// fecha perfectamente válida. Con él, ese número no se parece a una fecha, cae al camino del
+// texto y, si tampoco se entiende ahí, la fila queda marcada, que es lo correcto. Una
+// cartera cuyos cobros arrancan antes de 1990 no existe, y si existiera, el valor
+// formateado todavía puede rescatarla.
+const (
+	serieMinima = 32874.0  // 1990-01-01
+	serieMaxima = 109574.0 // 2200-01-01
+)
+
+// filaCruda devuelve la fila `i` de la lectura sin formato, o nil si no está.
+//
+// Devuelve nil en vez de fallar porque las dos lecturas pueden no tener el mismo largo (una
+// hoja con filas finales vacías las recorta distinto según se aplique o no el formato). Sin
+// la fila cruda, las fechas de esa línea se leen del texto, que es el comportamiento de
+// antes: se pierde la mejora, no el dato.
+func filaCruda(crudos Grid, i int) []string {
+	if i < 0 || i >= len(crudos) {
+		return nil
+	}
+	return crudos[i]
+}
+
+// fechaDeCelda lee una fecha mirando PRIMERO el valor crudo.
+//
+// Si el crudo es un número de serie de Excel, esa es la fecha y no hay nada que interpretar:
+// 44593 es el 1 de febrero de 2022 en cualquier equipo, con cualquier configuración
+// regional y cualquier formato de celda. Solo cuando el crudo no es una serie —una fecha
+// escrita como texto, o un CSV, donde crudo y formateado son lo mismo— se cae al texto, que
+// es donde sí hay que saber que el origen escribe d/m/aaaa.
+//
+// Ese orden es el arreglo: al leer solo el texto formateado, una fecha real de Excel llegaba
+// como «02-01-22» y se perdía entera (7-oct-2026). Devolver el texto a la primera
+// posición volvería a poner a adivinar si el 02 es el mes o el día.
+func fechaDeCelda(formateado, crudo string) string {
+	if t := strings.TrimSpace(crudo); t != "" {
+		if serie, err := strconv.ParseFloat(t, 64); err == nil {
+			if serie >= serieMinima && serie <= serieMaxima {
+				if v, err := excelize.ExcelDateToTime(serie, false); err == nil {
+					return v.Format("2006-01-02")
+				}
+			}
+			// Es un número y no es una serie plausible: NO se intenta leerlo como texto.
+			// «4» no es el 4 de enero de 1900 ni ninguna otra fecha, y dejarlo seguir sería
+			// inventar un dato que el archivo no trae.
+			return ""
+		}
+	}
+	return fechaDe(formateado)
+}
+
+// fechaDe lee las fechas del origen escritas como TEXTO. El formato real es d/m/aaaa
+// (3/8/2026 = 3 de AGOSTO), así que el día va primero: interpretarlo al revés movería de mes
+// miles de vencimientos. Devuelve "" si no entiende, para que el llamador decida.
+//
+// Para leer una celda de Excel usar fechaDeCelda, que mira el número de serie antes que
+// esto: el texto de una fecha real de Excel lo genera el formato del libro y puede venir en
+// cualquier orden.
 func fechaDe(s string) string {
 	t := strings.TrimSpace(s)
 	if t == "" {
@@ -369,6 +461,27 @@ func fechaDe(s string) string {
 		}
 	}
 	return ""
+}
+
+// finDeMesDeCelda lee el vencimiento de una tarjeta de una celda de Excel.
+//
+// Cuando el crudo es un número de serie, la fecha se lleva al ÚLTIMO día de su mes, que es la
+// regla que este campo ya tenía escrita: una tarjeta que vence en octubre sirve todo octubre.
+// Hace falta porque el origen escribe «ago-23» y Excel lo guarda como el 1 de agosto: quedarse
+// con ese día le quitaría a la tarjeta el mes de vigencia que la regla le da, y el cobro se
+// cortaría antes de tiempo. Medido sobre el archivo real: los 12 contratos que traen
+// vencimiento caen los 12 en día 1, que es la firma de un mes-año convertido.
+//
+// El camino del TEXTO se deja como estaba —finDeMesDe respeta una fecha completa tal cual— para
+// no cambiar lo que ya venía funcionando en los archivos CSV.
+func finDeMesDeCelda(formateado, crudo string) string {
+	if v := fechaDeCelda("", crudo); v != "" {
+		if t, err := time.Parse("2006-01-02", v); err == nil {
+			return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC).
+				AddDate(0, 1, -1).Format("2006-01-02")
+		}
+	}
+	return finDeMesDe(formateado)
 }
 
 // finDeMesDe lee un «mes-año» como los del vencimiento de tarjeta («oct-28»,

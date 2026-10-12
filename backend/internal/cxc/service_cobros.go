@@ -133,7 +133,7 @@ func llaveDeArchivo(f FilaCobro) string {
 }
 
 func (s *Service) leerCobros(ctx context.Context, empresaID string, archivo []byte) ([]FilaCobro, error) {
-	g, err := CargarGrid(archivo)
+	h, err := CargarHoja(archivo)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +147,7 @@ func (s *Service) leerCobros(ctx context.Context, empresaID string, archivo []by
 			reglas.CobroMaximo = m
 		}
 	}
-	return LeerCobros(g, reglas)
+	return LeerCobros(h, reglas)
 }
 
 func (s *Service) conciliarCobros(ctx context.Context, empresaID string, filas []FilaCobro) (ConciliacionCobros, error) {

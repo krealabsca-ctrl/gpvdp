@@ -219,6 +219,14 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
 	case errors.Is(err, ErrDocNoPagado):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
+	// La carpeta de comprobantes. «Vacía» es un pedido mal armado (400); «nada que adjuntar» es un
+	// pedido correcto con una carpeta que no sirve (422) — y ese segundo caso lo contesta el
+	// handler con el cruce adjunto, porque el detalle de por qué es lo único que permite
+	// arreglarla. Acá quedan los dos igual para que ninguna otra ruta los deje salir como 500.
+	case errors.Is(err, ErrCarpetaVacia):
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, err.Error())
+	case errors.Is(err, ErrNadaQueAdjuntar):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
 	// ErrSinDestinatario lo devuelve el transporte cuando la dirección queda vacía al limpiarla
 	// (un correo de proveedor de solo espacios pasa el `!= ""` del service). Sin este caso saldría
 	// como 500 «error interno» sobre algo que sí se puede explicar.
