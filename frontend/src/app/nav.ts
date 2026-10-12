@@ -40,7 +40,9 @@ import {
   SlidersHorizontal,
   ShoppingBag,
   ShoppingCart,
+  Tags,
   TrendingUp,
+  CopyX,
   FileCheck,
   Upload,
   Users,
@@ -107,6 +109,9 @@ export const MODULES: NavModule[] = [
       // Va PEGADO al importador y no en Conciliación: es una carga de archivo, el mismo gesto y el
       // mismo permiso. Quien sube estados de cuenta es quien tiene el reporte del sistema viejo.
       { label: "Pagos del sistema anterior", descripcion: "Qué salidas ya estaban aplicadas", to: "/pagos-externos", icon: FileCheck, permiso: "bancos.importar" },
+      // Va con el permiso de LEER y no con el de excluir: plata fuera de los libros que solo puede
+      // mirar quien la sacó no es auditable. El botón de sacar sí pide `bancos.excluir_movimiento`.
+      { label: "Duplicados y exclusiones", descripcion: "Lo que el banco cargó dos veces", to: "/duplicados", icon: CopyX, permiso: "bancos.ver_clasificar" },
       // La PANTALLA de catálogo es de administración: crea, renombra, fusiona y elimina. Por eso
       // pide `bancos.catalogo` y no el permiso base. `bancos.ver` sigue dejando LEER conceptos y
       // clasificaciones —lo que necesitan los selectores de las otras pantallas—, pero no abre esta.
@@ -144,6 +149,11 @@ export const MODULES: NavModule[] = [
     pages: [
       { label: "Bandeja", descripcion: "El trabajo, por fases", to: "/cxp/bandeja", icon: Inbox },
       { label: "Dashboard", descripcion: "Cartera, vencimientos y cola", to: "/cxp/dashboard", icon: LayoutDashboard, permiso: "cxp.dashboard" },
+      // Va PEGADO al Dashboard porque son las dos preguntas grandes y se confunden: el Dashboard
+      // mira cómo va el PROCESO (qué debemos, qué vence, qué está trabado) y esto mira EN QUÉ SE
+      // VA LA PLATA. El subtítulo nombra el ítem y el precio, que es lo que no está en ningún otro
+      // lado del sistema: el resto de CxP trabaja con el total de la factura.
+      { label: "Gasto por ítem", descripcion: "Qué compramos y a qué precio", to: "/cxp/gasto", icon: Tags, permiso: "cxp.gasto" },
       { label: "Importar", descripcion: "Excel o XML de facturación", to: "/cxp/importar", icon: Upload, permiso: "cxp.importar" },
       // La recepción por correo va JUNTO a Importar: son las dos puertas de lo mismo —una a mano y
       // otra sola—, y ponerlas separadas haría que nadie encuentre la automática.
@@ -249,6 +259,12 @@ export const MODULES: NavModule[] = [
       { label: "Empleados", descripcion: "Fichas, salarios y deducciones", to: "/rrhh/empleados", icon: Users },
       { label: "Corridas", descripcion: "Pago del período + horas extra y bonos", to: "/rrhh/corridas", icon: Calculator },
       { label: "Vacaciones e incapacidades", descripcion: "Registrar días disfrutados y boletas de la CCSS", to: "/rrhh/ausencias", icon: CalendarDays },
+      // Las dos puertas del autoservicio (mig 0092). Llevan SU PROPIO permiso, no `rrhh.ver`: esa
+      // es toda la función. Y el nombre es parte de ella —ya nos costó una vez que horas extra y
+      // vacaciones existieran y nadie las hallara porque el menú decía «Ausencias»—, así que acá
+      // dice textualmente lo que la persona viene a hacer.
+      { label: "Pedir mis vacaciones", descripcion: "Tu saldo y tus solicitudes", to: "/rrhh/mis-vacaciones", icon: CalendarDays, permiso: "rrhh.vacaciones.mias" },
+      { label: "Vacaciones del equipo", descripcion: "Aprobar los días de tu gente", to: "/rrhh/vacaciones-equipo", icon: UserCheck, permiso: "rrhh.vacaciones.equipo" },
       { label: "Finiquitos", descripcion: "Cese conforme al CT + provisiones", to: "/rrhh/finiquitos", icon: HandCoins },
       { label: "Parámetros", descripcion: "Cargas, renta y conceptos", to: "/rrhh/parametros", icon: SlidersHorizontal },
     ],

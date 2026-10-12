@@ -3,6 +3,7 @@ package cxp
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -76,6 +77,35 @@ func (h *Handler) MacroLote(c *gin.Context) {
 	if err != nil {
 		h.responderError(c, err, "macro-lote")
 		return
+	}
+	// UNA MACRO POR MONEDA. Una transferencia en dólares sale de una cuenta en dólares, y el banco
+	// no acepta las dos cosas en la misma carga; mezclarlas mandaba un monto sin moneda y lo
+	// decidía la cuenta desde la que alguien subiera el archivo.
+	//
+	// El lote NO se parte —«sin perder la integridad del mismo»—: lo que se separa es el archivo.
+	// Sin `?moneda=`, un lote de una sola moneda baja esa y uno mixto contesta qué hay, para que
+	// nadie se lleve media macro creyendo que son todas las líneas.
+	moneda := strings.ToUpper(strings.TrimSpace(c.Query("moneda")))
+	if grupos := SepararPorMoneda(rows, 0); len(grupos) > 1 && moneda == "" {
+		detalle := make([]gin.H, 0, len(grupos))
+		for _, g := range grupos {
+			detalle = append(detalle, gin.H{"moneda": g.Moneda, "lineas": len(g.Lineas), "total": g.Total})
+		}
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"code": "MACRO_MIXTA",
+			"message": "Este lote tiene facturas en más de una moneda y cada una va en su propio " +
+				"archivo. Pedí la macro indicando la moneda.",
+			"monedas": detalle,
+		})
+		return
+	} else if moneda != "" {
+		if rows = LineasDeMoneda(rows, moneda); len(rows) == 0 {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{
+				"code":    "MACRO_SIN_ESA_MONEDA",
+				"message": "Este lote no tiene ninguna factura en " + moneda + ".",
+			})
+			return
+		}
 	}
 	// GUARDARRAÍL: una macro SIN LÍNEAS no se baja.
 	//

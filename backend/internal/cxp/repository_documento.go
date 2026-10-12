@@ -175,8 +175,21 @@ func (r *pgRepository) CrearDocumento(ctx context.Context, empresaID string, in 
 		SELECT $1::uuid, p.id,
 		       COALESCE(NULLIF($3, ''), 'INT-' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 10)),
 		       NULLIF($4, ''), $5::date, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), $14::uuid,
-		       COALESCE(NULLIF($15, '')::date,
-		                CASE WHEN p.condicion_pago = 'CREDITO' THEN $5::date + p.plazo_credito_dias END),
+		       -- DE DÓNDE SALE EL VENCIMIENTO (mig 0095).
+		       --
+		       -- Con plazo_manda = 'PROVEEDOR' gana el convenio: emisión + el plazo de la ficha,
+		       -- aunque el comprobante traiga otro. Es el caso del proveedor que declara 90 días en
+		       -- su catálogo y tiene pactado otro — medido: 154 facturas de 36 proveedores con el
+		       -- vencimiento del XML distinto del plazo pactado.
+		       --
+		       -- Con 'XML' (el default, y lo que el sistema hacía siempre) manda el comprobante y
+		       -- el plazo de la ficha solo se usa si el XML no trajo vencimiento.
+		       CASE WHEN p.plazo_manda = 'PROVEEDOR' AND p.condicion_pago = 'CREDITO'
+		            THEN $5::date + p.plazo_credito_dias
+		            ELSE COALESCE(NULLIF($15, '')::date,
+		                          CASE WHEN p.condicion_pago = 'CREDITO'
+		                               THEN $5::date + p.plazo_credito_dias END)
+		       END,
 		       COALESCE(NULLIF($16, ''), 'CXP'),
 		       p.gasto_concepto_id, p.gasto_clasificacion_id, p.gasto_subclasificacion_id, (p.gasto_concepto_id IS NOT NULL),
 		       -- Enrutamiento automático: hereda el departamento (centro de costo) del proveedor.

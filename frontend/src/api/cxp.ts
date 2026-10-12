@@ -51,6 +51,8 @@ export interface Proveedor {
   /** Condiciones de crédito: CONTADO o CREDITO + plazo en días. */
   condicion_pago: "CONTADO" | "CREDITO";
   plazo_credito_dias: number;
+  /** De dónde sale el vencimiento de sus facturas: «XML» (el comprobante) o «PROVEEDOR» (este plazo). */
+  plazo_manda: "XML" | "PROVEEDOR";
   /** Gasto predeterminado (memoria AUTO): sus facturas nacen pre-clasificadas con esto. */
   gasto_concepto_id: string;
   gasto_clasificacion_id: string;
@@ -76,6 +78,7 @@ export interface ProveedorInput {
   exento_iva?: boolean;
   condicion_pago?: string;
   plazo_credito_dias?: number;
+  plazo_manda?: "XML" | "PROVEEDOR";
   gasto_concepto_id?: string;
   gasto_clasificacion_id?: string;
   gasto_subclasificacion_id?: string;
@@ -1475,8 +1478,19 @@ export const cxpApi = {
     return apiFetch<LotePago[]>("/cxp/lotes", { method: "GET" });
   },
   /** Descarga la macro (.txt) de un lote. */
-  descargarMacroLote(loteId: string): Promise<Blob> {
-    return apiFetch<Blob>(`/cxp/lotes/${loteId}/macro`, { method: "GET", blob: true });
+  /**
+   * La macro del lote. `moneda` baja SOLO las líneas de esa moneda.
+   *
+   * Un lote mixto sin moneda responde 422 `MACRO_MIXTA` con qué hay de cada una: una
+   * transferencia en dólares sale de una cuenta en dólares y el banco no acepta las dos en la
+   * misma carga, así que bajar «la macro» a secas entregaría media y nadie lo notaría.
+   */
+  descargarMacroLote(loteId: string, moneda?: string): Promise<Blob> {
+    return apiFetch<Blob>(`/cxp/lotes/${loteId}/macro`, {
+      method: "GET",
+      blob: true,
+      query: moneda ? { moneda } : undefined,
+    });
   },
   /** «Lo que se va a pagar»: una entrada por transferencia, con el detalle de sus facturas. */
   reporteLote(loteId: string): Promise<ReporteLote> {
@@ -2012,3 +2026,167 @@ export interface VistaComprobante {
   otros_en_el_archivo: number;
   comprobante: Comprobante | null;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Análisis de gasto por ítem (CABYS) — 9-oct-2026
+//
+// Todo el detalle de qué se compra vive en el XML de Hacienda, línea por línea. El parser ya lo
+// leía y el visor lo mostraba de a una factura; lo que faltaba era guardarlo para poder mirarlo
+// a través de todas. Estos tipos son el espejo de `internal/cxp/gasto.go`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Un ítem del gasto: un código CABYS con todo lo que se le compró. */
+export interface ItemGasto {
+  cabys: string;
+  /** La descripción que MÁS usaron los proveedores para este código, no una etiqueta del sistema. */
+  descripcion: string;
+  descripciones: number;
+  gasto_crc: string;
+  lineas: number;
+  facturas: number;
+  proveedores: number;
+  unidad: string;
+  /** Con más de una unidad de medida, los precios vienen vacíos: no se pueden comparar. */
+  unidades: number;
+  cantidad: string;
+  precio_min: string;
+  precio_max: string;
+  precio_ultimo: string;
+  /** (máx − mín) / mín × 100. Vacío cuando no hay con qué comparar. */
+  variacion_pct: string;
+  ultima_compra: string;
+  /** Líneas de facturas en otra moneda SIN tipo de cambio: no entraron en el monto. */
+  sin_convertir: number;
+}
+
+/** Una compra concreta de un ítem. */
+export interface CompraDeItem {
+  fecha: string;
+  proveedor: string;
+  proveedor_id: string;
+  documento_id: string;
+  consecutivo: string;
+  detalle: string;
+  moneda: string;
+  cantidad: string;
+  unidad: string;
+  precio_unitario: string;
+  total: string;
+}
+
+/**
+ * Sobre QUÉ PARTE del gasto se está hablando.
+ *
+ * Es lo primero que se pinta y no una nota al pie: una lista hecha con el 2 % de las facturas es
+ * verdadera y a la vez engañosa si nadie dice que es el 2 %.
+ */
+export interface CoberturaGasto {
+  facturas: number;
+  facturas_con_detalle: number;
+  monto_total: string;
+  monto_con_detalle: string;
+  porcentaje_monto: string;
+  lineas_sin_cabys: number;
+  lineas_sin_convertir: number;
+}
+
+export interface AnalisisGasto {
+  cobertura: CoberturaGasto;
+  items: ItemGasto[];
+  /** La suma de TODOS los ítems del filtro, no solo de los que se devuelven. */
+  total: string;
+  items_total: number;
+}
+
+/** Una línea de factura ya guardada. */
+export interface LineaFactura {
+  linea: number;
+  numero_linea: string;
+  cabys: string;
+  codigo_comercial: string;
+  detalle: string;
+  unidad_medida: string;
+  cantidad: string;
+  precio_unitario: string;
+  descuento: string;
+  impuesto: string;
+  total: string;
+}
+
+/** Un XML que no terminó en ninguna factura, con el motivo en palabras. */
+export interface XMLSinDestino {
+  nombre: string;
+  clave?: string;
+  motivo: string;
+}
+
+export interface FacturaConDetalle {
+  documento_id: string;
+  consecutivo: string;
+  proveedor: string;
+  clave: string;
+  lineas: number;
+  reemplazo: boolean;
+}
+
+export interface ResultadoDetalleCarga {
+  archivos: number;
+  comprobantes: number;
+  facturas: number;
+  lineas: number;
+  reemplazos: number;
+  cargadas: FacturaConDetalle[];
+  /** Facturas que existen en Hacienda y NO en el sistema. Es el hallazgo, no el descarte. */
+  sin_factura: XMLSinDestino[];
+  problemas: XMLSinDestino[];
+}
+
+export interface FiltrosGasto {
+  desde?: string;
+  hasta?: string;
+  proveedor_id?: string;
+  q?: string;
+  limite?: number;
+}
+
+export const gastoApi = {
+  /** La lista de todo lo que se compra, por CABYS, con la cobertura adelante. */
+  analisis(f: FiltrosGasto = {}): Promise<AnalisisGasto> {
+    return apiFetch<AnalisisGasto>("/cxp/gasto", {
+      method: "GET",
+      query: {
+        desde: f.desde || undefined,
+        hasta: f.hasta || undefined,
+        proveedor_id: f.proveedor_id || undefined,
+        q: f.q || undefined,
+        limite: f.limite || undefined,
+      },
+    });
+  },
+  /** Cada compra de un ítem, de la más reciente a la más vieja. */
+  compras(cabys: string, f: FiltrosGasto = {}): Promise<{ compras: CompraDeItem[] }> {
+    return apiFetch<{ compras: CompraDeItem[] }>(`/cxp/gasto/${encodeURIComponent(cabys)}`, {
+      method: "GET",
+      query: {
+        desde: f.desde || undefined,
+        hasta: f.hasta || undefined,
+        proveedor_id: f.proveedor_id || undefined,
+        q: f.q || undefined,
+      },
+    });
+  },
+  /** El detalle guardado de UNA factura. */
+  lineasDeDocumento(id: string): Promise<{ lineas: LineaFactura[] }> {
+    return apiFetch<{ lineas: LineaFactura[] }>(`/cxp/documentos/${id}/lineas`, { method: "GET" });
+  },
+  /**
+   * Sube los XML y reparte el detalle. El emparejamiento lo hace el SERVIDOR por la clave que
+   * viene DENTRO de cada archivo: a qué factura va cada uno no viaja en la petición, porque
+   * entonces bastaría con cambiarlo para colgarle a una factura el detalle de otra.
+   */
+  cargarXML(archivos: File[]): Promise<ResultadoDetalleCarga> {
+    const fd = new FormData();
+    for (const a of archivos) fd.append("archivos", a);
+    return apiFetch<ResultadoDetalleCarga>("/cxp/detalle/xml", { method: "POST", raw: fd });
+  },
+};

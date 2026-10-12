@@ -111,6 +111,66 @@ function detalleIBAN(err: unknown): string {
   return ` ${texto}${filas.length > 3 ? ` y ${filas.length - 3} más` : ""}`;
 }
 
+/** Descarga un blob con el nombre dado. */
+function descargar(blob: Blob, nombre: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombre;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Baja la macro del lote, UNA POR MONEDA.
+ *
+ * Una transferencia en dólares sale de una cuenta en dólares y el banco no acepta las dos cosas en
+ * la misma carga, así que un lote mixto son dos archivos. El servidor se niega a entregar «la
+ * macro» a secas de un lote mixto (422 MACRO_MIXTA) justamente para que nadie se lleve media
+ * creyendo que son todas las líneas; acá se leen las monedas que contestó y se bajan las dos, cada
+ * una con su nombre.
+ */
+async function bajarMacro(
+  loteId: string,
+  numero: string | number,
+  toast: { success: (m: string) => void; error: (m: string) => void },
+) {
+  const unArchivo = async (moneda?: string) => {
+    const blob = await cxpApi.descargarMacroLote(loteId, moneda);
+    descargar(blob, `macro-lote-${numero}${moneda ? `-${moneda}` : ""}.txt`);
+  };
+  try {
+    await unArchivo();
+  } catch (err) {
+    const monedas = monedasDelError(err);
+    if (monedas.length === 0) {
+      toast.error(mensajeError(err) + detalleIBAN(err));
+      return;
+    }
+    // Lote mixto: se baja un archivo por moneda y se dice cuántos son, porque el navegador los
+    // deja caer sin ceremonia y es fácil creer que bajó uno solo.
+    try {
+      for (const m of monedas) await unArchivo(m);
+      toast.success(
+        `Este lote tiene ${monedas.length} monedas: se bajaron ${monedas.length} archivos (${monedas.join(", ")}). ` +
+          `Cada uno se sube desde la cuenta de SU moneda.`,
+      );
+    } catch (err2) {
+      toast.error(mensajeError(err2) + detalleIBAN(err2));
+    }
+  }
+}
+
+/** Las monedas que el 422 MACRO_MIXTA enumeró, o vacío si el error es otro. */
+function monedasDelError(err: unknown): string[] {
+  if (!(err instanceof ApiError) || err.body?.["code"] !== "MACRO_MIXTA") return [];
+  const filas = err.body?.["monedas"];
+  if (!Array.isArray(filas)) return [];
+  return (filas as { moneda?: string }[]).map((f) => f.moneda ?? "").filter(Boolean);
+}
+
 type FaseKey = "rec" | "val" | "apr" | "cnt" | "pag" | "bco" | "pgd" | "arc" | "abi";
 
 const FASE_KEYS: FaseKey[] = ["rec", "val", "apr", "cnt", "pag", "bco", "pgd", "arc", "abi"];
@@ -1021,22 +1081,38 @@ export function BandejaPage() {
                   let bajada = false;
                   try {
                     const blob = await cxpApi.descargarMacroLote(lote.id);
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = `macro-lote-${lote.numero}.txt`;
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-                    URL.revokeObjectURL(url);
+                    descargar(blob, `macro-lote-${lote.numero}.txt`);
                     bajada = true;
                   } catch (err) {
-                    // Antes esto se tragaba en silencio y el toast decía «macro descargada» igual.
-                    // Decir que se bajó un archivo que no se bajó es peor que no bajarlo.
-                    toast.error(
-                      `Lote #${lote.numero} creado, pero la macro no se pudo generar: ${mensajeError(err)}` +
-                        detalleIBAN(err),
-                    );
+                    // Lote mixto: son DOS archivos, uno por moneda. Se bajan los dos y se avisa,
+                    // en vez de tratarlo como un fallo: el corte salió bien, lo que cambia es que
+                    // cada moneda se sube desde la cuenta de su moneda.
+                    const monedas = monedasDelError(err);
+                    if (monedas.length > 0) {
+                      try {
+                        for (const m of monedas) {
+                          const blob = await cxpApi.descargarMacroLote(lote.id, m);
+                          descargar(blob, `macro-lote-${lote.numero}-${m}.txt`);
+                        }
+                        toast.success(
+                          `Lote #${lote.numero}: ${monedas.length} archivos (${monedas.join(", ")}), ` +
+                            `uno por moneda. Cada uno se sube desde la cuenta de SU moneda.`,
+                        );
+                        bajada = true;
+                      } catch (err2) {
+                        toast.error(
+                          `Lote #${lote.numero} creado, pero la macro no se pudo generar: ${mensajeError(err2)}` +
+                            detalleIBAN(err2),
+                        );
+                      }
+                    } else {
+                      // Antes esto se tragaba en silencio y el toast decía «macro descargada» igual.
+                      // Decir que se bajó un archivo que no se bajó es peor que no bajarlo.
+                      toast.error(
+                        `Lote #${lote.numero} creado, pero la macro no se pudo generar: ${mensajeError(err)}` +
+                          detalleIBAN(err),
+                      );
+                    }
                   }
                   if (bajada) {
                     // `cantidad` son FACTURAS. En el modo agrupado no son lo mismo que los pagos, y
@@ -1087,19 +1163,7 @@ export function BandejaPage() {
           onReintentar={(id) => accion([id], "reintentar", "De vuelta en Por pagar")}
           onReporte={(loteId, numero) => setViendoReporte({ loteId, numero })}
           onMacro={async (loteId, numero) => {
-            try {
-              const blob = await cxpApi.descargarMacroLote(loteId);
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = `macro-lote-${numero}.txt`;
-              document.body.appendChild(a);
-              a.click();
-              a.remove();
-              URL.revokeObjectURL(url);
-            } catch (err) {
-              toast.error(mensajeError(err) + detalleIBAN(err));
-            }
+            await bajarMacro(loteId, numero, toast);
           }}
           puedePagar={puedePagar}
           pendiente={trans.isPending}
@@ -1528,8 +1592,23 @@ function CeldaVence({ d }: { d: Documento }) {
     </TD>
   );
 }
-// Monto: muestra el neto a pagar cuando hay anticipos aplicados (con el total original de contexto).
+/**
+ * Monto: EN LA MONEDA DE LA FACTURA.
+ *
+ * Hasta el 9-oct-2026 esta celda pintaba `total_crc` con «CRC» fijo, así que una factura en dólares
+ * se veía convertida a colones y nada lo decía: «las facturas que entran en dólares se están
+ * convirtiendo en colones, y eso está mal — en la operativa diaria las facturas de dólares se pagan
+ * en dólares». El detalle de la factura siempre lo mostró bien; era la lista, que es donde se
+ * trabaja todos los días, la que mentía.
+ *
+ * El equivalente en colones no se pierde: va debajo, en chico, y SOLO cuando la factura no es en
+ * colones. Para una factura en colones sería el mismo número dos veces.
+ */
 function CeldaMonto({ d }: { d: Documento }) {
+  const moneda = d.moneda || "CRC";
+  const esExtranjera = moneda !== "CRC";
+  // Los anticipos solo netean entre colones (ErrMonedaNoNeteable), así que el neto siempre es
+  // CRC y solo aparece en facturas en colones.
   if (toNumber(d.anticipos_aplicados) > 0) {
     return (
       <TD className="text-right tabular-nums">
@@ -1543,7 +1622,21 @@ function CeldaMonto({ d }: { d: Documento }) {
       </TD>
     );
   }
-  return <TD className="text-right tabular-nums">{formatMoneda(d.total_crc, "CRC")}</TD>;
+  return (
+    <TD className="text-right tabular-nums">
+      <span className={cn("block", esExtranjera && "font-medium text-accent")}>
+        {formatMoneda(d.total, moneda)}
+      </span>
+      {esExtranjera && (
+        <span
+          className="block text-[10.5px] text-content-muted"
+          title="Equivalente en colones con el tipo de cambio de la factura. Se paga en la moneda de arriba."
+        >
+          ≈ {formatMoneda(d.total_crc, "CRC")}
+        </span>
+      )}
+    </TD>
+  );
 }
 
 /**
@@ -1884,7 +1977,7 @@ function ValidarDialog({
       <div className="w-full max-w-md rounded-xl border border-border bg-surface-raised p-5 shadow-lifted">
         <h2 className="mb-1 text-base font-semibold text-content">Validar — {doc.proveedor}</h2>
         <p className="mb-3 text-xs text-content-muted">
-          {gastoRuta(doc) || "Gasto sin clasificar"} · {formatMoneda(doc.total_crc, "CRC")} · {doc.departamento || "sin departamento"}
+          {gastoRuta(doc) || "Gasto sin clasificar"} · {formatMoneda(doc.total, doc.moneda || "CRC")} · {doc.departamento || "sin departamento"}
         </p>
         <div className="mb-3 flex flex-col gap-1.5">
           {preguntas.map((q, i) => (
@@ -1949,7 +2042,7 @@ function EscalarDialog({
       <div className="w-full max-w-md rounded-xl border border-border bg-surface-raised p-5 shadow-lifted">
         <h2 className="mb-1 text-base font-semibold text-content">Validar por escalamiento — {doc.proveedor}</h2>
         <p className="mb-3 text-xs text-content-muted">
-          {gastoRuta(doc) || "Gasto sin clasificar"} · {formatMoneda(doc.total_crc, "CRC")} · {doc.departamento || "sin departamento"}
+          {gastoRuta(doc) || "Gasto sin clasificar"} · {formatMoneda(doc.total, doc.moneda || "CRC")} · {doc.departamento || "sin departamento"}
         </p>
         <div className="mb-3 rounded-lg border border-pendiente/40 bg-pendiente/10 px-3 py-2 text-[12.5px] text-content">
           ⚠ Solo procede si el área <b>no tiene validador asignado</b> o la factura <b>ya está vencida</b>. Queda registrado como <b>escalamiento</b> a tu nombre (no podrás además aprobarla).

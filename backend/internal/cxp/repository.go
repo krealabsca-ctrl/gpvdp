@@ -168,6 +168,17 @@ type Repository interface {
 	// que corresponde uno a uno con un archivo del banco.
 	PagosSinComprobante(ctx context.Context, empresaID, loteID string, soloFaltantes bool) ([]PagoConRecibo, error)
 
+	// Detalle de factura: las líneas del XML (CABYS, cantidad, precio unitario) guardadas para
+	// poder analizar QUÉ se compró, no solo cuánto se pagó.
+	DocumentoDeClave(ctx context.Context, empresaID, clave string) (DocumentoBreve, error)
+	GuardarDetalle(ctx context.Context, empresaID, documentoID string, lineas []LineaDetalle) error
+	LineasDeDocumento(ctx context.Context, empresaID, documentoID string) ([]LineaGuardada, error)
+	// Análisis de gasto: el detalle agrupado por CABYS. Devuelve además el total de TODOS los
+	// ítems del filtro y cuántos son, porque la lista viene recortada.
+	ItemsDeGasto(ctx context.Context, empresaID string, f FiltrosGasto) ([]ItemGasto, string, int, error)
+	CoberturaDeGasto(ctx context.Context, empresaID string, f FiltrosGasto) (CoberturaGasto, error)
+	ComprasDeItem(ctx context.Context, empresaID, cabys string, f FiltrosGasto) ([]CompraDeItem, error)
+
 	// Recepción de facturas por buzón de correo (etapa 2 de la ingesta).
 	CedulasDeEmpresa(ctx context.Context, empresaID string) ([]string, error)
 	CrearFuente(ctx context.Context, empresaID string, in FuenteInput, tokenHash, usuarioID string) (FuenteRecepcion, error)
@@ -223,7 +234,7 @@ func NewRepository(pool *pgxpool.Pool) Repository { return &pgRepository{pool: p
 
 const proveedorCols = `id::text, nombre, COALESCE(tipo_identificacion, ''), COALESCE(identificacion, ''),
 	COALESCE(email, ''), COALESCE(telefono, ''), COALESCE(iban, ''), retencion_renta_pct::text, exento_iva, activo,
-	condicion_pago, plazo_credito_dias,
+	condicion_pago, plazo_credito_dias, plazo_manda,
 	COALESCE(gasto_concepto_id::text, ''), COALESCE(gasto_clasificacion_id::text, ''), COALESCE(gasto_subclasificacion_id::text, ''),
 	COALESCE(departamento, ''), es_contabilidad`
 
@@ -233,7 +244,7 @@ func scanProveedor(row scanner) (Proveedor, error) {
 	var p Proveedor
 	err := row.Scan(&p.ID, &p.Nombre, &p.TipoIdentificacion, &p.Identificacion, &p.Email,
 		&p.Telefono, &p.IBAN, &p.RetencionRentaPct, &p.ExentoIVA, &p.Activo,
-		&p.CondicionPago, &p.PlazoCreditoDias,
+		&p.CondicionPago, &p.PlazoCreditoDias, &p.PlazoManda,
 		&p.GastoConceptoID, &p.GastoClasificacionID, &p.GastoSubclasificacionID,
 		&p.Departamento, &p.EsContabilidad)
 	return p, err
@@ -362,6 +373,9 @@ func (r *pgRepository) Actualizar(ctx context.Context, empresaID, id string, in 
 		    email = NULLIF($6, ''), telefono = NULLIF($7, ''), iban = NULLIF($8, ''),
 		    retencion_renta_pct = $9, exento_iva = $10,
 		    condicion_pago = COALESCE(NULLIF($11, ''), 'CONTADO'), plazo_credito_dias = $12,
+		    -- Vacío conserva lo que ya estaba: una edición que no toca este campo no puede
+		    -- devolverle el proveedor al plazo del XML sin que nadie lo pida (mig 0095).
+		    plazo_manda = COALESCE(NULLIF($17, ''), plazo_manda),
 		    gasto_concepto_id = (SELECT c.id FROM concepto c WHERE c.id = NULLIF($13, '')::uuid AND c.empresa_id = $1::uuid AND c.visible_cxp),
 		    gasto_clasificacion_id = (SELECT cl.id FROM clasificacion cl WHERE cl.id = NULLIF($14, '')::uuid AND cl.empresa_id = $1::uuid),
 		    gasto_subclasificacion_id = (SELECT sc.id FROM subclasificacion sc WHERE sc.id = NULLIF($15, '')::uuid AND sc.empresa_id = $1::uuid),

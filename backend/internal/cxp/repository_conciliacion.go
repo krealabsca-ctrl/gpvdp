@@ -11,7 +11,18 @@ import (
 // netoAPagarSQL es LA definición de lo que sale del banco por una factura: total menos la
 // retención menos los anticipos aplicados. La comparten el archivo de pago y la verificación de
 // la huella, para que no puedan divergir.
-const netoAPagarSQL = `GREATEST(d.total - d.retencion - COALESCE((SELECT SUM(aa.monto_crc) FROM anticipo_aplicacion aa WHERE aa.factura_id = d.id AND aa.activo), 0), 0)`
+// netoAPagarSQL es lo que de verdad se le transfiere al proveedor, EN LA MONEDA DE LA FACTURA.
+//
+// `d.total` y `d.retencion` están en la moneda de la factura; `aa.monto_crc`, como su nombre dice,
+// en COLONES. Restarlos sin mirar la moneda era mezclar: a una factura de USD 1.000 con un
+// anticipo de ₡100.000 aplicado le quedaba «1000 − 100000» y el GREATEST la dejaba en CERO. El
+// proveedor habría recibido una transferencia por nada.
+//
+// Por eso la resta de anticipos se acota a las facturas en colones. No es una omisión: los
+// anticipos SOLO existen en colones —las tres consultas que los listan filtran `moneda = 'CRC'`—,
+// así que una factura en dólares no puede tener ninguno, y el service además lo impide al aplicar.
+// El día que haya anticipos en dólares, esto tiene que pasar a comparar `aa.moneda = d.moneda`.
+const netoAPagarSQL = `GREATEST(d.total - d.retencion - COALESCE((SELECT SUM(aa.monto_crc) FROM anticipo_aplicacion aa WHERE aa.factura_id = d.id AND aa.activo AND d.moneda = 'CRC'), 0), 0)`
 
 // NetoAPagar devuelve el neto de un documento (mismo cálculo que el archivo de pago).
 func (r *pgRepository) NetoAPagar(ctx context.Context, empresaID, docID string) (string, error) {

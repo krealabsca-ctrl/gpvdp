@@ -69,8 +69,16 @@ func TestCatalogoSinDuplicados(t *testing.T) {
 	// en la tabla `permiso` desde su migración y el router los exigía en nueve rutas; lo que faltaba
 	// era nombrarlos acá, que es de donde se dibuja la matriz de Seguridad. Sin eso no había check
 	// que marcar y la función quedaba apagada para todo rol que no fuera ADMIN.
-	if len(Catalogo) != 85 {
-		t.Errorf("catálogo tiene %d permisos, se esperaban 85", len(Catalogo))
+	// → 87 con el autoservicio de vacaciones (8-oct-2026). `rrhh.vacaciones.mias` y
+	// `rrhh.vacaciones.equipo` existen para que pedir o aprobar días libres no obligue a dar
+	// `rrhh.ver`, que abre quince rutas e incluye salarios, deducciones, finiquitos e
+	// incapacidades. Es el mismo problema que tenía «Ver Bancos» antes de la migración 0074.
+	// → 90 con el análisis de gasto por ítem (9-oct-2026). `cxp.gasto` abre la pantalla que lee el
+	// detalle (CABYS, cantidad, precio unitario) del XML de cada factura. Va aparte de
+	// `cxp.dashboard` porque son dos preguntas distintas —cómo va el PROCESO contra en qué se va
+	// la plata— aunque hoy lo reciban los mismos roles.
+	if len(Catalogo) != 90 {
+		t.Errorf("catálogo tiene %d permisos, se esperaban 90", len(Catalogo))
 	}
 }
 

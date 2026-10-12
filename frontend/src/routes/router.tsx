@@ -8,6 +8,7 @@ import { NotFoundPage } from "@/routes/NotFoundPage";
 // Módulo Bancos (Fase 1 + Bandeja de clasificación Fase A)
 import { DashboardPage } from "@/features/bancos/pages/DashboardPage";
 import { ImportadorPage } from "@/features/bancos/pages/ImportadorPage";
+import { DuplicadosPage } from "@/features/bancos/pages/DuplicadosPage";
 import { PagosExternosPage } from "@/features/bancos/pages/PagosExternosPage";
 import { ClasificarPage } from "@/features/bancos/pages/ClasificarPage";
 import { CatalogoPage } from "@/features/bancos/pages/CatalogoPage";
@@ -39,6 +40,7 @@ import { DocumentoDetailPage } from "@/features/cxp/pages/DocumentoDetailPage";
 import { ImportarPage } from "@/features/cxp/pages/ImportarPage";
 import { RecepcionPage } from "@/features/cxp/pages/RecepcionPage";
 import { ComprobantesPage } from "@/features/cxp/pages/ComprobantesPage";
+import { GastoPage } from "@/features/cxp/pages/GastoPage";
 import { FuentesRecepcionPage } from "@/features/cxp/pages/FuentesRecepcionPage";
 import { DashboardCxpPage } from "@/features/cxp/pages/DashboardCxpPage";
 import { ResponsabilidadesPage } from "@/features/cxp/pages/ResponsabilidadesPage";
@@ -59,6 +61,8 @@ import { ParametrosNominaPage } from "@/features/rrhh/pages/ParametrosNominaPage
 import { CorridasPage } from "@/features/rrhh/pages/CorridasPage";
 import { FiniquitosPage } from "@/features/rrhh/pages/FiniquitosPage";
 import { AusenciasPage } from "@/features/rrhh/pages/AusenciasPage";
+import { MisVacacionesPage } from "@/features/rrhh/pages/MisVacacionesPage";
+import { VacacionesEquipoPage } from "@/features/rrhh/pages/VacacionesEquipoPage";
 import { DashboardRRHHPage } from "@/features/rrhh/pages/DashboardRRHHPage";
 import { ExistenciasPage } from "@/features/inventario/pages/ExistenciasPage";
 import { EntradasPage } from "@/features/inventario/pages/EntradasPage";
@@ -104,6 +108,8 @@ export const router = createBrowserRouter([
           { index: true, element: <DashboardPage /> },
           { path: "importador", element: <ImportadorPage /> },
           { path: "pagos-externos", element: <PagosExternosPage /> },
+          // Sacar de los libros un movimiento que el banco cargó dos veces (mig 0093).
+          { path: "duplicados", element: <DuplicadosPage /> },
           { path: "clasificar", element: <ClasificarPage /> },
           // Rutas viejas → Clasificar (Movimientos y Revisar se fundieron en la Bandeja).
           { path: "movimientos", element: <Navigate to="/clasificar" replace /> },
@@ -136,6 +142,7 @@ export const router = createBrowserRouter([
           // Los recibos del banco de una corrida entera: se sueltan los cien archivos y cada uno
           // se pega solo a su factura leyendo el código del nombre.
           { path: "cxp/comprobantes", element: <ComprobantesPage /> },
+          { path: "cxp/gasto", element: <GastoPage /> },
           { path: "cxp/proveedores", element: <ProveedoresPage /> },
           { path: "cxp/anticipos", element: <AnticiposPage /> },
           { path: "cxp/cajas", element: <CajaChicaPage /> },
@@ -167,6 +174,10 @@ export const router = createBrowserRouter([
           { path: "rrhh/empleados", element: <EmpleadosPage /> },
           { path: "rrhh/corridas", element: <CorridasPage /> },
           { path: "rrhh/ausencias", element: <AusenciasPage /> },
+          // Autoservicio de vacaciones (mig 0092): ninguna de las dos abre las quince rutas de
+          // `rrhh.ver`, así que pedir o aprobar días no cuesta ver salarios ni incapacidades.
+          { path: "rrhh/mis-vacaciones", element: <MisVacacionesPage /> },
+          { path: "rrhh/vacaciones-equipo", element: <VacacionesEquipoPage /> },
           { path: "rrhh/finiquitos", element: <FiniquitosPage /> },
           { path: "rrhh/parametros", element: <ParametrosNominaPage /> },
           // Módulo Inventario (Fase 1): cofres, urnas y suministros por sede.

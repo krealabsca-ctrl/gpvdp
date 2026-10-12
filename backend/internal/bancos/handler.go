@@ -154,6 +154,24 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "fecha inválida (se espera YYYY-MM-DD)")
 	case errors.Is(err, ErrExportacionVacia):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, "no hay datos para exportar con ese filtro")
+	// Excluir un movimiento suelto (mig 0093). Los dos primeros son CONFLICTO y no «no
+	// encontrado»: el movimiento existe, lo que no corresponde es la acción sobre su estado
+	// actual, y su frase entera dice qué hacer en su lugar.
+	case errors.Is(err, ErrMovimientoNoExcluible), errors.Is(err, ErrMovimientoNoIncluible):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrMotivoExclusionRequerido), errors.Is(err, ErrRangoDuplicadosRequerido):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoPaquete(err))
+	// Dividir un movimiento (mig 0094). Cada causa lleva su frase entera porque cada una tiene un
+	// arreglo distinto —devolverlo a los libros, desenlazarlo de CxP, dividir el principal, bajar
+	// el monto—, y un «no se puede» a secas obliga a adivinar cuál es.
+	case errors.Is(err, ErrParteNoEncontrada):
+		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrMovimientoNoDivisible), errors.Is(err, ErrParteNoDivisible),
+		errors.Is(err, ErrMovimientoExcluidoNoSeDivide):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrMontoDivisionInvalido), errors.Is(err, ErrMontoDivisionExcede),
+		errors.Is(err, ErrDivisionConCxP), errors.Is(err, ErrDivisionSinClasificacion):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoPaquete(err))
 	// Dimensiones y presupuesto.
 	case errors.Is(err, ErrSedeNoEncontrada), errors.Is(err, ErrPresupuestoNoEncontrado),
 		errors.Is(err, ErrDepartamentoNoEncontrado):

@@ -46,7 +46,8 @@ func (r *pgRepository) VacacionParaAviso(ctx context.Context, empresaID, vacacio
 		       COALESCE(v.observaciones, '')
 		FROM vacacion v
 		JOIN empleado e ON e.id = v.empleado_id
-		WHERE v.empresa_id = $1::uuid AND v.id = $2::uuid AND NOT v.anulada`
+		WHERE v.empresa_id = $1::uuid AND v.id = $2::uuid AND NOT v.anulada
+		  AND v.estado IN ('` + VacacionAprobada + `', '` + VacacionConfirmada + `')`
 	var a VacacionAviso
 	err := r.pool.QueryRow(ctx, q, empresaID, vacacionID).Scan(
 		&a.EmpleadoID, &a.Nombre, &a.Email, &a.Dias, &a.FechaInicio, &a.FechaFin, &a.Observaciones)

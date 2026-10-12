@@ -340,6 +340,95 @@ export interface PlanHistorico {
   aviso: string;
 }
 
+// --- Sacar un movimiento de los libros (mig 0093) ---
+
+/** Un movimiento fuera de los libros por decisión de alguien, con su rastro. */
+export interface MovimientoExcluido {
+  id: string;
+  fecha: string;
+  documento: string;
+  debito: string;
+  credito: string;
+  descripcion: string;
+  cuenta: string;
+  banco: string;
+  motivo: string;
+  excluido_por: string;
+  excluido_en: string;
+  incluido: boolean;
+}
+
+export interface LadoDuplicado {
+  id: string;
+  documento: string;
+  descripcion: string;
+}
+
+/**
+ * Dos movimientos que podrían ser el mismo hecho cargado dos veces.
+ *
+ * Trae las SEÑALES, no un veredicto: el sistema propone y una persona decide. Está medido por qué
+ * — la regla de «mismos cuatro dígitos» a secas devolvía 84 pares que eran comisiones legítimas.
+ */
+export interface ParDuplicado {
+  fecha: string;
+  monto: string;
+  es_debito: boolean;
+  cuenta: string;
+  banco: string;
+  a: LadoDuplicado;
+  b: LadoDuplicado;
+  /** Los últimos cuatro dígitos del consecutivo coinciden. */
+  mismos_ultimos_4: boolean;
+  /** El consecutivo cambió de largo: huella de un cambio de formato del banco. */
+  largo_distinto: boolean;
+  /** La descripción cambió. Dos movimientos legítimos iguales traen la MISMA. */
+  descripcion_distinta: boolean;
+  /** Cuántas de las tres se cumplen (0 a 3). Lo cuenta el servidor. */
+  senales: number;
+}
+
+export interface RespuestaDuplicados {
+  pares: ParDuplicado[];
+  total: number;
+  /** Cuántos cumplen las TRES señales: es el número por el que se pregunta al abrir. */
+  con_las_tres: number;
+}
+
+// --- Dividir un movimiento entre partidas (mig 0094) ---
+
+/** Una de las caras de un movimiento repartido. */
+export interface ParteMovimiento {
+  id: string;
+  /** Distingue el movimiento original de las partes que se le apartaron. */
+  es_principal: boolean;
+  monto: string;
+  es_debito: boolean;
+  concepto: string;
+  clasificacion: string;
+  motivo: string;
+  incluido: boolean;
+}
+
+/**
+ * El reparto de un movimiento: el hecho bancario (uno) y sus partes.
+ *
+ * `monto_antes_de_dividir` y `suma_de_las_partes` viajan JUNTOS para que la pantalla pueda MOSTRAR
+ * la invariante en vez de prometerla: si alguna vez difieren, se ve.
+ */
+export interface DivisionMovimiento {
+  movimiento_id: string;
+  /** El hecho bancario no se reparte: misma fecha, consecutivo y descripción en todas las partes. */
+  fecha: string;
+  documento: string;
+  descripcion: string;
+  partes: ParteMovimiento[];
+  monto_antes_de_dividir: string;
+  suma_de_las_partes: string;
+  /** Lo calcula el servidor: las partes siguen sumando lo que trajo el banco. */
+  cuadra: boolean;
+}
+
 export interface ResultadoReversa {
   importacion_id: string;
   estado: EstadoImportacion;
@@ -1590,6 +1679,69 @@ export const bancosApi = {
       },
     });
   },
+  // --- Sacar UN movimiento de los libros (mig 0093) ---
+  //
+  // La contraparte a escala de una fila de `revertirImportacion`. Existe porque hasta ahora, para
+  // sacar un duplicado suelto, había que tirar abajo la carga entera.
+
+  /** Saca UN movimiento de los libros. El motivo es obligatorio y queda en auditoría. */
+  excluirMovimiento(movimientoId: string, motivo: string): Promise<{ ok: boolean }> {
+    return apiFetch<{ ok: boolean }>(`/bancos/movimientos/${movimientoId}/excluir`, {
+      method: "POST",
+      json: { motivo },
+    });
+  },
+  /** Lo devuelve a los libros. Solo sirve para los excluidos a mano. */
+  incluirMovimiento(movimientoId: string): Promise<{ ok: boolean }> {
+    return apiFetch<{ ok: boolean }>(`/bancos/movimientos/${movimientoId}/incluir`, { method: "POST" });
+  },
+  /** Lo que está fuera de los libros por decisión de alguien, con quién y por qué. */
+  movimientosExcluidos(): Promise<{ items: MovimientoExcluido[]; total: number }> {
+    return apiFetch<{ items: MovimientoExcluido[]; total: number }>("/bancos/movimientos/excluidos", {
+      method: "GET",
+    });
+  },
+  /**
+   * Pares que PODRÍAN ser el mismo hecho cargado dos veces. No excluye nada: propone.
+   *
+   * `senales` (0 a 3) lo cuenta el servidor, para que la pantalla no invente su propio criterio.
+   */
+  duplicadosSospechosos(desde: string, hasta: string): Promise<RespuestaDuplicados> {
+    return apiFetch<RespuestaDuplicados>("/bancos/movimientos/duplicados", {
+      method: "GET",
+      query: { desde, hasta },
+    });
+  },
+
+  // --- Dividir un movimiento entre partidas (mig 0094) ---
+
+  /**
+   * Aparta parte de un movimiento a otra clasificación.
+   *
+   * Devuelve el REPARTO COMPLETO, con `cuadra` calculado por el servidor: la invariante es del
+   * dominio y dos implementaciones de la misma comprobación son dos oportunidades de que una diga
+   * que cuadra cuando no.
+   */
+  dividirMovimiento(
+    movimientoId: string,
+    in_: { monto: string; concepto_id?: string; clasificacion_id: string; departamento_id?: string; sede_id?: string; motivo?: string },
+  ): Promise<DivisionMovimiento> {
+    return apiFetch<DivisionMovimiento>(`/bancos/movimientos/${movimientoId}/dividir`, {
+      method: "POST",
+      json: in_,
+    });
+  },
+  /** Devuelve UNA parte a su movimiento principal. El id es el de la parte. */
+  deshacerDivision(parteId: string): Promise<{ ok: boolean }> {
+    return apiFetch<{ ok: boolean }>(`/bancos/movimientos/${parteId}/deshacer-division`, {
+      method: "POST",
+    });
+  },
+  /** El reparto completo. Sirve con el id del principal o con el de cualquier parte. */
+  partesDeMovimiento(movimientoId: string): Promise<DivisionMovimiento> {
+    return apiFetch<DivisionMovimiento>(`/bancos/movimientos/${movimientoId}/partes`, { method: "GET" });
+  },
+
   /** Saca de los libros TODOS los movimientos de una carga. El motivo es obligatorio. */
   revertirImportacion(importacionId: string, motivo: string): Promise<ResultadoReversa> {
     return apiFetch<ResultadoReversa>(`/bancos/importaciones/${importacionId}/revertir`, {

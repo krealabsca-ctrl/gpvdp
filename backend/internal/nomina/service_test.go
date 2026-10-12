@@ -796,6 +796,47 @@ func (f *fakeRepo) AnularVacacion(_ context.Context, _, id string) error {
 	return ErrVacacionNoEncontrada
 }
 
+// ---- Autoservicio de vacaciones (mig 0092) ----
+//
+// Estos doce están acá SOLO para que el fake siga cumpliendo la interfaz. El autoservicio se prueba
+// contra PostgreSQL de verdad (vacaciones_autoservicio_pg_test.go) porque lo que hay que proteger
+// es el SQL: que un alcance vacío cierre, que el recorte por departamento viaje hasta el UPDATE y
+// que la lista de columnas no deje escapar un salario. Nada de eso lo puede demostrar un doble.
+
+func (f *fakeRepo) EmpleadoDeUsuario(context.Context, string, string) (string, error) {
+	return "", ErrSinEmpleadoLigado
+}
+func (f *fakeRepo) DepartamentosDeJefe(context.Context, string, string) ([]string, error) {
+	return nil, nil
+}
+func (f *fakeRepo) SaldoDeEmpleado(context.Context, string, string, decimal.Decimal) (SaldoVacaciones, error) {
+	return SaldoVacaciones{}, nil
+}
+func (f *fakeRepo) SaldosDeDepartamentos(context.Context, string, []string, decimal.Decimal) ([]SaldoVacaciones, error) {
+	return nil, nil
+}
+func (f *fakeRepo) SolicitarVacacion(ctx context.Context, empresaID string, in VacacionInput, diasPorMes decimal.Decimal, usuarioID string) (Vacacion, error) {
+	return Vacacion{}, nil
+}
+func (f *fakeRepo) MisVacaciones(context.Context, string, string) ([]SolicitudVacacion, error) {
+	return nil, nil
+}
+func (f *fakeRepo) VacacionesDeDepartamentos(context.Context, string, []string, bool) ([]SolicitudVacacion, error) {
+	return nil, nil
+}
+func (f *fakeRepo) CambiarEstadoVacacion(context.Context, string, string, string, string, string, string, []string) error {
+	return nil
+}
+func (f *fakeRepo) VacacionDeEmpleado(context.Context, string, string) (string, string, error) {
+	return "", "", ErrVacacionNoEncontrada
+}
+func (f *fakeRepo) ListarJefaturas(context.Context, string) ([]Jefatura, error) { return nil, nil }
+func (f *fakeRepo) AsignarJefatura(context.Context, string, string, string, string, string) error {
+	return nil
+}
+func (f *fakeRepo) QuitarJefatura(context.Context, string, string, string) error        { return nil }
+func (f *fakeRepo) LigarUsuarioAEmpleado(context.Context, string, string, string) error { return nil }
+
 func (f *fakeRepo) SaldosVacaciones(ctx context.Context, empresaID string, diasPorMes decimal.Decimal) ([]SaldoVacaciones, error) {
 	out := make([]SaldoVacaciones, 0, len(f.empleados))
 	for id := range f.empleados {

@@ -65,6 +65,7 @@ import {
   useResumenClasificacion,
 } from "@/features/bancos/hooks";
 import { ClasifCombobox, type ClasifElegida } from "@/features/bancos/components/ClasifCombobox";
+import { DividirMovimiento } from "@/features/bancos/components/DividirMovimiento";
 import { PatronesTab } from "@/features/bancos/components/PatronesTab";
 import { ResumenSeleccion } from "@/features/bancos/components/ResumenSeleccion";
 
@@ -528,6 +529,9 @@ function MovsTab({
   const [cuentaId, setCuentaId] = useState("");
   const [page, setPage] = useState(1);
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
+  // Qué movimiento está mostrando su reparto. Uno a la vez: dos paneles abiertos compiten por el
+  // mismo ancho y se pierde de vista cuál se está repartiendo.
+  const [dividiendo, setDividiendo] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setQDebounced(q.trim()), 300);
@@ -916,6 +920,18 @@ function MovsTab({
                           esDebito={esDebito}
                           onElegir={(c) => clasificarFila(m, c)}
                         />
+                        {/* Repartir el movimiento entre partidas (mig 0094): el recibo de luz
+                            que trae un proyecto especial adentro. Va DEBAJO del clasificador
+                            porque es la excepción —primero se intenta clasificar entero— y
+                            porque las dos cosas responden a la misma pregunta: a qué partida
+                            corresponde este gasto. */}
+                        <button
+                          type="button"
+                          className="mt-1 text-[11px] text-content-muted underline-offset-2 hover:underline"
+                          onClick={() => setDividiendo(dividiendo === m.id ? null : m.id)}
+                        >
+                          {dividiendo === m.id ? "cerrar el reparto" : "dividir entre partidas"}
+                        </button>
                       </TD>
                       {estado === "CLASIFICADO" && (
                         <TD>
@@ -927,6 +943,22 @@ function MovsTab({
                     </TR>
                   );
                 })}
+                {/* El panel del reparto va como una fila aparte, a todo el ancho: el formulario
+                    no cabe en una celda y partirlo en dos lugares haría perder de vista la
+                    invariante, que es lo único que hay que mirar al dividir. */}
+                {dividiendo && (
+                  <TR>
+                    <TD colSpan={estado === "CLASIFICADO" ? 8 : 7}>
+                      <DividirMovimiento
+                        movimientoId={dividiendo}
+                        esDebito={
+                          toNumber(items.find((x) => x.id === dividiendo)?.debito ?? "0") > 0
+                        }
+                        onCerrar={() => setDividiendo(null)}
+                      />
+                    </TD>
+                  </TR>
+                )}
               </TBody>
             </Table>
           </TableContainer>

@@ -48,6 +48,7 @@ import {
 } from "@/features/cxp/dominio";
 import { fraseEnvioOK } from "@/features/cxp/comprobanteDominio";
 import { HistorialEnvios } from "@/features/cxp/components/HistorialEnvios";
+import { DetalleLineasCard } from "@/features/cxp/components/DetalleLineasCard";
 import {
   useAdjuntarComprobante,
   useAnticiposDisponibles,
@@ -281,6 +282,10 @@ export function DocumentoDetailPage() {
             <AnticiposCard doc={doc} />
           </div>
         )}
+
+      {/* Qué se compró, línea por línea (del XML). Solo aparece si el detalle está cargado: la
+          inmensa mayoría de las facturas entró por Excel y trae solo el encabezado. */}
+      <DetalleLineasCard documentoId={doc.id} />
 
       {/* Facturas «de Contabilidad»: el check y la aprobación sin validación de área */}
       <ContabilidadCard doc={doc} />

@@ -376,8 +376,65 @@ export interface SaldoVacaciones {
   fecha_ingreso: string;
   meses_servicio: number;
   acumulado: string;
+  /** Solo lo CONFIRMADO: los días que la persona ya se tomó. */
   disfrutado: string;
+  /** Pedidos o aprobados y todavía sin disfrutar. Se muestra aparte o se pide dos veces lo mismo. */
+  reservado: string;
+  /** Lo que puede pedir hoy: acumulado − disfrutado − reservado. */
   pendiente: string;
+}
+
+// --- Autoservicio de vacaciones (mig 0092) ---
+
+/** SOLICITADA → APROBADA → CONFIRMADA, o RECHAZADA. Solo CONFIRMADA cuenta como disfrute. */
+export type EstadoVacacion = "SOLICITADA" | "APROBADA" | "CONFIRMADA" | "RECHAZADA";
+
+/**
+ * Una vacación vista desde el autoservicio.
+ *
+ * Lo que NO trae es la parte importante: ni salario, ni deducciones, ni identificación. Una
+ * jefatura aprobando días libres no necesita nada de eso.
+ */
+export interface SolicitudVacacion {
+  id: string;
+  empleado_id: string;
+  empleado_nombre: string;
+  departamento: string;
+  fecha_inicio: string;
+  /** Derivada de inicio + días; no se guarda, para que no pueda contradecir a los días. */
+  fecha_fin: string;
+  dias: string;
+  observaciones: string;
+  estado: EstadoVacacion;
+  anulada: boolean;
+  creado_en: string;
+  solicitada_por: string;
+  aprobada_por: string;
+  aprobada_en: string;
+  motivo_rechazo: string;
+}
+
+export interface MiVacaciones {
+  saldo: SaldoVacaciones;
+  solicitudes: SolicitudVacacion[];
+}
+
+export interface VacacionesEquipo {
+  /** Las que esperan decisión: con eso entra la jefatura a la pantalla. */
+  pendientes: SolicitudVacacion[];
+  /** Todo el equipo, para ver si puede dar más días esa semana. */
+  calendario: SolicitudVacacion[];
+  /** Días disponibles de su gente. Ni un dato de dinero. */
+  saldos: SaldoVacaciones[];
+}
+
+export interface Jefatura {
+  departamento_id: string;
+  departamento: string;
+  usuario_id: string;
+  usuario_nombre: string;
+  usuario_email: string;
+  rol: "TITULAR" | "SUPLENTE";
 }
 
 /** Descarga con el nombre autoritativo que puso el servidor. */
@@ -632,6 +689,58 @@ export const rrhhApi = {
   },
   anularVacacion(id: string): Promise<void> {
     return apiFetch<void>(`/rrhh/vacaciones/${id}/anular`, { method: "POST" });
+  },
+  /** RRHH da por disfrutados los días de una solicitud aprobada. */
+  confirmarVacacion(id: string): Promise<void> {
+    return apiFetch<void>(`/rrhh/vacaciones/${id}/confirmar`, { method: "POST" });
+  },
+
+  // --- Autoservicio de vacaciones ---
+  //
+  // Ninguna de estas llamadas dice A QUIÉN corresponde la acción: el empleado y el departamento
+  // los resuelve el servidor desde el usuario autenticado. Si viajaran en la petición, cualquiera
+  // con el permiso podría pedir o aprobar días a nombre de otro.
+  misVacaciones(): Promise<MiVacaciones> {
+    return apiFetch<MiVacaciones>("/rrhh/vacaciones/mias", { method: "GET" });
+  },
+  pedirVacaciones(input: { fecha_inicio: string; dias: string; observaciones?: string }): Promise<Vacacion> {
+    return apiFetch<Vacacion>("/rrhh/vacaciones/mias", { method: "POST", json: input });
+  },
+  cancelarMiSolicitud(id: string): Promise<void> {
+    return apiFetch<void>(`/rrhh/vacaciones/mias/${id}/cancelar`, { method: "POST" });
+  },
+  vacacionesDelEquipo(): Promise<VacacionesEquipo> {
+    return apiFetch<VacacionesEquipo>("/rrhh/vacaciones/equipo", { method: "GET" });
+  },
+  resolverSolicitud(id: string, aprobar: boolean, motivo = ""): Promise<void> {
+    return apiFetch<void>(`/rrhh/vacaciones/equipo/${id}/resolver`, {
+      method: "POST",
+      json: { aprobar, motivo },
+    });
+  },
+
+  // --- Jefaturas y vínculo ficha ↔ usuario (administración) ---
+  jefaturas(): Promise<Jefatura[]> {
+    return apiFetch<Jefatura[]>("/rrhh/jefaturas", { method: "GET" });
+  },
+  asignarJefatura(departamentoId: string, usuarioId: string, rol: "TITULAR" | "SUPLENTE" = "TITULAR"): Promise<void> {
+    return apiFetch<void>("/rrhh/jefaturas", {
+      method: "POST",
+      json: { departamento_id: departamentoId, usuario_id: usuarioId, rol },
+    });
+  },
+  quitarJefatura(departamentoId: string, usuarioId: string): Promise<void> {
+    return apiFetch<void>("/rrhh/jefaturas", {
+      method: "DELETE",
+      query: { departamento_id: departamentoId, usuario_id: usuarioId },
+    });
+  },
+  /** Conecta la ficha con el usuario del sistema. Mandar "" la desliga. */
+  ligarUsuario(empleadoId: string, usuarioId: string): Promise<void> {
+    return apiFetch<void>(`/rrhh/empleados/${empleadoId}/usuario`, {
+      method: "PUT",
+      json: { usuario_id: usuarioId },
+    });
   },
 
   // --- Notificaciones al colaborador (texto en Configuración → Notificaciones) ---

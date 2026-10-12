@@ -69,7 +69,23 @@ type Vacacion struct {
 	Observaciones  string `json:"observaciones"`
 	Anulada        bool   `json:"anulada"`
 	CreadoEn       string `json:"creado_en"`
+	// Estado: SOLICITADA → APROBADA → CONFIRMADA, o RECHAZADA (mig 0092). Lo que RRHH registra
+	// directamente nace CONFIRMADA, que es como se comportaba la tabla entera antes.
+	Estado string `json:"estado"`
 }
+
+// Estados de una vacación. Solo CONFIRMADA cuenta como días disfrutados; SOLICITADA y APROBADA
+// reservan saldo para que nadie pida dos veces los mismos días.
+const (
+	// VacacionSolicitada la pidió el colaborador y espera a su jefatura.
+	VacacionSolicitada = "SOLICITADA"
+	// VacacionAprobada tiene el visto de la jefatura: los días quedan reservados, todavía no gozados.
+	VacacionAprobada = "APROBADA"
+	// VacacionConfirmada la verificó RRHH. Es la única que cuenta como disfrute.
+	VacacionConfirmada = "CONFIRMADA"
+	// VacacionRechazada no reserva nada; queda como rastro de que se pidió y por qué no se dio.
+	VacacionRechazada = "RECHAZADA"
+)
 
 // VacacionInput son los datos para registrar un disfrute de vacaciones.
 type VacacionInput struct {
@@ -87,6 +103,12 @@ type SaldoVacaciones struct {
 	FechaIngreso   string `json:"fecha_ingreso"`
 	MesesServicio  int    `json:"meses_servicio"`
 	Acumulado      string `json:"acumulado"`
-	Disfrutado     string `json:"disfrutado"`
-	Pendiente      string `json:"pendiente"`
+	// Disfrutado cuenta SOLO lo confirmado: es lo que esta persona ya se tomó, y lo que va al
+	// finiquito.
+	Disfrutado string `json:"disfrutado"`
+	// Reservado son los días pedidos o aprobados que todavía no se disfrutaron. Se muestra aparte
+	// porque un saldo que los esconde invita a pedir dos veces los mismos días (mig 0092).
+	Reservado string `json:"reservado"`
+	// Pendiente es lo que la persona puede pedir HOY: acumulado − disfrutado − reservado.
+	Pendiente string `json:"pendiente"`
 }
