@@ -194,6 +194,26 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			// tiene su propio permiso.
 			scoped.GET("/bancos/importaciones", P("bancos.importar"), bancosH.Importaciones)
 			scoped.POST("/bancos/importaciones/:id/revertir", P("bancos.revertir_importacion"), bancosH.RevertirImportacion)
+			// Sacar UN movimiento de los libros (mig 0093), para el duplicado que el banco mete
+			// cuando le cambia el formato al consecutivo. Hasta ahora la única salida era revertir
+			// la carga entera, que en la práctica significaba no sacarlo.
+			//
+			// Excluir e incluir van con el mismo permiso —es la misma autoridad en las dos
+			// direcciones—, pero LEER quién sacó qué va con el permiso de ver: plata fuera de los
+			// libros que solo puede mirar quien la sacó no es auditable.
+			scoped.POST("/bancos/movimientos/:id/excluir", P("bancos.excluir_movimiento"), bancosH.ExcluirMovimiento)
+			scoped.POST("/bancos/movimientos/:id/incluir", P("bancos.excluir_movimiento"), bancosH.IncluirMovimiento)
+			scoped.GET("/bancos/movimientos/excluidos", P("bancos.ver_clasificar"), bancosH.ExcluidosAMano)
+			scoped.GET("/bancos/movimientos/duplicados", P("bancos.ver_clasificar"), bancosH.DuplicadosSospechosos)
+			// Dividir un movimiento entre partidas (mig 0094): el recibo de luz que trae un
+			// proyecto especial adentro. El hecho bancario queda intacto —misma fecha, mismo
+			// consecutivo, misma descripción— y la suma de las partes da lo que trajo el banco.
+			//
+			// VER el reparto va con el permiso de leer: quien revisa una partida tiene que poder
+			// saber que ese gasto es parte de un movimiento mayor.
+			scoped.POST("/bancos/movimientos/:id/dividir", P("bancos.dividir_movimiento"), bancosH.DividirMovimiento)
+			scoped.POST("/bancos/movimientos/:id/deshacer-division", P("bancos.dividir_movimiento"), bancosH.DeshacerDivision)
+			scoped.GET("/bancos/movimientos/:id/partes", P("bancos.ver_clasificar"), bancosH.PartesDeMovimiento)
 			scoped.POST("/bancos/importaciones/:id/deshacer-reversa", P("bancos.revertir_importacion"), bancosH.DeshacerReversaImportacion)
 			// Clasificar
 			scoped.PATCH("/bancos/movimientos/:id/clasificacion", P("bancos.clasificar"), bancosH.Reclasificar)
@@ -278,6 +298,14 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			// roles y la configuración del correo, uno.
 			scoped.GET("/cxp/documentos/:id/comprobante/envios", P("cxp.ver"), cxpH.EnviosComprobante)
 			scoped.GET("/cxp/documentos/:id/anticipos", P("cxp.ver"), cxpH.AplicacionesDocumento)
+			// El detalle de líneas es parte del expediente de la factura: no estrena permiso.
+			scoped.GET("/cxp/documentos/:id/lineas", P("cxp.ver"), cxpH.LineasDeDocumento)
+
+			// Análisis de gasto por ítem. La CARGA del detalle va con `cxp.importar` porque es
+			// cargar documentos; la LECTURA con `cxp.gasto`, que es la pantalla nueva.
+			scoped.POST("/cxp/detalle/xml", P("cxp.importar"), cxpH.CargarDetalleXML)
+			scoped.GET("/cxp/gasto", P("cxp.gasto"), cxpH.AnalisisGasto)
+			scoped.GET("/cxp/gasto/:cabys", P("cxp.gasto"), cxpH.ComprasDeItem)
 			scoped.GET("/cxp/anticipos/disponibles", P("cxp.ver"), cxpH.AnticiposDisponibles)
 			scoped.GET("/cxp/anticipos", P("cxp.ver"), cxpH.AnticiposEmpresa)
 			scoped.GET("/cxp/lotes", P("cxp.ver"), cxpH.ListarLotes)
@@ -462,6 +490,29 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.GET("/rrhh/vacaciones", P("rrhh.ver"), nominaH.ListarVacaciones)
 			scoped.POST("/rrhh/vacaciones", P("rrhh.ausencias"), nominaH.RegistrarVacacion)
 			scoped.POST("/rrhh/vacaciones/:id/anular", P("rrhh.ausencias"), nominaH.AnularVacacion)
+			// Confirmar es el paso de RRHH: convierte la reserva aprobada en disfrute, que es lo
+			// único que cuenta contra el saldo gozado y lo que va al finiquito.
+			scoped.POST("/rrhh/vacaciones/:id/confirmar", P("rrhh.ausencias"), nominaH.ConfirmarVacacion)
+
+			// ---- Autoservicio de vacaciones (mig 0092) ----
+			//
+			// Estas seis rutas son la razón de ser de los permisos nuevos: con `rrhh.vacaciones.mias`
+			// o `rrhh.vacaciones.equipo` NO se abre ninguna de las quince de `rrhh.ver`, así que
+			// quien pide o aprueba días libres no ve un salario, una deducción, un finiquito ni una
+			// incapacidad. Ninguna recibe a qué empleado corresponde: el alcance lo resuelve el
+			// servidor desde el usuario autenticado.
+			scoped.GET("/rrhh/vacaciones/mias", P("rrhh.vacaciones.mias"), nominaH.MisVacaciones)
+			scoped.POST("/rrhh/vacaciones/mias", P("rrhh.vacaciones.mias"), nominaH.PedirVacaciones)
+			scoped.POST("/rrhh/vacaciones/mias/:id/cancelar", P("rrhh.vacaciones.mias"), nominaH.CancelarMiSolicitud)
+			scoped.GET("/rrhh/vacaciones/equipo", P("rrhh.vacaciones.equipo"), nominaH.VacacionesDelEquipo)
+			scoped.POST("/rrhh/vacaciones/equipo/:id/resolver", P("rrhh.vacaciones.equipo"), nominaH.ResolverSolicitud)
+
+			// Nombrar jefaturas y ligar una ficha a su usuario cambian QUIÉN puede aprobarle días
+			// a quién: van con el permiso de gestionar empleados, no con el de pedir vacaciones.
+			scoped.GET("/rrhh/jefaturas", P("rrhh.empleados"), nominaH.Jefaturas)
+			scoped.POST("/rrhh/jefaturas", P("rrhh.empleados"), nominaH.AsignarJefatura)
+			scoped.DELETE("/rrhh/jefaturas", P("rrhh.empleados"), nominaH.QuitarJefatura)
+			scoped.PUT("/rrhh/empleados/:id/usuario", P("rrhh.empleados"), nominaH.LigarUsuario)
 			// Reportes
 			scoped.GET("/rrhh/reportes/provisiones", P("rrhh.ver"), nominaH.Provisiones)
 			// Parámetros del año y conceptos (guardarraíl CCSS en el servicio)

@@ -475,6 +475,27 @@ func (f *fakeRepo) PagosSinComprobante(context.Context, string, string, bool) ([
 	return nil, nil
 }
 
+// Detalle de factura y análisis de gasto. El fake solo satisface la interfaz: estos métodos son
+// casi todos SQL de agregación, y un fake que devuelva lo que se le pida no probaría ni el
+// GROUP BY ni la conversión de moneda ni el NULL del tipo de cambio, que es justo donde se rompen.
+// Se prueban en `gasto_pg_test.go` contra Postgres de verdad.
+func (f *fakeRepo) DocumentoDeClave(context.Context, string, string) (DocumentoBreve, error) {
+	return DocumentoBreve{}, ErrDocumentoNoEncontrado
+}
+func (f *fakeRepo) GuardarDetalle(context.Context, string, string, []LineaDetalle) error { return nil }
+func (f *fakeRepo) LineasDeDocumento(context.Context, string, string) ([]LineaGuardada, error) {
+	return nil, nil
+}
+func (f *fakeRepo) ItemsDeGasto(context.Context, string, FiltrosGasto) ([]ItemGasto, string, int, error) {
+	return nil, "0", 0, nil
+}
+func (f *fakeRepo) CoberturaDeGasto(context.Context, string, FiltrosGasto) (CoberturaGasto, error) {
+	return CoberturaGasto{}, nil
+}
+func (f *fakeRepo) ComprasDeItem(context.Context, string, string, FiltrosGasto) ([]CompraDeItem, error) {
+	return nil, nil
+}
+
 // Comprobante: envío y bitácora. Lo que el fake captura se usa en comprobante_envio_test.go —
 // ahí está el detalle de por qué cada campo importa.
 func (f *fakeRepo) ObtenerComprobanteEnvio(context.Context, string, string) (ComprobanteEnvio, error) {

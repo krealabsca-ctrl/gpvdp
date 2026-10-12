@@ -45,9 +45,20 @@ func escribirCSVPago(c *gin.Context, rows []PagoRow) {
 // escribirMacroTxt genera la macro de pago en el formato del banco (TXT, sin encabezado,
 // separado por comas): IBAN, Nombre, Cédula, Monto, Descripción, Descripción, Descripción.
 // La descripción se repite 3 veces según lo exige la macro.
+// El nombre del archivo lleva la MONEDA (y el lote, cuando se conoce): los dos archivos de un lote
+// mixto caen en la misma carpeta de descargas, y «macro-pagos.txt» dos veces es una trampa — se
+// sube el de colones creyendo que es el de dólares y nadie lo nota hasta que el banco rebota.
 func escribirMacroTxt(c *gin.Context, rows []PagoRow) {
+	nombre := "macro-pagos.txt"
+	if len(rows) > 0 {
+		m := strings.ToUpper(strings.TrimSpace(rows[0].Moneda))
+		if m == "" {
+			m = "CRC"
+		}
+		nombre = "macro-pagos-" + m + ".txt"
+	}
 	c.Header("Content-Type", "text/plain; charset=utf-8")
-	c.Header("Content-Disposition", `attachment; filename="macro-pagos.txt"`)
+	c.Header("Content-Disposition", `attachment; filename="`+nombre+`"`)
 	var b strings.Builder
 	for _, r := range rows {
 		desc := descripcionDePago(r)

@@ -112,6 +112,26 @@ type Repository interface {
 	// CrearVacacion valida el saldo dentro del propio INSERT (anti-carrera).
 	CrearVacacion(ctx context.Context, empresaID string, in VacacionInput, diasPorMes decimal.Decimal, usuarioID string) (Vacacion, error)
 	AnularVacacion(ctx context.Context, empresaID, id string) error
+
+	// Autoservicio de vacaciones (mig 0092). El alcance de estos métodos lo resuelve el
+	// servidor: `EmpleadoDeUsuario` y `DepartamentosDeJefe` son las dos funciones que lo
+	// producen, y lo que devuelven vacío cierra la puerta en vez de abrirla.
+	EmpleadoDeUsuario(ctx context.Context, empresaID, usuarioID string) (string, error)
+	DepartamentosDeJefe(ctx context.Context, empresaID, usuarioID string) ([]string, error)
+	SaldoDeEmpleado(ctx context.Context, empresaID, empleadoID string, diasPorMes decimal.Decimal) (SaldoVacaciones, error)
+	SaldosDeDepartamentos(ctx context.Context, empresaID string, deptos []string, diasPorMes decimal.Decimal) ([]SaldoVacaciones, error)
+	// SolicitarVacacion es CrearVacacion con estado SOLICITADA: misma validación de saldo.
+	SolicitarVacacion(ctx context.Context, empresaID string, in VacacionInput, diasPorMes decimal.Decimal, usuarioID string) (Vacacion, error)
+	MisVacaciones(ctx context.Context, empresaID, empleadoID string) ([]SolicitudVacacion, error)
+	VacacionesDeDepartamentos(ctx context.Context, empresaID string, deptos []string, soloPendientes bool) ([]SolicitudVacacion, error)
+	// CambiarEstadoVacacion lleva el recorte por departamento HASTA el UPDATE; `deptos` en nil
+	// significa sin recorte (RRHH) y una lista vacía no puede tocar nada.
+	CambiarEstadoVacacion(ctx context.Context, empresaID, vacacionID, desde, hacia, usuarioID, motivo string, deptos []string) error
+	VacacionDeEmpleado(ctx context.Context, empresaID, vacacionID string) (empleadoID, estado string, err error)
+	ListarJefaturas(ctx context.Context, empresaID string) ([]Jefatura, error)
+	AsignarJefatura(ctx context.Context, empresaID, departamentoID, usuarioID, rol, porUsuarioID string) error
+	QuitarJefatura(ctx context.Context, empresaID, departamentoID, usuarioID string) error
+	LigarUsuarioAEmpleado(ctx context.Context, empresaID, empleadoID, usuarioID string) error
 	// Saldos DERIVADOS de vacaciones (acumulado por meses de servicio − disfrutado).
 	SaldosVacaciones(ctx context.Context, empresaID string, diasPorMes decimal.Decimal) ([]SaldoVacaciones, error)
 	SaldoVacacionesEmpleado(ctx context.Context, empresaID, empleadoID string, diasPorMes decimal.Decimal) (SaldoVacaciones, error)

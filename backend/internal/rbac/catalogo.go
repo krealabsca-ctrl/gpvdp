@@ -52,6 +52,14 @@ var Catalogo = []PermisoDef{
 	// este catálogo es lo que hace que una empresa NUEVA nazca con él (DIRECTOR_FINANCIERO lo hereda
 	// porque su matriz es `codigos()`; ADMIN, por el bypass).
 	{"bancos.revertir_importacion", "Bancos", "Revertir una carga del banco", "Sacar de los libros TODOS los movimientos que trajo una importación equivocada (y volver a ponerlos), con motivo. No borra nada", true},
+	// La misma autoridad a escala de UNA fila (mig 0093). Existe porque `incluido` tenía un solo
+	// escritor —la reversa de la carga entera— y un duplicado suelto obligaba a tirar abajo la
+	// importación completa.
+	{"bancos.excluir_movimiento", "Bancos", "Sacar un movimiento de los libros", "Excluir un movimiento suelto —un duplicado del banco— sin revertir toda la carga, con motivo y reversible. No borra nada", true},
+	// Dividir reparte la ATRIBUCIÓN de un movimiento sin tocar el hecho bancario (mig 0094). No se
+	// cuelga de `bancos.clasificar`: clasificar es decir a qué partida va un movimiento; dividir es
+	// decidir que son DOS hechos contables.
+	{"bancos.dividir_movimiento", "Bancos", "Dividir un movimiento entre partidas", "Separar parte de un movimiento a otra clasificación (un proyecto especial dentro del recibo de luz). La suma de las partes siempre da lo que trajo el banco", true},
 	{"bancos.clasificar", "Bancos", "Clasificar movimientos", "Clasificar y reclasificar (individual y masivo)", false},
 	{"bancos.reglas", "Bancos", "Gestionar reglas del motor", "Crear, editar, pausar y eliminar reglas", false},
 	{"bancos.catalogo", "Bancos", "Gestionar catálogo", "Conceptos, clasificaciones, bancos, cuentas y visibilidad CxP", false},
@@ -69,6 +77,7 @@ var Catalogo = []PermisoDef{
 	{"cxp.ver_todo", "Cuentas por pagar", "Ver todas las áreas", "Ve las facturas de TODOS los departamentos; sin este permiso el usuario solo ve las de su(s) área(s) asignada(s)", false},
 	{"cxp.dashboard", "Cuentas por pagar", "Ver dashboard de CxP", "KPIs y tablero del proceso de cuentas por pagar", false},
 	{"cxp.cartera_abierta", "Cuentas por pagar", "Ver la cartera abierta completa", "TODO lo que la empresa debe, sin importar la fase ni el departamento (dato sensible: es la deuda total)", true},
+	{"cxp.gasto", "Cuentas por pagar", "Analizar el gasto por ítem", "Qué se compra, a qué precio y a cuántos proveedores, según el detalle (CABYS) del XML de cada factura", false},
 	{"cxp.clasificar", "Cuentas por pagar", "Clasificar / priorizar facturas", "Segmentar gasto, tipo y prioridad", false},
 	{"cxp.revisar", "Cuentas por pagar", "Revisar facturas", "Marcar como revisadas. Incluye liquidar viáticos (sin pago)", false},
 	// Sacar una factura del flujo NO es revisarla, y antes estaba recortado por código de rol —lo
@@ -137,6 +146,11 @@ var Catalogo = []PermisoDef{
 	{"rrhh.corrida", "RRHH / Nómina", "Correr y aprobar nómina", "Calcular, aprobar y pagar la corrida quincenal; generar el archivo de pago", true},
 	{"rrhh.finiquito", "RRHH / Nómina", "Liquidar cese (finiquito)", "Calcular, aprobar y pagar liquidaciones de cese conforme al Código de Trabajo", true},
 	{"rrhh.ausencias", "RRHH / Nómina", "Registrar incapacidades y vacaciones", "Anotar incapacidades CCSS/INS y el disfrute de vacaciones que alimentan la corrida", false},
+	// Los dos permisos del autoservicio (mig 0092). Existen para que pedir o aprobar días libres
+	// no obligue a dar `rrhh.ver`, que abre quince rutas e incluye salarios, deducciones,
+	// finiquitos e incapacidades. Son independientes: quien los tenga NO necesita `rrhh.ver`.
+	{"rrhh.vacaciones.mias", "RRHH / Nómina", "Pedir mis vacaciones", "Ver el saldo propio y solicitar días. No abre ninguna ficha, salario ni dato de otro empleado", false},
+	{"rrhh.vacaciones.equipo", "RRHH / Nómina", "Aprobar vacaciones del equipo", "Ver el calendario y los días disponibles de su departamento y aprobar o rechazar. Sin salarios, deducciones, finiquitos ni incapacidades", false},
 	// Inventario — cofres, urnas y suministros por sede.
 	{"inventario.ver", "Inventario", "Ver inventario", "Existencias por sede, unidades, movimientos y rotación (lectura)", false},
 	{"inventario.catalogo", "Inventario", "Gestionar el catálogo", "Categorías, artículos y los mínimos y máximos por sede", false},
@@ -232,7 +246,7 @@ var MatrizDefault = map[string][]string{
 	"SUPERVISOR_FINANCIERO": conLecturaBancos(
 		"bancos.importar", "bancos.clasificar", "bancos.reglas", "bancos.catalogo",
 		"bancos.tc_registrar", "bancos.traslados", "bancos.saldos", "bancos.conciliar", "bancos.exportar", "bancos.cerrar_periodo",
-		"cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.cartera_abierta", "cxp.clasificar", "cxp.revisar", "cxp.validar_depto", "cxp.tesoreria", "cxp.comprobante", "cxp.importar", "cxp.recepcion", "cxp.anticipos",
+		"cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.gasto", "cxp.cartera_abierta", "cxp.clasificar", "cxp.revisar", "cxp.validar_depto", "cxp.tesoreria", "cxp.comprobante", "cxp.importar", "cxp.recepcion", "cxp.anticipos",
 		// Denegar y anular: es lo que ya podía hacer cuando la autorización iba por código de rol
 		// (mig 0079). Se le mantiene tal cual para que el cambio no le quite nada a nadie.
 		"cxp.anular",
@@ -256,7 +270,7 @@ var MatrizDefault = map[string][]string{
 		// Revisa: marcar una factura como revisada es el trabajo diario del auxiliar de
 		// contabilidad —clasificarla y darla por buena para que siga—. No firma ni paga:
 		// aprobar y tesorería siguen fuera de este rol. Decisión del usuario (2026-08-14).
-		"cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.clasificar", "cxp.revisar", "cxp.comprobante", "cxp.proveedores", "cxp.importar", "cxp.recepcion", "cxp.anticipos",
+		"cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.gasto", "cxp.clasificar", "cxp.revisar", "cxp.comprobante", "cxp.proveedores", "cxp.importar", "cxp.recepcion", "cxp.anticipos",
 		// Marca pero NO aprueba: marcar es parte de segmentar la factura, aprobar es firmar.
 		// Y abre rubros de gasto: es quien clasifica, así que es quien se topa con el gasto que
 		// todavía no existe en el catálogo.
@@ -267,9 +281,9 @@ var MatrizDefault = map[string][]string{
 		"inventario.ver", "inventario.entrada", "inventario.servicio", "inventario.traslado", "inventario.conteo",
 	),
 	// Gerencia General: lectura + validación de área + escalamiento + aprobación (firma mancomunada).
-	"GERENCIA_GENERAL": conLecturaBancos("cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.validar_depto", "cxp.validar_escalado", "cxp.aprobar", "cxp.aprobar_contabilidad", "cxp.parametros", "cxp.fuentes", "cxp.caja_ver", "cxc.ver", "cxc.ver_todas_sedes", "inventario.ver"),
+	"GERENCIA_GENERAL": conLecturaBancos("cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.gasto", "cxp.validar_depto", "cxp.validar_escalado", "cxp.aprobar", "cxp.aprobar_contabilidad", "cxp.parametros", "cxp.fuentes", "cxp.caja_ver", "cxc.ver", "cxc.ver_todas_sedes", "inventario.ver"),
 	// Auditor Interno: solo lectura.
-	"AUDITOR_INTERNO": conLecturaBancos("cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.caja_ver", "cxc.ver", "cxc.ver_todas_sedes", "inventario.ver"),
+	"AUDITOR_INTERNO": conLecturaBancos("cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.gasto", "cxp.caja_ver", "cxc.ver", "cxc.ver_todas_sedes", "inventario.ver"),
 	// Supervisor de Piso: la autoridad de la operación de cobro. Es un cargo real que el
 	// negocio nombró como quien autoriza las excepciones — notas de crédito sin tope, arreglos
 	// a plazo largo y el corte del servicio por mora.

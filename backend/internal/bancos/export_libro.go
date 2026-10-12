@@ -35,6 +35,13 @@ const (
 	colorMarca      = "0F5132" // verde VDP
 	colorMarcaSuave = "E8F0EC" // verde muy claro para bandas de agrupación
 	colorNegativo   = "B42318" // rojo para débitos
+	// colorConvertido marca los montos que venían en otra moneda y salen ya en colones. Azul y no
+	// otro verde: el verde de la marca ya significa «encabezado» en este libro, y el rojo ya
+	// significa «débito». Un color que no significa nada todavía es lo que permite leerlo sin
+	// leyenda.
+	colorConvertido = "1B6CA8"
+	// colorAlertaSuave va detrás de lo que NO se pudo convertir: queda en su moneda y no suma.
+	colorAlertaSuave = "FDF3F2"
 )
 
 // Formatos numéricos. El «-» del cero es el estilo contable: un cero suelto ensucia la columna.
@@ -50,6 +57,18 @@ type ColumnaReporte struct {
 	// Tipo: "texto" | "fecha" | "monto" | "montoDebito" | "entero"
 	Tipo string
 }
+
+// MontoConvertido es un monto que YA está en colones pero venía de otra moneda. Se pinta distinto
+// para que nadie lo confunda con el número del estado de cuenta.
+//
+// Es un tipo y no una columna aparte porque la condición es de la FILA, no de la columna: en el
+// mismo reporte conviven cuentas en colones y en dólares, y solo las segundas se marcan.
+type MontoConvertido float64
+
+// MontoSinConvertir es un monto que quedó en SU MONEDA porque falta el tipo de cambio del mes. Va
+// en rojo sobre fondo de alerta: es el único número del reporte que no son colones, y si se viera
+// igual que el resto entraría a una suma que no le corresponde.
+type MontoSinConvertir float64
 
 // FilaReporte es una fila de datos. Los valores se emparejan por posición con las columnas.
 type FilaReporte struct {
@@ -91,9 +110,12 @@ type estilosLibro struct {
 	etiqueta, valor, nota                         int
 	thTexto, thNumero                             int
 	tdTexto, tdFecha, tdMonto, tdDebito, tdEntero int
-	grupo, grupoMonto                             int
-	totalTexto, totalMonto                        int
-	granTotalTexto, granTotalMonto                int
+	// Variantes de monto para lo que no vino en colones: convertido (azul) y sin tipo de cambio
+	// (rojo sobre fondo de alerta, en su moneda original).
+	tdMontoConv, tdDebitoConv, tdMontoSinTC int
+	grupo, grupoMonto                       int
+	totalTexto, totalMonto                  int
+	granTotalTexto, granTotalMonto          int
 }
 
 func nuevosEstilos(f *excelize.File) (estilosLibro, error) {
@@ -221,6 +243,35 @@ func nuevosEstilos(f *excelize.File) (estilosLibro, error) {
 	}
 	if e.tdDebito, err = mk(&excelize.Style{
 		Font:         &excelize.Font{Size: 9, Color: colorNegativo},
+		CustomNumFmt: strPtr(fmtMonto),
+		Alignment:    &excelize.Alignment{Horizontal: "right", Vertical: "top"},
+	}); err != nil {
+		return e, err
+	}
+	// Los montos que venían en OTRA MONEDA y acá salen ya convertidos a colones. Se pintan para que
+	// no haya que ir a mirar la cuenta para saber que ese número no es el del estado de cuenta: es
+	// su equivalente. Sin la marca, un crédito de ₡212.763 en una cuenta en dólares parece un error
+	// de carga.
+	if e.tdMontoConv, err = mk(&excelize.Style{
+		Font:         &excelize.Font{Size: 9, Color: colorConvertido},
+		CustomNumFmt: strPtr(fmtMonto),
+		Alignment:    &excelize.Alignment{Horizontal: "right", Vertical: "top"},
+	}); err != nil {
+		return e, err
+	}
+	if e.tdDebitoConv, err = mk(&excelize.Style{
+		Font:         &excelize.Font{Size: 9, Color: colorConvertido, Italic: true},
+		CustomNumFmt: strPtr(fmtMonto),
+		Alignment:    &excelize.Alignment{Horizontal: "right", Vertical: "top"},
+	}); err != nil {
+		return e, err
+	}
+	// Y los que NO se pudieron convertir porque falta el tipo de cambio del mes: van en su moneda
+	// original, sobre fondo de alerta. Es la única celda del reporte cuyo número no es colones, y
+	// tiene que verse: si se pintara igual que el resto, entraría a una suma que no le corresponde.
+	if e.tdMontoSinTC, err = mk(&excelize.Style{
+		Font:         &excelize.Font{Size: 9, Color: colorNegativo, Bold: true},
+		Fill:         excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{colorAlertaSuave}},
 		CustomNumFmt: strPtr(fmtMonto),
 		Alignment:    &excelize.Alignment{Horizontal: "right", Vertical: "top"},
 	}); err != nil {
@@ -640,9 +691,21 @@ func escribirCelda(f *excelize.File, hoja, celda string, v any, tipo string, est
 		if err := f.SetCellValue(hoja, celda, n); err != nil {
 			return err
 		}
+		// El estilo sale del TIPO DEL VALOR antes que del tipo de la columna: la misma columna
+		// «Crédito» lleva colones de una cuenta en colones y colones convertidos de una en
+		// dólares, y solo los segundos se marcan.
 		estilo := est.tdMonto
 		if tipo == "montoDebito" {
 			estilo = est.tdDebito
+		}
+		switch v.(type) {
+		case MontoConvertido:
+			estilo = est.tdMontoConv
+			if tipo == "montoDebito" {
+				estilo = est.tdDebitoConv
+			}
+		case MontoSinConvertir:
+			estilo = est.tdMontoSinTC
 		}
 		return f.SetCellStyle(hoja, celda, celda, estilo)
 	case "entero":
@@ -667,6 +730,10 @@ func comoFloat(v any) (float64, bool) {
 	switch n := v.(type) {
 	case float64:
 		return n, true
+	case MontoConvertido:
+		return float64(n), true
+	case MontoSinConvertir:
+		return float64(n), true
 	case int:
 		return float64(n), true
 	case string:

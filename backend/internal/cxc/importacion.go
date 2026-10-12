@@ -455,7 +455,27 @@ func fechaDe(s string) string {
 	if i := strings.Index(t, "|"); i > 0 {
 		t = strings.TrimSpace(t[:i])
 	}
-	for _, layout := range []string{"2/1/2006", "02/01/2006", "2006-01-02", "2/1/06", "02/01/06", "2006/01/02"} {
+	// EL GUION Y LA BARRA conviven porque el origen usa las dos, y hasta en el mismo archivo:
+	// medido el 8-oct-2026 en el reporte de pagos real, «Fecha de Pago Bancario de la asociación»
+	// venía «27/01/2026» y «Fecha de Pago», en la columna de al lado, «01-10-2026». Mientras el
+	// guion no estuvo, esa segunda columna se leía vacía y las 3.695 filas caían en cuarentena con
+	// «sin fecha de pago legible», que es el motivo que impide aplicar el cobro.
+	//
+	// El día va primero, también acá: se midió sobre el archivo, no se supuso. El segundo
+	// componente era «10» en las 3.695 filas —octubre— y los primeros iban del 01 al 07, los días
+	// que cubre un reporte exportado el 7 de octubre.
+	//
+	// El ORDEN de esta lista no separa el ISO de d-m-aaaa, y está probado: moviendo el ISO al
+	// final no cambia ni un caso. Lo que los separa es el largo del primer componente —«2026-01-27»
+	// leído como d-m-aaaa toma «20» de día y revienta en el separador siguiente—. El ISO está
+	// arriba por legibilidad, agrupado con las formas de año completo.
+	for _, layout := range []string{
+		"2/1/2006", "02/01/2006",
+		"2006-01-02", "2006/01/02",
+		"2-1-2006", "02-01-2006",
+		"2/1/06", "02/01/06",
+		"2-1-06", "02-01-06",
+	} {
 		if v, err := time.Parse(layout, t); err == nil {
 			return v.Format("2006-01-02")
 		}

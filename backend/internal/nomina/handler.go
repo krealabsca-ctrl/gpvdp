@@ -446,8 +446,24 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 	case errors.Is(err, ErrEmpleadoNoEncontrado), errors.Is(err, ErrConceptoNoEncontrado),
 		errors.Is(err, ErrDeduccionNoEncontrada), errors.Is(err, ErrParametrosNoEncontrados),
 		errors.Is(err, ErrCorridaNoEncontrada), errors.Is(err, ErrFiniquitoNoEncontrado),
-		errors.Is(err, ErrIncapacidadNoEncontrada), errors.Is(err, ErrVacacionNoEncontrada):
+		errors.Is(err, ErrIncapacidadNoEncontrada), errors.Is(err, ErrVacacionNoEncontrada),
+		errors.Is(err, ErrJefaturaNoEncontrada), errors.Is(err, ErrDepartamentoNoEncontrado):
 		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, err.Error())
+	// Autoservicio de vacaciones (mig 0092). Los dos primeros NO son fallos: son un alcance
+	// vacío, que es un estado normal y tiene arreglo —pedirle a RRHH la ficha, o que te nombren
+	// jefatura—. Salen como 422 con su frase entera porque esa frase ES la instrucción; un 403
+	// pelado diría «no podés» sin decir qué falta.
+	case errors.Is(err, ErrSinEmpleadoLigado), errors.Is(err, ErrSinDepartamentosACargo),
+		errors.Is(err, ErrMotivoRechazoRequerido), errors.Is(err, ErrRolJefaturaInvalido):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
+	// Querer tocar la solicitud de otro es un intento de salirse del alcance, no un dato malo.
+	case errors.Is(err, ErrNoEsTuVacacion):
+		httpx.Abort(c, http.StatusForbidden, httpx.CodeSinPermiso, err.Error())
+	// La vacación ya cambió de estado, o es de un departamento ajeno: las dos cosas llegan acá
+	// como el mismo conflicto, a propósito. Distinguirlas le diría a quien prueba ids ajenos
+	// cuáles existen.
+	case errors.Is(err, ErrTransicionVacacionInvalida):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
 	case errors.Is(err, ErrEmpleadoDuplicado), errors.Is(err, ErrConceptoDuplicado),
 		errors.Is(err, ErrCorridaDuplicada), errors.Is(err, ErrFiniquitoDuplicado):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())

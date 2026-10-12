@@ -37,6 +37,10 @@ type proveedorRequest struct {
 	ExentoIVA          bool   `json:"exento_iva"`
 	CondicionPago      string `json:"condicion_pago" validate:"omitempty,oneof=CONTADO CREDITO"`
 	PlazoCreditoDias   int    `json:"plazo_credito_dias" validate:"gte=0,lte=365"`
+	// PlazoManda: de dónde sale el vencimiento de sus facturas. «XML» (default, el comprobante
+	// manda) o «PROVEEDOR» (manda este plazo, aunque el XML traiga otro). Vacío conserva lo que
+	// el proveedor ya tenía configurado.
+	PlazoManda string `json:"plazo_manda" validate:"omitempty,oneof=XML PROVEEDOR"`
 	// Gasto predeterminado (alimenta el AUTO de sus facturas).
 	GastoConceptoID         string `json:"gasto_concepto_id" validate:"omitempty,uuid"`
 	GastoClasificacionID    string `json:"gasto_clasificacion_id" validate:"omitempty,uuid"`
@@ -65,6 +69,7 @@ func (req proveedorRequest) aInput() (ProveedorInput, error) {
 		ExentoIVA:               req.ExentoIVA,
 		CondicionPago:           req.CondicionPago,
 		PlazoCreditoDias:        req.PlazoCreditoDias,
+		PlazoManda:              req.PlazoManda,
 		GastoConceptoID:         req.GastoConceptoID,
 		GastoClasificacionID:    req.GastoClasificacionID,
 		GastoSubclasificacionID: req.GastoSubclasificacionID,

@@ -36,6 +36,8 @@ var tablasDelLote = []string{
 	"movimiento_bancario", "cuenta_bancaria", "banco",
 	// Los pagos agrupados por proveedor (mig 0088).
 	"remesa_pago",
+	// El detalle de línea de cada factura (mig 0096): lo que sostiene el análisis de gasto.
+	"cxp_linea",
 }
 
 const (

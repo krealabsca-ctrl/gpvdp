@@ -86,16 +86,15 @@ func (s *Service) ExportarMovimientosXLSX(ctx context.Context, empresaID string,
 			montoSinTC += montoNum(m.Credito) + montoNum(m.Debito)
 		}
 	}
-	avisos := []string{
-		// La nota nombra la columna tal como sale en la hoja. Cuando la columna se renombró a
-		// «Equivalencia», esta línea quedó citando un nombre que ya no existía en ninguna parte del
-		// archivo, y una nota que manda a buscar una columna inexistente es peor que no tenerla.
-		"Los totales están en colones y salen de la columna «Equivalencia». " +
-			"Débito y Crédito van en la moneda de cada cuenta.",
-	}
+	// Desde el 9-oct-2026 la hoja va ENTERA en colones, así que ya no hace falta la nota que
+	// explicaba que Débito y Crédito iban en la moneda de cada cuenta: dejar de ser cierta es
+	// razón suficiente para quitarla, y una hoja de una sola moneda no necesita que se lo
+	// adviertan. Lo que sí necesita aviso es la excepción.
+	avisos := []string{}
 	if sinTC > 0 {
 		avisos = append(avisos, fmt.Sprintf(
-			"%d movimiento(s) por USD %s no tienen tipo de cambio del mes y NO suman al total en colones",
+			"%d movimiento(s) por USD %s no tienen tipo de cambio del mes: quedan EN DÓLARES, "+
+				"marcados en rojo, y no suman al total en colones",
 			sinTC, formatoMiles(montoSinTC)))
 	}
 
@@ -259,13 +258,46 @@ func columnasDetalle() []ColumnaReporte {
 // filaDetalle arma la fila en el MISMO orden que columnasDetalle. Las dos van juntas: separarlas es
 // lo que produce un .xlsx con los montos corridos una columna.
 func filaDetalle(m MovimientoExport, concepto, clasificacion string) []any {
+	debito, credito := montosEnColones(m)
 	return []any{
 		m.Fecha, m.Documento,
-		montoNum(m.Debito), montoNum(m.Credito), montoNum(m.MontoCRC),
+		debito, credito, montoNum(m.MontoCRC),
 		m.Descripcion, bancoCuenta(m),
 		concepto, clasificacion,
 		ConsecutivoLargo(m.Banco, m.Descripcion),
 	}
+}
+
+// montosEnColones devuelve el débito y el crédito YA CONVERTIDOS, marcados según su origen.
+//
+// Hasta el 9-oct-2026 estas dos columnas iban en la moneda de cada cuenta, y eso rompía todo cuadre
+// hecho en Excel: quien sumaba la columna «Crédito» mezclaba colones con dólares y el total salía
+// corto sin que nada lo avisara. Ahora la hoja entera está en una sola moneda y se puede sumar.
+//
+// LA CONVERSIÓN NO SE CALCULA ACÁ. Sale de `MontoCRC`, que es el valor que el ERP ya guardó con el
+// tipo de cambio del mes; recalcularla sería una segunda fórmula que puede discrepar de la que usan
+// el cuadre, el tablero y el EBITDA.
+//
+// El reparto entre débito y crédito se respeta: `MontoCRC` es el equivalente del movimiento, y va
+// al lado donde el movimiento tiene su monto. Un movimiento no puede tener los dos.
+//
+// Cuando falta el tipo de cambio del mes, el monto se queda EN SU MONEDA y se marca en rojo. Es
+// deliberado: poner cero perdería el dato, y convertirlo con un tipo de cambio inventado sería
+// peor. Hoy son 133 movimientos, y el aviso del encabezado ya los cuenta.
+func montosEnColones(m MovimientoExport) (debito, credito any) {
+	d, c := montoNum(m.Debito), montoNum(m.Credito)
+	if m.Moneda == "" || m.Moneda == "CRC" {
+		return d, c
+	}
+	crc := montoNum(m.MontoCRC)
+	if crc == 0 {
+		// Sin equivalencia: queda en su moneda, visible.
+		return MontoSinConvertir(d), MontoSinConvertir(c)
+	}
+	if d > 0 {
+		return MontoConvertido(crc), MontoConvertido(0)
+	}
+	return MontoConvertido(0), MontoConvertido(crc)
 }
 
 // bancoCuenta identifica en UNA columna en qué cuenta cayó el movimiento.

@@ -149,6 +149,24 @@ type Repository interface {
 	RevertirImportacion(ctx context.Context, empresaID, importacionID, usuarioID, motivo string) (CambioDeReversa, error)
 	DeshacerReversaImportacion(ctx context.Context, empresaID, importacionID string) (CambioDeReversa, error)
 
+	// Excluir UN movimiento (mig 0093). `incluido` tenía un solo escritor —la reversa de una carga
+	// entera—, así que un duplicado suelto obligaba a tirar abajo la importación completa. Estos
+	// cuatro conviven con la reversa sin pisarla: ella solo toca lo incluido y solo devuelve lo que
+	// marcó, y la exclusión a mano deja `excluido_por_reversa` en false.
+	ExcluirMovimiento(ctx context.Context, empresaID, movID, motivo, usuarioID string) error
+	IncluirMovimiento(ctx context.Context, empresaID, movID string) error
+	ExcluidosAMano(ctx context.Context, empresaID string) ([]MovimientoExcluido, error)
+	MovimientoParaExcluir(ctx context.Context, empresaID, movID string) (MovimientoExcluido, error)
+	// DuplicadosSospechosos PROPONE pares; no excluye nada. El veredicto es de una persona.
+	DuplicadosSospechosos(ctx context.Context, empresaID, desde, hasta string) ([]ParDuplicado, error)
+
+	// Dividir un movimiento entre partidas (mig 0094). La invariante que sostienen entre los
+	// cuatro: padre + hijos = lo que trajo el banco, siempre.
+	DividirMovimiento(ctx context.Context, empresaID, movID string, in DivisionInput, usuarioID string) (string, error)
+	DeshacerDivision(ctx context.Context, empresaID, parteID string) error
+	PartesDeMovimiento(ctx context.Context, empresaID, movID string) (Division, error)
+	MovimientoParaDividir(ctx context.Context, empresaID, movID string) (MovimientoDivisible, error)
+
 	// Administración de bancos y cuentas (catálogo)
 	ListarBancos(ctx context.Context, empresaID string, incluirInactivos bool) ([]BancoItem, error)
 	CrearBanco(ctx context.Context, empresaID, nombre string) (BancoItem, error)

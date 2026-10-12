@@ -31,6 +31,10 @@ type Proveedor struct {
 	// Condiciones de crédito: CONTADO o CREDITO + plazo en días (calcula vencimientos).
 	CondicionPago    string `json:"condicion_pago"`
 	PlazoCreditoDias int    `json:"plazo_credito_dias"`
+	// PlazoManda: «XML» (el comprobante manda, default) o «PROVEEDOR» (manda el convenio de esta
+	// ficha). Existe porque hay proveedores que declaran 90 días en su catálogo y tienen pactado
+	// otro plazo, y el vencimiento del XML ganaba siempre.
+	PlazoManda string `json:"plazo_manda"`
 	// Gasto predeterminado (memoria AUTO): sus facturas nacen pre-clasificadas con esto.
 	GastoConceptoID         string `json:"gasto_concepto_id"`
 	GastoClasificacionID    string `json:"gasto_clasificacion_id"`
@@ -55,6 +59,8 @@ type ProveedorInput struct {
 	ExentoIVA          bool
 	CondicionPago      string // "" => CONTADO
 	PlazoCreditoDias   int
+	// PlazoManda: "" => XML (no cambia lo que ya estaba configurado).
+	PlazoManda string
 	// Gasto predeterminado ("" = sin asignar / limpiar). Validado contra la empresa en SQL.
 	GastoConceptoID         string
 	GastoClasificacionID    string
