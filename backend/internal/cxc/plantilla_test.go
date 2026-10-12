@@ -67,9 +67,9 @@ func TestElLectorReconoceTodasLasColumnasDeLaPlantilla(t *testing.T) {
 func TestLaHojaDeDatosNoTraeNingunContrato(t *testing.T) {
 	g := gridDeLaPlantilla(t)
 
-	_, err := LeerContratos(g, ReglasImportacion{CuotaMaxima: decimal.NewFromInt(1000000)})
+	_, err := LeerContratos(HojaDe(g), ReglasImportacion{CuotaMaxima: decimal.NewFromInt(1000000)})
 	if err != ErrSinFilas {
-		filas, _ := LeerContratos(g, ReglasImportacion{CuotaMaxima: decimal.NewFromInt(1000000)})
+		filas, _ := LeerContratos(HojaDe(g), ReglasImportacion{CuotaMaxima: decimal.NewFromInt(1000000)})
 		t.Fatalf("la plantilla trae %d contrato(s) y tiene que venir vacía (err=%v)", len(filas), err)
 	}
 }
@@ -81,7 +81,7 @@ func TestElEjemploDeLaAyudaEsUnaFilaValida(t *testing.T) {
 	g := gridDeLaPlantilla(t)
 	g = append(g, filaEjemplo)
 
-	filas, err := LeerContratos(g, ReglasImportacion{CuotaMaxima: decimal.NewFromInt(1000000)})
+	filas, err := LeerContratos(HojaDe(g), ReglasImportacion{CuotaMaxima: decimal.NewFromInt(1000000)})
 	if err != nil {
 		t.Fatalf("leer la plantilla con el ejemplo: %v", err)
 	}

@@ -33,7 +33,7 @@ type Conciliacion struct {
 // PrevisualizarContratos lee el archivo y devuelve el reporte de conciliación sin
 // escribir nada en la cartera.
 func (s *Service) PrevisualizarContratos(ctx context.Context, empresaID string, archivo []byte, nombre, usuarioID string) (string, Conciliacion, error) {
-	g, err := CargarGrid(archivo)
+	h, err := CargarHoja(archivo)
 	if err != nil {
 		return "", Conciliacion{}, err
 	}
@@ -41,7 +41,7 @@ func (s *Service) PrevisualizarContratos(ctx context.Context, empresaID string, 
 	if err != nil {
 		return "", Conciliacion{}, err
 	}
-	filas, err := LeerContratos(g, reglas)
+	filas, err := LeerContratos(h, reglas)
 	if err != nil {
 		return "", Conciliacion{}, err
 	}
@@ -60,7 +60,7 @@ func (s *Service) PrevisualizarContratos(ctx context.Context, empresaID string, 
 // 70 000 filas interpretadas en la sesión para confirmarlas después es la clase de estado
 // que se corrompe. El archivo es la fuente y el reporte se recalcula igual.
 func (s *Service) ConfirmarContratos(ctx context.Context, empresaID, importacionID string, archivo []byte, usuarioID string) (Conciliacion, Aplicado, error) {
-	g, err := CargarGrid(archivo)
+	h, err := CargarHoja(archivo)
 	if err != nil {
 		return Conciliacion{}, Aplicado{}, err
 	}
@@ -68,7 +68,7 @@ func (s *Service) ConfirmarContratos(ctx context.Context, empresaID, importacion
 	if err != nil {
 		return Conciliacion{}, Aplicado{}, err
 	}
-	filas, err := LeerContratos(g, reglas)
+	filas, err := LeerContratos(h, reglas)
 	if err != nil {
 		return Conciliacion{}, Aplicado{}, err
 	}

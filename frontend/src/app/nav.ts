@@ -48,6 +48,7 @@ import {
   Waves,
   Mailbox,
   KeyRound,
+  Paperclip,
   CalendarCheck,
   UserCheck,} from "lucide-react";
 
@@ -148,6 +149,10 @@ export const MODULES: NavModule[] = [
       // otra sola—, y ponerlas separadas haría que nadie encuentre la automática.
       { label: "Recepción", descripcion: "Lo que llega del correo", to: "/cxp/recepcion", icon: Mailbox, permiso: "cxp.recepcion" },
       { label: "Buzones", descripcion: "Correo y credencial por empresa", to: "/cxp/fuentes", icon: KeyRound, permiso: "cxp.fuentes" },
+      // La OTRA punta del expediente: Importar y Recepción son lo que llega del proveedor;
+      // Comprobantes es lo que vuelve del banco después de pagar. El subtítulo dice «por corrida»
+      // porque ahí está la diferencia con adjuntar de a uno —que ya existía y nadie usaba—.
+      { label: "Comprobantes", descripcion: "Los recibos del banco, por corrida", to: "/cxp/comprobantes", icon: Paperclip, permiso: "cxp.comprobante" },
       // El nombre ES parte de la función: ya nos costó una vez que horas extra y vacaciones
       // existieran y nadie las hallara porque el menú decía «Ausencias». «Compromisos» suena a
       // contabilidad y «Obligaciones» suena a legal; «Responsabilidades» es la palabra que usa la

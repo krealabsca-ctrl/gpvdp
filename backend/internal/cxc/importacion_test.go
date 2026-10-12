@@ -31,7 +31,7 @@ func TestLeerContratosDelArchivoReal(t *testing.T) {
 		t.Fatalf("filas del grid = %d, se esperaban 10", len(g))
 	}
 
-	filas, err := LeerContratos(g, ReglasImportacion{CuotaMaxima: decimal.NewFromInt(500000)})
+	filas, err := LeerContratos(HojaDe(g), ReglasImportacion{CuotaMaxima: decimal.NewFromInt(500000)})
 	if err != nil {
 		t.Fatalf("LeerContratos: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestLeerContratosCuarentena(t *testing.T) {
 		{"CO6", "CUOTA ILEGIBLE", "no es un monto", "Mensual", "1/8/2026", "SAN JOSÉ - VALLE DE PAZ SA", "1"},
 		{"CO7", "BUENO", "5600.00", "Mensual", "1/8/2026", "SAN JOSÉ - VALLE DE PAZ SA", "1"},
 	}
-	filas, err := LeerContratos(g, ReglasImportacion{CuotaMaxima: decimal.NewFromInt(500000)})
+	filas, err := LeerContratos(HojaDe(g), ReglasImportacion{CuotaMaxima: decimal.NewFromInt(500000)})
 	if err != nil {
 		t.Fatalf("LeerContratos: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestLeerContratosResuelvePorEncabezadoNoPorPosicion(t *testing.T) {
 		{"Modalidad", "Basura", "No. Contrato", "Cédula", "Monto Cuota", "Fecha Primer Cobro", "Día de Pago"},
 		{"Mensual", "x", "CO9", "111", "7500.00", "15/9/2026", "15"},
 	}
-	filas, err := LeerContratos(g, ReglasImportacion{CuotaMaxima: decimal.NewFromInt(500000)})
+	filas, err := LeerContratos(HojaDe(g), ReglasImportacion{CuotaMaxima: decimal.NewFromInt(500000)})
 	if err != nil {
 		t.Fatalf("LeerContratos: %v", err)
 	}

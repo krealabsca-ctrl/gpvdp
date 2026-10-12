@@ -339,6 +339,15 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			// Comprobantes
 			scoped.POST("/cxp/documentos/:id/comprobante", P("cxp.comprobante"), cxpH.AdjuntarComprobante)
 			scoped.POST("/cxp/documentos/:id/comprobante/enviar", P("cxp.comprobante"), cxpH.EnviarComprobante)
+			// La carpeta entera de una corrida. Mismo permiso que adjuntar de a uno: es la misma
+			// escritura, cien veces. La previsualización también lo pide aunque solo lea, porque
+			// la respuesta dice qué facturas existen con qué código, y eso es tanto como leer la
+			// cartera por otra puerta.
+			scoped.POST("/cxp/comprobantes/carpeta/previsualizar", P("cxp.comprobante"), cxpH.PrevisualizarCarpeta)
+			scoped.POST("/cxp/comprobantes/carpeta", P("cxp.comprobante"), cxpH.AdjuntarCarpeta)
+			// El control inverso —qué pagos todavía no tienen recibo— se LEE: lo consulta quien
+			// revisa el expediente, no solo quien adjunta.
+			scoped.GET("/cxp/comprobantes/pagos", P("cxp.ver"), cxpH.PagosConRecibo)
 			// Proveedores
 			scoped.POST("/cxp/proveedores", P("cxp.proveedores"), cxpH.CrearProveedor)
 			scoped.PATCH("/cxp/proveedores/:id", P("cxp.proveedores"), cxpH.ActualizarProveedor)

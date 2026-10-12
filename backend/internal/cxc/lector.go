@@ -16,40 +16,91 @@ import (
 // alguien agregó una validación en un solo lado.
 type Grid [][]string
 
+// Hoja es el archivo leído en sus DOS formas, y existe por una sola razón: las fechas.
+//
+// Excel no guarda «1/2/2022», guarda el número 44593 y aparte el formato con que
+// mostrarlo. Al leer solo lo formateado, lo que llega es el render de ESE formato —medido
+// el 7-oct-2026: una celda con el 1 de febrero de 2022 llegaba como «02-01-22»— y ahí ya
+// no hay forma de saber si el 02 es el mes o el día. El importador leía esa columna como
+// vacía y la fila entera caía en cuarentena con «sin fecha de primer cobro ni de próximo
+// pago», mientras el usuario miraba su archivo y veía las dos fechas puestas.
+//
+// Adivinar el orden del texto no es una opción: con DateStyle invertido ya se metieron
+// fechas con mes y día cambiados en silencio, y acá serían miles de vencimientos movidos
+// de mes. El número de serie, en cambio, es absoluto y no depende de ningún formato.
+//
+// Por eso se conservan las dos: `Valores` es lo que una persona ve y lo que sirve para
+// todo lo demás, y `Crudos` es de donde salen las fechas. En un CSV son idénticas: no hay
+// formato que aplicar.
+type Hoja struct {
+	Valores Grid
+	Crudos  Grid
+}
+
 // bom es la marca de orden de bytes que Excel pone al exportar UTF-8. Los dos archivos
 // reales del usuario la traen y, sin quitarla, el primer encabezado no calza con nada.
 // Se escribe como escape porque un BOM literal en el fuente no compila.
 const bom = "\uFEFF"
 
-// CargarGrid lee un archivo de cartera o de cobros, sea CSV o Excel, y lo devuelve como
-// Grid. Detecta el formato por el contenido, no por la extensión: los exportadores
-// mandan «.xls» que en realidad son CSV más seguido de lo que uno querría.
+// CargarGrid lee un archivo de cartera o de cobros, sea CSV o Excel, y devuelve solo los
+// valores formateados. Sirve para mirar el encabezado o contar filas; para LEER FECHAS hay
+// que usar CargarHoja, que además trae el valor crudo (ver Hoja).
 func CargarGrid(archivo []byte) (Grid, error) {
+	h, err := CargarHoja(archivo)
+	if err != nil {
+		return nil, err
+	}
+	return h.Valores, nil
+}
+
+// CargarHoja lee un archivo de cartera o de cobros, sea CSV o Excel. Detecta el formato por
+// el contenido, no por la extensión: los exportadores mandan «.xls» que en realidad son CSV
+// más seguido de lo que uno querría.
+func CargarHoja(archivo []byte) (Hoja, error) {
 	if len(archivo) == 0 {
-		return nil, ErrArchivoVacio
+		return Hoja{}, ErrArchivoVacio
 	}
 	// Los XLSX son ZIP: empiezan con "PK".
 	if len(archivo) > 2 && archivo[0] == 'P' && archivo[1] == 'K' {
-		return gridDeExcel(archivo)
+		return hojaDeExcel(archivo)
 	}
-	return gridDeCSV(archivo)
+	g, err := gridDeCSV(archivo)
+	if err != nil {
+		return Hoja{}, err
+	}
+	return HojaDe(g), nil
 }
 
-func gridDeExcel(archivo []byte) (Grid, error) {
+// HojaDe arma una Hoja a partir de un grid de texto suelto, donde lo escrito ES el valor:
+// un CSV, o una tabla construida a mano. Las fechas se leen entonces del texto, que es el
+// único camino disponible y el correcto para esas fuentes.
+func HojaDe(g Grid) Hoja { return Hoja{Valores: g, Crudos: g} }
+
+// hojaDeExcel recorre la hoja DOS veces, con y sin aplicar el formato del libro.
+//
+// Dos pasadas y no una porque las dos lecturas sirven para cosas distintas y ninguna
+// reemplaza a la otra: el texto formateado es lo que el usuario ve y lo que hay que
+// mostrarle cuando algo no se entiende, y el crudo es lo único que permite leer una fecha
+// sin adivinar si el primer número es el día o el mes.
+func hojaDeExcel(archivo []byte) (Hoja, error) {
 	f, err := excelize.OpenReader(bytes.NewReader(archivo))
 	if err != nil {
-		return nil, fmt.Errorf("cxc: abrir excel: %w", err)
+		return Hoja{}, fmt.Errorf("cxc: abrir excel: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 	hojas := f.GetSheetList()
 	if len(hojas) == 0 {
-		return nil, ErrArchivoVacio
+		return Hoja{}, ErrArchivoVacio
 	}
 	rows, err := f.GetRows(hojas[0])
 	if err != nil {
-		return nil, fmt.Errorf("cxc: leer filas: %w", err)
+		return Hoja{}, fmt.Errorf("cxc: leer filas: %w", err)
 	}
-	return Grid(rows), nil
+	crudas, err := f.GetRows(hojas[0], excelize.Options{RawCellValue: true})
+	if err != nil {
+		return Hoja{}, fmt.Errorf("cxc: leer filas sin formato: %w", err)
+	}
+	return Hoja{Valores: Grid(rows), Crudos: Grid(crudas)}, nil
 }
 
 // gridDeCSV lee el CSV detectando el separador. El sistema de origen exporta con `;`
