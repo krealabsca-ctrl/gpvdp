@@ -81,6 +81,8 @@ export interface FiltrosCartera {
   asociacion_id?: string;
   estado?: string;
   con_saldo?: boolean;
+  /** La cartera de RECUPERACIÓN: solo los que ya tienen al menos una cuota vencida. */
+  solo_vencido?: boolean;
   en_revision?: boolean;
   orden?: string;
   page?: number;
@@ -247,6 +249,24 @@ export const cxcApi = {
     return apiFetch<{ plan: PlanCargos; creados: number }>("/cxc/cargos/generar", {
       method: "POST",
       json: { desde, hasta, total },
+    });
+  },
+
+  /** Qué pasaría si se rehicieran los cargos. No toca nada. */
+  planRegeneracion(): Promise<RegeneracionPlan> {
+    return apiFetch<RegeneracionPlan>("/cxc/cargos/regenerar/plan", { method: "GET" });
+  },
+
+  /**
+   * Borra los cargos que no tienen nada colgando y los rehace con la cartera de HOY.
+   *
+   * `confirmarBorrados` tiene que ser EXACTAMENTE el número del plan: si entre mirar y apretar
+   * alguien registró un cobro, el servidor contesta 409 y no borra nada.
+   */
+  regenerarCargos(desde: string, hasta: string, confirmarBorrados: number): Promise<RegeneracionHecha> {
+    return apiFetch<RegeneracionHecha>("/cxc/cargos/regenerar", {
+      method: "POST",
+      json: { desde, hasta, confirmar_borrados: confirmarBorrados },
     });
   },
 };
@@ -1128,3 +1148,19 @@ export const preventivoApi = {
     return apiFetch<ListaPreventiva>("/cxc/preventivo", { method: "GET", query: { ...filtros } });
   },
 };
+
+/** Qué se puede rehacer de los cargos y qué no. */
+export interface RegeneracionPlan {
+  total: number;
+  /** Los que se pueden rehacer: sin pagos aplicados, sin notas de crédito y sin factura. */
+  borrables: number;
+  /** Los que NO se tocan porque algo cuelga de ellos. Si es > 0, la corrección queda a medias. */
+  se_conservan: number;
+  monto_borrable: string;
+}
+
+export interface RegeneracionHecha {
+  borrados: number;
+  creados: number;
+  plan: PlanCargos;
+}

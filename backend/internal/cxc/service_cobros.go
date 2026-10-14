@@ -79,6 +79,28 @@ func (s *Service) ConfirmarCobros(ctx context.Context, empresaID, importacionID 
 		if f.Anulado() || f.Monto.Sign() <= 0 {
 			continue
 		}
+		// SIN FECHA DE PAGO NO SE INTENTA SIQUIERA.
+		//
+		// `cobro_cxc.fecha_pago` es NOT NULL y el INSERT la pasa como `$4::date`, así que una
+		// fila sin fecha legible revienta en la base con «invalid input syntax for type date»
+		// (SQLSTATE 22007). El lector ya la había marcado con el motivo «sin fecha de pago
+		// legible»; lo que faltaba era que el confirmador le hiciera caso en vez de mandarla a
+		// estrellarse contra Postgres y mostrar el error crudo.
+		//
+		// Importa el volumen: si la columna de fechas del archivo viene con un nombre que el
+		// lector no reconoce, TODAS las filas caen acá, y la diferencia entre leer 3.695 veces
+		// «invalid input syntax for type date» o 3.695 veces «sin fecha de pago legible» es la
+		// diferencia entre no saber qué pasó y saber exactamente qué columna arreglar.
+		//
+		// No se descarta por estar en cuarentena en general: un cobro cuyo contrato no está en
+		// la cartera entra igual, a la bandeja de «sin identificar», porque la plata llegó de
+		// verdad. Lo único que no puede entrar es lo que la base no puede guardar.
+		if f.FechaPago == "" {
+			fallas = append(fallas, fmt.Sprintf(
+				"línea %d (consecutivo %s): sin fecha de pago legible — revisá esa columna en el archivo",
+				f.Linea, f.Consecutivo))
+			continue
+		}
 		in := CobroInput{
 			Contrato: f.Contrato, Consecutivo: f.Consecutivo,
 			FechaPago: f.FechaPago, FechaBancaria: f.FechaBanco, FechaRegistro: f.FechaCreado,

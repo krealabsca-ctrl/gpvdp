@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -37,10 +38,10 @@ type proveedorRequest struct {
 	ExentoIVA          bool   `json:"exento_iva"`
 	CondicionPago      string `json:"condicion_pago" validate:"omitempty,oneof=CONTADO CREDITO"`
 	PlazoCreditoDias   int    `json:"plazo_credito_dias" validate:"gte=0,lte=365"`
-	// PlazoManda: de dónde sale el vencimiento de sus facturas. «XML» (default, el comprobante
+	// ConvenioManda: de dónde sale el vencimiento de sus facturas. «XML» (default, el comprobante
 	// manda) o «PROVEEDOR» (manda este plazo, aunque el XML traiga otro). Vacío conserva lo que
 	// el proveedor ya tenía configurado.
-	PlazoManda string `json:"plazo_manda" validate:"omitempty,oneof=XML PROVEEDOR"`
+	ConvenioManda string `json:"convenio_manda" validate:"omitempty,oneof=XML PROVEEDOR"`
 	// Gasto predeterminado (alimenta el AUTO de sus facturas).
 	GastoConceptoID         string `json:"gasto_concepto_id" validate:"omitempty,uuid"`
 	GastoClasificacionID    string `json:"gasto_clasificacion_id" validate:"omitempty,uuid"`
@@ -69,7 +70,7 @@ func (req proveedorRequest) aInput() (ProveedorInput, error) {
 		ExentoIVA:               req.ExentoIVA,
 		CondicionPago:           req.CondicionPago,
 		PlazoCreditoDias:        req.PlazoCreditoDias,
-		PlazoManda:              req.PlazoManda,
+		ConvenioManda:           req.ConvenioManda,
 		GastoConceptoID:         req.GastoConceptoID,
 		GastoClasificacionID:    req.GastoClasificacionID,
 		GastoSubclasificacionID: req.GastoSubclasificacionID,
@@ -204,47 +205,47 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, errSMTP.Error())
 	case errors.Is(err, ErrProveedorNoEncontrado), errors.Is(err, ErrDocumentoNoEncontrado), errors.Is(err, ErrComprobanteNoEncontrado), errors.Is(err, ErrDepartamentoNoEncontrado), errors.Is(err, ErrAplicacionNoEncontrada),
 		errors.Is(err, ErrFondoNoEncontrado), errors.Is(err, ErrValeNoEncontrado):
-		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, err.Error())
+		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, sinPrefijoCxP(err))
 	case errors.Is(err, ErrFuenteNoEncontrada), errors.Is(err, ErrRecepcionNoEncontrada),
 		errors.Is(err, ErrRemesaNoEncontrada), errors.Is(err, ErrLoteNoEncontrado):
-		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, err.Error())
+		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, sinPrefijoCxP(err))
 	case errors.Is(err, ErrFuenteDuplicada), errors.Is(err, ErrCodigoPagoDuplicado):
-		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoCxP(err))
 	case errors.Is(err, ErrRecepcionNoReintentable):
-		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
 	case errors.Is(err, ErrTokenRecepcionInvalido):
-		httpx.Abort(c, http.StatusUnauthorized, httpx.CodeNoAutenticado, err.Error())
+		httpx.Abort(c, http.StatusUnauthorized, httpx.CodeNoAutenticado, sinPrefijoCxP(err))
 	case errors.Is(err, ErrFondoDuplicado):
-		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoCxP(err))
 	case errors.Is(err, ErrNoEsCustodio), errors.Is(err, ErrSinPermisoCartera):
-		httpx.Abort(c, http.StatusForbidden, httpx.CodeSinPermiso, err.Error())
+		httpx.Abort(c, http.StatusForbidden, httpx.CodeSinPermiso, sinPrefijoCxP(err))
 	case errors.Is(err, ErrValeSobreLimite), errors.Is(err, ErrFondoInsuficiente), errors.Is(err, ErrFondoSinProveedor),
 		errors.Is(err, ErrSinValesPendientes), errors.Is(err, ErrValeYaEnReposicion), errors.Is(err, ErrFondoInactivo),
 		errors.Is(err, ErrValeGastoRequerido), errors.Is(err, ErrValeDetalleRequerido):
-		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
 	case errors.Is(err, ErrDocNoPagado):
-		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoCxP(err))
 	// La carpeta de comprobantes. «Vacía» es un pedido mal armado (400); «nada que adjuntar» es un
 	// pedido correcto con una carpeta que no sirve (422) — y ese segundo caso lo contesta el
 	// handler con el cruce adjunto, porque el detalle de por qué es lo único que permite
 	// arreglarla. Acá quedan los dos igual para que ninguna otra ruta los deje salir como 500.
 	case errors.Is(err, ErrCarpetaVacia):
-		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, err.Error())
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, sinPrefijoCxP(err))
 	case errors.Is(err, ErrNadaQueAdjuntar):
-		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
 	// ErrSinDestinatario lo devuelve el transporte cuando la dirección queda vacía al limpiarla
 	// (un correo de proveedor de solo espacios pasa el `!= ""` del service). Sin este caso saldría
 	// como 500 «error interno» sobre algo que sí se puede explicar.
 	case errors.Is(err, ErrProveedorSinEmail), errors.Is(err, shared.ErrSinDestinatario):
-		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
 	case errors.Is(err, ErrProveedorDuplicado), errors.Is(err, ErrDocumentoDuplicado), errors.Is(err, ErrDepartamentoDuplicado):
-		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoCxP(err))
 	case errors.Is(err, ErrTransicionInvalida), errors.Is(err, ErrYaAprobado):
-		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoCxP(err))
 	// Bloqueado para pago es una regla de negocio, no un conflicto de estado: el pedido está bien
 	// formado y el estado es correcto, lo que no corresponde es pagarlo por banco.
 	case errors.Is(err, ErrDocumentoBloqueadoParaPago):
-		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
 	// ErrSinComprobantes estaba declarado y sin traducir: subir un archivo legible pero sin
 	// comprobantes devolvía 500 «error interno» en vez de decir qué le faltaba al archivo. Lo
 	// encontró TestTodoCentinelaTieneTraduccionHTTP, no un usuario.
@@ -253,12 +254,12 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 		errors.Is(err, ErrAccionInvalida), errors.Is(err, ErrFechaPagoRequerida), errors.Is(err, ErrSinDocumentos),
 		errors.Is(err, ErrPeriodoInvalido), errors.Is(err, ErrModoPagoInvalido),
 		errors.Is(err, ErrCodigoPagoInvalido):
-		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, err.Error())
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, sinPrefijoCxP(err))
 	case errors.Is(err, ErrRolNoAutorizado), errors.Is(err, ErrNoEsValidador), errors.Is(err, ErrValidadorNoAprueba),
 		errors.Is(err, ErrNoAprobadorContabilidad), errors.Is(err, ErrMarcadorNoAprueba):
-		httpx.Abort(c, http.StatusForbidden, httpx.CodeSinPermiso, err.Error())
+		httpx.Abort(c, http.StatusForbidden, httpx.CodeSinPermiso, sinPrefijoCxP(err))
 	case errors.Is(err, ErrCatalogoInvalido):
-		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, err.Error())
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, sinPrefijoCxP(err))
 	case errors.Is(err, ErrDeptoRequerido), errors.Is(err, ErrRespaldoRequerido), errors.Is(err, ErrEscalamientoNoAplica),
 		errors.Is(err, ErrClaveRequerida), errors.Is(err, ErrMotivoAnticipoRequerido),
 		errors.Is(err, ErrMotivoContabilidadRequerido), errors.Is(err, ErrContabilidadNoModificable),
@@ -270,24 +271,32 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 		// Los dos son 422 y los dos dicen qué hacer; ninguno cae silenciosamente al correo global,
 		// que sería mandarle a los proveedores de una empresa desde el buzón de otra.
 		errors.Is(err, ErrCifradoNoDisponible), errors.Is(err, ErrSecretoCorreoIlegible):
-		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
 	case errors.Is(err, ErrNoEsAnticipo), errors.Is(err, ErrAnticipoNoPagado), errors.Is(err, ErrProveedorDistinto),
 		errors.Is(err, ErrMonedaNoNeteable), errors.Is(err, ErrFacturaNoNeteable), errors.Is(err, ErrMontoAplicacionInvalido),
 		errors.Is(err, ErrReversaNoPermitida):
-		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
 	// Responsabilidades mensuales (migración 0082).
 	case errors.Is(err, ErrResponsabilidadNoEncontrada), errors.Is(err, ErrPeriodoNoEncontrado):
-		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, err.Error())
+		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, sinPrefijoCxP(err))
 	case errors.Is(err, ErrPeriodoYaCerrado):
-		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoCxP(err))
 	// ErrPruebaYaUsada es 409: esa factura o ese débito YA cerró otra responsabilidad, y dejar
 	// pasar el segundo haría que un solo pago apagara dos alarmas.
 	case errors.Is(err, ErrPruebaYaUsada):
-		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoCxP(err))
+	// Liberar el candado del contado (mig 0097). El motivo es 422 —el pedido está bien formado,
+	// le falta la explicación que exige la regla— y «no está bloqueada» es 409, porque el estado
+	// de la factura no es el que el pedido supone. Los dos tienen que llegar con su texto a la
+	// pantalla: salir como «error interno» es justo lo que esta semana obligó a adivinar.
+	case errors.Is(err, ErrMotivoLiberacionRequerido):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
+	case errors.Is(err, ErrNoEstaBloqueada):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoCxP(err))
 	case errors.Is(err, ErrMotivoObligatorio), errors.Is(err, ErrPruebaObligatoria),
 		errors.Is(err, ErrSinComprobanteNoDeducible), errors.Is(err, ErrRespaldoSinArchivo),
 		errors.Is(err, ErrPeriodicidadInvalida):
-		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
 	default:
 		// Red de seguridad: id UUID inválido (22P02) o fecha inválida (22007/22008) → 400, no 500.
 		var pgErr *pgconn.PgError
@@ -295,8 +304,10 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 			httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "dato inválido (id o fecha con formato incorrecto)")
 			return
 		}
-		h.log.Error("cxp "+op, zap.Error(err))
-		httpx.Abort(c, http.StatusInternalServerError, httpx.CodeErrorInterno, "error interno")
+		// La causa real se guarda en el log con una REFERENCIA que el usuario también ve. Sin
+		// ella, un «error interno» pelado obliga a adivinar: el motivo existe, pero está en una
+		// línea de log que nadie sabe cuál es (ver internal/httpx/interno.go).
+		httpx.AbortInterno(c, h.log, "cxp "+op, err)
 	}
 }
 
@@ -309,4 +320,14 @@ func atoiDefault(s string, def int) int {
 		return def
 	}
 	return n
+}
+
+// sinPrefijoCxP quita el «cxp: » con que se declaran los errores de dominio.
+//
+// El prefijo existe para que un error que viaja por los logs diga de qué módulo salió. En la
+// PANTALLA no aporta nada: quien lee «cxp: decí por qué esta factura sí se paga por banco» ya
+// sabe que está en Cuentas por pagar, y el prefijo solo le da aspecto de error técnico a un
+// mensaje escrito para él. Bancos, Grupo e Inventario ya lo hacían; CxP era el que faltaba.
+func sinPrefijoCxP(err error) string {
+	return strings.TrimPrefix(err.Error(), "cxp: ")
 }

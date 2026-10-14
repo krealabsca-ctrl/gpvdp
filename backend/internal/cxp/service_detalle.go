@@ -153,3 +153,77 @@ func (s *Service) CargarDetalleXML(ctx context.Context, empresaID string, archiv
 func (s *Service) LineasDeDocumento(ctx context.Context, empresaID, documentoID string) ([]LineaGuardada, error) {
 	return s.repo.LineasDeDocumento(ctx, empresaID, documentoID)
 }
+
+// topeRellenoPorCorrida acota cuántas facturas se rellenan por llamada.
+//
+// No es una limitación técnica: es para que la pantalla conteste rápido y el usuario vea avanzar
+// el contador en vez de esperar sin señal frente a mil facturas. Si quedan más, el botón sigue
+// ahí diciendo cuántas faltan.
+const topeRellenoPorCorrida = 300
+
+// ResultadoRelleno es el parte de una corrida de relleno.
+type ResultadoRelleno struct {
+	Procesadas int `json:"procesadas"`
+	Facturas   int `json:"facturas"`
+	Lineas     int `json:"lineas"`
+	// Ilegibles: el XML está guardado pero no se pudo leer. Se cuentan aparte porque son un
+	// problema distinto —un archivo roto— y no «todavía no se procesó».
+	Ilegibles int `json:"ilegibles"`
+	// SinLineas: el comprobante se leyó pero no traía detalle (pasa con algunos tiquetes).
+	SinLineas int `json:"sin_lineas"`
+	// Faltan: cuántas quedan para la próxima corrida. 0 = terminó.
+	Faltan int `json:"faltan"`
+}
+
+// PendientesDeDetalle dice cuántas facturas que YA entraron por el buzón pueden rellenarse con el
+// XML que el sistema ya tiene guardado.
+func (s *Service) PendientesDeDetalle(ctx context.Context, empresaID string) (int, error) {
+	return s.repo.ContarRecepcionesSinDetalle(ctx, empresaID)
+}
+
+// RellenarDetalleDesdeRecepcion extrae el detalle de los XML que ya están guardados en la base.
+//
+// EL CAMINO REAL DE LAS FACTURAS ES EL BUZÓN, no la carga manual: «esto se alimenta de la
+// recepción, ya que el importador no lo usamos» (Director Financiero, 13-oct-2026). Todo lo que
+// entró por ahí antes de que se guardara el detalle tiene su `xml_crudo` en la base y la tabla de
+// líneas vacía. No hay nada que subir: el archivo ya está acá.
+//
+// Una factura cuyo XML no se pueda leer NO corta la corrida: se cuenta y se sigue. Frenar todo por
+// un comprobante roto dejaría sin detalle a las otras mil.
+func (s *Service) RellenarDetalleDesdeRecepcion(ctx context.Context, empresaID string) (ResultadoRelleno, error) {
+	pendientes, err := s.repo.RecepcionesSinDetalle(ctx, empresaID, topeRellenoPorCorrida)
+	if err != nil {
+		return ResultadoRelleno{}, err
+	}
+
+	var res ResultadoRelleno
+	for _, p := range pendientes {
+		res.Procesadas++
+		comps, err := leerComprobantes(p.XML)
+		if err != nil || len(comps) == 0 {
+			res.Ilegibles++
+			continue
+		}
+		d := DetalleDeXML(comps[0])
+		if len(d.Lineas) == 0 {
+			res.SinLineas++
+			continue
+		}
+		if err := s.repo.GuardarDetalle(ctx, empresaID, p.DocumentoID, d.Lineas); err != nil {
+			return ResultadoRelleno{}, err
+		}
+		res.Facturas++
+		res.Lineas += len(d.Lineas)
+	}
+
+	// Lo que queda DESPUÉS de esta corrida. Las ilegibles y las sin líneas siguen contando como
+	// pendientes —su `detalle_lineas` sigue en 0— y eso es correcto: el botón seguiría ofreciendo
+	// reintentarlas. Por eso el parte las nombra aparte, para que se vea que no son «faltan por
+	// procesar» sino «no hay nada que sacarles».
+	faltan, err := s.repo.ContarRecepcionesSinDetalle(ctx, empresaID)
+	if err != nil {
+		return ResultadoRelleno{}, err
+	}
+	res.Faltan = faltan
+	return res, nil
+}

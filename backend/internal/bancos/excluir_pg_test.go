@@ -37,6 +37,10 @@ var tablasExcluir = []string{
 	"empresa", "usuario", "banco", "cuenta_bancaria", "importacion", "movimiento_bancario",
 	// La división manda la parte apartada a otra partida, así que hace falta el catálogo.
 	"concepto", "clasificacion",
+	// La huella CxP→Bancos trae el gasto de lo que se pagó (13-oct-2026), así que la lista de
+	// movimientos toca las tablas de CxP. Sin ellas el esquema temporal da «relation does not
+	// exist», que es lo correcto: el pool solo ve este esquema.
+	"proveedor", "lote_pago", "remesa_pago", "documento_cxp",
 }
 
 func baseDeExclusion(t *testing.T) *pgRepository {

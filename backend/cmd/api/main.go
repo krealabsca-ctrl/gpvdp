@@ -95,7 +95,7 @@ func run(migrateOnly bool) error {
 	if err := rbacSvc.EnsureDefaults(ctx); err != nil {
 		logger.Error("rbac: no se pudieron sembrar los permisos por defecto (se continúa)", zap.Error(err))
 	}
-	rbacH := rbac.NewHandler(rbacSvc)
+	rbacH := rbac.NewHandler(rbacSvc, logger)
 
 	bancosSvc := bancos.NewService(bancos.NewRepository(pool), audit, logger, cfg.CierreBloqueante)
 	// Sync BCCR (Fase D): inyecta el fetcher solo si hay credenciales; sin ellas el
@@ -160,7 +160,7 @@ func run(migrateOnly bool) error {
 	// Plantillas de las notificaciones: el TEXTO de los correos es configuración por empresa.
 	// CxP y RRHH le piden a este servicio el asunto y el cuerpo antes de enviar.
 	plantillasSvc := plantillas.NewService(plantillas.NewRepository(pool), audit)
-	plantillasH := plantillas.NewHandler(plantillasSvc)
+	plantillasH := plantillas.NewHandler(plantillasSvc, logger)
 	cxpSvc.SetPlantillas(plantillasSvc)
 
 	// RRHH / Nómina (Fase 3): siembra el catálogo base de conceptos (idempotente).

@@ -44,6 +44,7 @@ import {
 } from "@/features/cxp/hooks";
 import { useClasificaciones, useConceptos } from "@/features/bancos/hooks";
 import { useTienePermiso } from "@/features/auth/permisos";
+import { CandadoDeContado } from "@/features/cxp/components/CandadoDeContado";
 import { CargarIBANPanel } from "@/features/cxp/components/CargarIBANPanel";
 import { GastoCombobox, type GastoElegido } from "@/features/cxp/components/GastoCombobox";
 import type { FiltrosProveedores, Proveedor, ProveedorInput } from "@/api/cxp";
@@ -99,7 +100,7 @@ interface FormState {
   exento_iva: boolean;
   condicion_pago: string;
   plazo_credito_dias: string;
-  plazo_manda: string;
+  convenio_manda: string;
   departamento: string;
   gasto: GastoElegido | null;
 }
@@ -115,7 +116,7 @@ const VACIO: FormState = {
   exento_iva: false,
   condicion_pago: "CONTADO",
   plazo_credito_dias: "0",
-  plazo_manda: "XML",
+  convenio_manda: "XML",
   departamento: "",
   gasto: null,
 };
@@ -198,7 +199,7 @@ export function ProveedoresPage() {
       exento_iva: p.exento_iva,
       condicion_pago: p.condicion_pago || "CONTADO",
       plazo_credito_dias: String(p.plazo_credito_dias ?? 0),
-      plazo_manda: p.plazo_manda || "XML",
+      convenio_manda: p.convenio_manda || "XML",
       departamento: p.departamento || "",
       gasto: p.gasto_concepto_id
         ? {
@@ -233,7 +234,7 @@ export function ProveedoresPage() {
       plazo_credito_dias: form.condicion_pago === "CREDITO" ? Number(form.plazo_credito_dias) || 0 : 0,
       // Un proveedor de contado no tiene vencimiento que disputar: se guarda XML para no dejar
       // una preferencia colgada que reviva si alguien lo pasa a crédito más adelante.
-      plazo_manda: form.condicion_pago === "CREDITO" ? (form.plazo_manda as "XML" | "PROVEEDOR") : "XML",
+      convenio_manda: form.condicion_pago === "CREDITO" ? (form.convenio_manda as "XML" | "PROVEEDOR") : "XML",
       departamento: form.departamento || undefined,
       gasto_concepto_id: form.gasto?.conceptoId || undefined,
       gasto_clasificacion_id: form.gasto?.clasificacionId || undefined,
@@ -375,22 +376,24 @@ export function ProveedoresPage() {
                     placeholder="30"
                     inputMode="numeric"
                   />
-                  {/* De dónde sale el vencimiento de SUS facturas (mig 0095).
-                      Solo aparece en crédito: un proveedor de contado no tiene vencimiento, así
-                      que la opción no significaría nada. */}
+                  {/* A QUIÉN SE LE CREE SOBRE ESTE PROVEEDOR (migs 0095 y 0097).
+                      Un solo switch para dos cosas que son la misma pregunta: el plazo de
+                      vencimiento y la condición de venta. Dos casillas separadas para «¿le creo
+                      al comprobante o al convenio?» es lo que vuelve inusable una pantalla.
+                      Solo aparece en crédito: en contado las dos coinciden y no hay qué elegir. */}
                   <Select
-                    label="El vencimiento lo manda"
-                    value={form.plazo_manda}
-                    onChange={(e) => set("plazo_manda", e.target.value)}
+                    label="Cuando la factura y el convenio no coinciden, manda"
+                    value={form.convenio_manda}
+                    onChange={(e) => set("convenio_manda", e.target.value)}
                     options={[
                       { value: "XML", label: "La factura (lo que declare el comprobante)" },
-                      { value: "PROVEEDOR", label: `El convenio (emisión + ${form.plazo_credito_dias || "0"} días)` },
+                      { value: "PROVEEDOR", label: `El convenio (crédito a ${form.plazo_credito_dias || "0"} días)` },
                     ]}
                   />
                   <p className="-mt-1 text-xs text-content-muted sm:col-span-2">
-                    {form.plazo_manda === "PROVEEDOR"
-                      ? "Las facturas nuevas de este proveedor vencerán según el plazo de arriba, aunque el comprobante declare otro."
-                      : "Se usa el vencimiento que trae el comprobante. Si declara un plazo que no es el pactado —hay proveedores que ponen 90 días por defecto—, elegí «El convenio»."}
+                    {form.convenio_manda === "PROVEEDOR"
+                      ? "Sus facturas nuevas vencerán según el plazo de arriba y se podrán pagar por banco, aunque el comprobante declare otro plazo o diga «contado»."
+                      : "Se usa lo que trae el comprobante. Si declara un plazo que no es el pactado —hay proveedores que ponen 90 días por defecto— o dice «contado» cuando en realidad es a crédito, elegí «El convenio»."}
                   </p>
                 </>
               )}
@@ -435,6 +438,14 @@ export function ProveedoresPage() {
                   Cancelar
                 </Button>
               </div>
+              {/* Lo que el cambio de arriba NO arregla: las facturas que YA entraron trancadas
+                  por el candado del contado. Aparece solo si las hay, y solo al editar —un
+                  proveedor que se está creando todavía no tiene facturas—. */}
+              {editId && (
+                <div className="sm:col-span-3">
+                  <CandadoDeContado proveedorId={editId} />
+                </div>
+              )}
             </form>
           </CardContent>
         </Card>
@@ -585,7 +596,7 @@ export function ProveedoresPage() {
                         <Badge tone="pendiente">Crédito {p.plazo_credito_dias}d</Badge>
                         {/* Que el convenio mande se VE en la lista: si no, hay que abrir ficha por
                             ficha para saber cuáles quedaron configurados, y no se audita. */}
-                        {p.plazo_manda === "PROVEEDOR" && (
+                        {p.convenio_manda === "PROVEEDOR" && (
                           <span
                             className="ml-1"
                             title="El vencimiento sale de este plazo, no del que declare la factura"

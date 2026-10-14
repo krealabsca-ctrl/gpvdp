@@ -285,8 +285,7 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 	case errors.Is(err, ErrSaldoInvalido), errors.Is(err, ErrSinCuentas):
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, err.Error())
 	default:
-		h.log.Error("bancos "+op, zap.Error(err))
-		httpx.Abort(c, http.StatusInternalServerError, httpx.CodeErrorInterno, "error interno")
+		httpx.AbortInterno(c, h.log, "bancos "+op, err)
 	}
 }
 

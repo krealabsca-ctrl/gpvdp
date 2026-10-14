@@ -588,6 +588,16 @@ export interface PagoCxPDeMovimiento {
   huella: string;
   /** Cuántas facturas cubre: 1 en un pago suelto, más en uno agrupado por proveedor. */
   facturas: number;
+  /**
+   * El TIPO DE GASTO de lo que se pagó, tal como está clasificado en CxP. Vacíos si la factura
+   * todavía no se clasificó.
+   *
+   * En un pago AGRUPADO solo vienen con valor si TODAS las facturas comparten el mismo gasto: si
+   * mezclan, no hay uno que describa el pago y mostrar cualquiera atribuiría la plata al rubro
+   * equivocado.
+   */
+  concepto: string;
+  clasificacion: string;
 }
 
 /** Cómo se cerró un aviso: la partida se corrigió, o estaba bien y se explica por qué. */

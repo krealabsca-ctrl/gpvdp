@@ -69,6 +69,7 @@ export function CarteraPage() {
   const [formaPagoId, setFormaPagoId] = useState("");
   const [asociacionId, setAsociacionId] = useState("");
   const [conSaldo, setConSaldo] = useState(false);
+  const [soloVencido, setSoloVencido] = useState(false);
   const [enRevision, setEnRevision] = useState(params.get("en_revision") === "1");
   // Contrato que se está corrigiendo (null = diálogo cerrado).
   const [corrigiendo, setCorrigiendo] = useState<ContratoCxc | null>(null);
@@ -81,7 +82,7 @@ export function CarteraPage() {
   }, [qInput]);
   useEffect(() => {
     setPage(1);
-  }, [q, sedeId, modalidadId, formaPagoId, asociacionId, conSaldo, enRevision, orden]);
+  }, [q, sedeId, modalidadId, formaPagoId, asociacionId, conSaldo, soloVencido, enRevision, orden]);
 
   // UN solo objeto de filtros: el mismo que mide el encabezado y el que trae las filas.
   const filtros = {
@@ -91,6 +92,7 @@ export function CarteraPage() {
     ...(formaPagoId ? { forma_pago_id: formaPagoId } : {}),
     ...(asociacionId ? { asociacion_id: asociacionId } : {}),
     ...(conSaldo ? { con_saldo: true } : {}),
+    ...(soloVencido ? { solo_vencido: true } : {}),
     ...(enRevision ? { en_revision: true } : {}),
     ...(orden ? { orden } : {}),
   };
@@ -164,6 +166,15 @@ export function CarteraPage() {
         <label className="flex items-center gap-2 pb-2 text-xs text-content-muted">
           <input type="checkbox" checked={conSaldo} onChange={(e) => setConSaldo(e.target.checked)} className="h-3.5 w-3.5 rounded border-border accent-accent" />
           Solo con saldo
+        </label>
+        {/* LA CARTERA DE RECUPERACIÓN: solo lo que YA venció.
+            «Todo lo que tiene fecha de próximo pago en noviembre ya no es parte de la cartera
+            actual de recuperación, pero lo anterior sí» (13-oct-2026). «Solo con saldo» no sirve
+            para eso: incluye al que debe la cuota que vence la semana que viene, y a ése no se
+            le llama. */}
+        <label className="flex items-center gap-2 pb-2 text-xs text-content-muted" title="Los que ya tienen al menos una cuota vencida. Deja fuera a los que deben una cuota que todavía no vence.">
+          <input type="checkbox" checked={soloVencido} onChange={(e) => setSoloVencido(e.target.checked)} className="h-3.5 w-3.5 rounded border-border accent-accent" />
+          Solo en mora
         </label>
         <label className="flex items-center gap-2 pb-2 text-xs text-content-muted">
           <input type="checkbox" checked={enRevision} onChange={(e) => setEnRevision(e.target.checked)} className="h-3.5 w-3.5 rounded border-border accent-accent" />

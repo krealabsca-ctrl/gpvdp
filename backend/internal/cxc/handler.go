@@ -2,6 +2,7 @@ package cxc
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -65,6 +66,7 @@ func (h *Handler) Contratos(c *gin.Context) {
 		AsociacionID: c.Query("asociacion_id"),
 		Estado:       c.Query("estado"),
 		ConSaldo:     c.Query("con_saldo") == "true",
+		SoloVencido:  c.Query("solo_vencido") == "true",
 		EnRevision:   c.Query("en_revision") == "true",
 		Orden:        c.Query("orden"),
 		Page:         atoiDefault(c.Query("page"), 1),
@@ -214,7 +216,20 @@ func (h *Handler) archivoDe(c *gin.Context) ([]byte, string, error) {
 		return nil, "", errors.New("falta el archivo (campo «archivo»)")
 	}
 	if fh.Size > TopeArchivo {
-		return nil, "", errors.New("el archivo supera el tamaño máximo permitido")
+		// EL MENSAJE DICE LOS DOS NÚMEROS.
+		//
+		// «Supera el tamaño máximo» obliga a adivinar por cuánto y contra qué: no se sabe si
+		// sobra un megabyte o cincuenta, ni si conviene partir el archivo en dos o en veinte.
+		// Con las dos cifras a la vista la decisión se toma sola.
+		//
+		// Y lleva el aviso del proxy porque el límite EFECTIVO puede ser más bajo: el Caddyfile
+		// del despliegue corta en 24 MB, así que un archivo de 40 MB pasa este control y muere
+		// antes de llegar acá, con un error del servidor web que no dice nada de esto.
+		return nil, "", fmt.Errorf(
+			"el archivo pesa %s y el máximo es %s. Partilo en varios y subilos de a uno "+
+				"—reimportar no duplica—. Si el sistema está detrás de un proxy, el tope real "+
+				"puede ser menor",
+			enMegas(fh.Size), enMegas(TopeArchivo))
 	}
 	f, err := fh.Open()
 	if err != nil {
@@ -231,12 +246,21 @@ func (h *Handler) archivoDe(c *gin.Context) ([]byte, string, error) {
 func (h *Handler) error(c *gin.Context, err error, op string) {
 	var paramInvalido *ErrParametroInvalido
 	switch {
-	case errors.Is(err, ErrContratoNoEncontrado), errors.Is(err, ErrImportacionAjena):
+	case errors.Is(err, ErrContratoNoEncontrado), errors.Is(err, ErrImportacionAjena),
+		// Estaba declarado y sin traducir: abrir la planilla de una asociación que no existe
+		// en la empresa devolvía 500 «error interno» en vez de decir qué no se encontró.
+		errors.Is(err, ErrAsociacionNoEncontrada):
 		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, err.Error())
 	case errors.Is(err, ErrArchivoVacio), errors.Is(err, ErrSinEncabezado), errors.Is(err, ErrSinFilas):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
 	case errors.Is(err, ErrSinDesde), errors.Is(err, ErrRangoInvalido), errors.Is(err, ErrRangoDemasiadoAmplio):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, err.Error())
+	// Rehacer los cargos se confirma con el número exacto del plan. Que no coincida es un
+	// CONFLICTO de estado, no un pedido mal armado: entre mirar el plan y apretar el botón la
+	// cartera cambió —alguien registró un cobro— y el número ya no es el mismo. El mensaje trae
+	// los dos para que se vea cuánto se movió.
+	case errors.Is(err, ErrConfirmacionNoCoincide):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
 	case errors.Is(err, ErrCobroNoEncontrado):
 		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, err.Error())
 	case errors.Is(err, ErrCobroYaReversado), errors.Is(err, ErrCargoSinSaldo), errors.Is(err, ErrCargoAjeno),
@@ -292,10 +316,7 @@ func (h *Handler) error(c *gin.Context, err error, op string) {
 	case errors.Is(err, ErrSinPermisoSedes):
 		httpx.Abort(c, http.StatusForbidden, httpx.CodeSinPermiso, err.Error())
 	default:
-		if h.log != nil {
-			h.log.Error("cxc: error interno", zap.String("op", op), zap.Error(err))
-		}
-		httpx.Abort(c, http.StatusInternalServerError, httpx.CodeErrorInterno, "error interno")
+		httpx.AbortInterno(c, h.log, "cxc "+op, err)
 	}
 }
 
@@ -596,4 +617,50 @@ func (h *Handler) Gestiones(c *gin.Context) {
 		lista = []GestionFila{}
 	}
 	c.JSON(http.StatusOK, lista)
+}
+
+// enMegas escribe un tamaño en megabytes con un decimal, para ponerlo en un mensaje.
+//
+// Con un decimal y no con los bytes crudos: «67.108.864 bytes» no le dice nada a nadie, y
+// «64 MB» sí. El decimal importa para que un archivo de 64,3 MB no se lea como exactamente el
+// tope y parezca que el sistema lo rechazó por capricho.
+func enMegas(n int64) string {
+	return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+}
+
+// PlanRegeneracion GET /v1/cxc/cargos/regenerar/plan — qué pasaría si se rehicieran los cargos.
+func (h *Handler) PlanRegeneracion(c *gin.Context) {
+	empresaID, _, _, ok := h.claims(c)
+	if !ok {
+		return
+	}
+	plan, err := h.svc.PlanDeRegeneracion(c.Request.Context(), empresaID)
+	if err != nil {
+		h.error(c, err, "plan-regeneracion")
+		return
+	}
+	c.JSON(http.StatusOK, plan)
+}
+
+// RegenerarCargos POST /v1/cxc/cargos/regenerar — borra los cargos sin pagos y los rehace.
+func (h *Handler) RegenerarCargos(c *gin.Context) {
+	empresaID, rol, usuarioID, ok := h.claims(c)
+	if !ok {
+		return
+	}
+	var in struct {
+		Desde     string `json:"desde"`
+		Hasta     string `json:"hasta"`
+		Confirmar int    `json:"confirmar_borrados"`
+	}
+	if err := c.ShouldBindJSON(&in); err != nil {
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "cuerpo inválido")
+		return
+	}
+	res, err := h.svc.RegenerarCargos(c.Request.Context(), empresaID, rol, usuarioID, in.Desde, in.Hasta, in.Confirmar)
+	if err != nil {
+		h.error(c, err, "regenerar-cargos")
+		return
+	}
+	c.JSON(http.StatusOK, res)
 }

@@ -9,15 +9,23 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"go.uber.org/zap"
+
 	"github.com/gpvdp/erp/internal/auth"
 	"github.com/gpvdp/erp/internal/httpx"
 )
 
 // Handler expone la edición de plantillas.
-type Handler struct{ svc *Service }
+//
+// Lleva logger porque un error inesperado acá tiene que quedar escrito: sin él, el 500 sale con
+// una referencia que no lleva a ninguna línea de log y la trazabilidad es una promesa vacía.
+type Handler struct {
+	svc *Service
+	log *zap.Logger
+}
 
 // NewHandler construye el handler.
-func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
+func NewHandler(svc *Service, log *zap.Logger) *Handler { return &Handler{svc: svc, log: log} }
 
 // Listar GET /v1/plantillas — tipos de notificación con su texto vigente y sus variables.
 func (h *Handler) Listar(c *gin.Context) {
@@ -28,7 +36,7 @@ func (h *Handler) Listar(c *gin.Context) {
 	}
 	items, err := h.svc.Listar(c.Request.Context(), claims.EmpresaID)
 	if err != nil {
-		httpx.Abort(c, http.StatusInternalServerError, httpx.CodeErrorInterno, "error interno")
+		httpx.AbortInterno(c, h.log, "plantillas: listar", err)
 		return
 	}
 	c.JSON(http.StatusOK, items)
@@ -54,7 +62,7 @@ func (h *Handler) Guardar(c *gin.Context) {
 	desconocidas, err := h.svc.Guardar(c.Request.Context(), claims.EmpresaID, c.Param("clave"),
 		req.Asunto, req.Cuerpo, claims.UsuarioID())
 	if err != nil {
-		responder(c, err, desconocidas)
+		responder(c, h.log, err, desconocidas)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"guardada": true})
@@ -68,7 +76,7 @@ func (h *Handler) Restablecer(c *gin.Context) {
 		return
 	}
 	if err := h.svc.Restablecer(c.Request.Context(), claims.EmpresaID, c.Param("clave"), claims.UsuarioID()); err != nil {
-		responder(c, err, nil)
+		responder(c, h.log, err, nil)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"restablecida": true})
@@ -90,14 +98,15 @@ func (h *Handler) VistaPrevia(c *gin.Context) {
 	asunto, cuerpo, desconocidas, err := h.svc.VistaPrevia(c.Request.Context(), claims.EmpresaID,
 		c.Param("clave"), req.Asunto, req.Cuerpo)
 	if err != nil {
-		responder(c, err, desconocidas)
+		responder(c, h.log, err, desconocidas)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"asunto": asunto, "cuerpo": cuerpo, "desconocidas": desconocidas})
 }
 
-// responder mapea los errores de dominio a HTTP.
-func responder(c *gin.Context, err error, desconocidas []string) {
+// responder mapea los errores de dominio a HTTP. Recibe el logger porque el caso `default`
+// necesita dejar la causa escrita junto a la referencia que ve el usuario.
+func responder(c *gin.Context, log *zap.Logger, err error, desconocidas []string) {
 	switch {
 	case errors.Is(err, ErrTipoDesconocido):
 		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, "esa notificación no existe")
@@ -107,6 +116,6 @@ func responder(c *gin.Context, err error, desconocidas []string) {
 	case errors.Is(err, ErrAsuntoVacio), errors.Is(err, ErrCuerpoVacio):
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, err.Error())
 	default:
-		httpx.Abort(c, http.StatusInternalServerError, httpx.CodeErrorInterno, "error interno")
+		httpx.AbortInterno(c, log, "plantillas", err)
 	}
 }

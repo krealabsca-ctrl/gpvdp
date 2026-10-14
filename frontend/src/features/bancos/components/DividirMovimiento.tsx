@@ -70,7 +70,21 @@ export function DividirMovimiento(props: {
 
   if (q.isLoading) return <LoadingState label="Cargando el reparto" />;
   const d = q.data;
-  if (!d) return null;
+  // NUNCA EN BLANCO.
+  //
+  // Esto devolvía `null` cuando la consulta fallaba, así que el panel se abría vacío y el botón
+  // parecía no hacer nada — reportado por el Director Financiero el 13-oct-2026. El caso real:
+  // un movimiento EXCLUIDO de los libros, que el endpoint no devuelve porque no tiene partes que
+  // mostrar. El problema no era ese 404 sino que no se viera: un panel mudo manda a dudar del
+  // botón en vez de leer el motivo.
+  if (!d) {
+    return (
+      <div className="rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-content-muted">
+        No se pudo abrir el reparto de este movimiento.{" "}
+        {q.error ? mensajeError(q.error) : "Probá cerrando y abriendo de nuevo."}
+      </div>
+    );
+  }
 
   const dividido = d.partes.length > 1;
 

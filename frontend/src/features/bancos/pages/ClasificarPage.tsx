@@ -9,7 +9,7 @@
  * (match exacto = 100); todo lo demás queda "Por clasificar". Sin nivel intermedio.
  */
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Badge,
@@ -84,7 +84,21 @@ const META_AUTO = 90; // % de auto-clasificación al que apunta el motor
 export function ClasificarPage() {
   const { periodo } = usePeriodoActivo();
   const [tab, setTab] = useState<Tab>("pendientes");
-  const [todosPeriodos, setTodosPeriodos] = useState(true);
+  /**
+   * ARRANCA EN EL PERÍODO ACTIVO, no en el histórico completo.
+   *
+   * Decisión del Director Financiero (13-oct-2026): «en la operativa diaria debería estar
+   * desactivado por defecto, para que siempre tenga a la vista el historial del mes en curso».
+   * Clasificar es trabajo del mes: abrir con los 31.193 movimientos de tres años obliga a filtrar
+   * antes de empezar, todos los días.
+   *
+   * El riesgo de un default que ACOTA es que se lea como «no existe» lo que simplemente no está
+   * en el rango — el modo de falla recurrente de este proyecto. Por eso la casilla queda a la
+   * vista junto a las pestañas, los contadores siguen el mismo filtro (así nunca dicen 618
+   * mientras la lista muestra 20) y el encabezado de la lista nombra el período que se está
+   * mirando.
+   */
+  const [todosPeriodos, setTodosPeriodos] = useState(false);
   const periodoFiltro = todosPeriodos ? undefined : periodo;
 
   const resumenQ = useResumenClasificacion(periodoFiltro);
@@ -237,6 +251,25 @@ export function ClasificarPage() {
           Todos los períodos (histórico completo)
         </label>
       </div>
+
+      {/* EL MES EN CURSO PUEDE ESTAR VACÍO, y eso es normal: el estado de cuenta de un mes se
+          carga al mes siguiente. Sin este aviso, abrir y ver ceros se lee como «no hay nada» —o
+          como que el sistema se rompió— cuando lo que pasa es que todavía no se importó nada de
+          este mes. Es el mismo modo de falla que el filtro silencioso, y por eso el aviso trae
+          la salida al lado en vez de mandar a buscar la casilla. */}
+      {!todosPeriodos && r && r.total === 0 && (
+        <div className="rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-content-muted">
+          No hay movimientos cargados en {etiquetaPeriodo(periodo)}. Puede que el estado de cuenta
+          del mes todavía no se haya importado.{" "}
+          <button
+            type="button"
+            className="font-medium text-accent underline underline-offset-2"
+            onClick={() => setTodosPeriodos(true)}
+          >
+            Ver el histórico completo
+          </button>
+        </div>
+      )}
 
       {tab === "pendientes" && (
         <MovsTab
@@ -831,7 +864,8 @@ function MovsTab({
                   const sel = seleccion.has(m.id);
                   const ruta = m.concepto && m.clasificacion ? `${m.concepto} › ${m.clasificacion}` : "";
                   return (
-                    <TR key={m.id} className={sel ? "bg-accent/5" : undefined}>
+                    <Fragment key={m.id}>
+                    <TR className={sel ? "bg-accent/5" : undefined}>
                       <TD>
                         <input
                           type="checkbox"
@@ -880,6 +914,18 @@ function MovsTab({
                               : m.pago_cxp.consecutivo
                                 ? ` · FC ${m.pago_cxp.consecutivo.slice(-6)}`
                                 : ""}
+                            {/* DE QUÉ ERA el pago, no solo a quién se le pagó: es lo que hace
+                                falta para clasificar el movimiento sin abrir la factura. Viene
+                                vacío si todavía no se clasificó en CxP —y entonces no se pinta
+                                nada, que es lo honesto— y también si el pago agrupa facturas con
+                                gastos distintos, porque ahí no hay UNO que lo describa. */}
+                            {m.pago_cxp.clasificacion && (
+                              <span className="text-content-muted">
+                                {" · "}
+                                {m.pago_cxp.concepto ? `${m.pago_cxp.concepto} › ` : ""}
+                                {m.pago_cxp.clasificacion}
+                              </span>
+                            )}
                           </span>
                         )}
                         {/* El sello del sistema ANTERIOR. Dice «esto ya está resuelto afuera», que
@@ -914,24 +960,39 @@ function MovsTab({
                         {!esDebito ? <Importe m={m} /> : "—"}
                       </TD>
                       <TD>
-                        <ClasifCombobox
-                          actual={ruta}
-                          auto={m.estado_clasificacion === "AUTO"}
-                          esDebito={esDebito}
-                          onElegir={(c) => clasificarFila(m, c)}
-                        />
-                        {/* Repartir el movimiento entre partidas (mig 0094): el recibo de luz
-                            que trae un proyecto especial adentro. Va DEBAJO del clasificador
-                            porque es la excepción —primero se intenta clasificar entero— y
-                            porque las dos cosas responden a la misma pregunta: a qué partida
-                            corresponde este gasto. */}
-                        <button
-                          type="button"
-                          className="mt-1 text-[11px] text-content-muted underline-offset-2 hover:underline"
-                          onClick={() => setDividiendo(dividiendo === m.id ? null : m.id)}
-                        >
-                          {dividiendo === m.id ? "cerrar el reparto" : "dividir entre partidas"}
-                        </button>
+                        {/* EL REPARTO ENTRE PARTIDAS VIVE DETRÁS DEL «⋯», no en la fila.
+                            Decisión del Director Financiero (13-oct-2026): «en la operativa real
+                            diaria ese dividir en plena calificación estorba». Dividir es la
+                            excepción —0 de 31.193 movimientos—, y un enlace permanente bajo cada
+                            clasificador compite por la atención con el trabajo de todos los días.
+                            Detrás del menú sigue a un clic de donde estás mirando, que es mejor
+                            que mandarlo a otra pantalla donde habría que volver a buscar el
+                            movimiento. */}
+                        <div className="flex items-start gap-1">
+                          <div className="min-w-0 flex-1">
+                            <ClasifCombobox
+                              actual={ruta}
+                              auto={m.estado_clasificacion === "AUTO"}
+                              esDebito={esDebito}
+                              onElegir={(c) => clasificarFila(m, c)}
+                            />
+                          </div>
+                          {/* En un movimiento EXCLUIDO no se ofrece: está fuera de los libros, y
+                              repartir entre partidas una plata que ya no suma no significa nada.
+                              Ofrecerlo igual abría un panel que no podía cargar. */}
+                          {m.incluido && (
+                            <button
+                              type="button"
+                              className="mt-1 shrink-0 rounded px-1.5 py-0.5 text-content-muted hover:bg-surface-muted hover:text-content"
+                              aria-label={`Más acciones para el movimiento del ${m.fecha}`}
+                              title="Dividir entre partidas"
+                              aria-expanded={dividiendo === m.id}
+                              onClick={() => setDividiendo(dividiendo === m.id ? null : m.id)}
+                            >
+                              ⋯
+                            </button>
+                          )}
+                        </div>
                       </TD>
                       {estado === "CLASIFICADO" && (
                         <TD>
@@ -941,24 +1002,26 @@ function MovsTab({
                         </TD>
                       )}
                     </TR>
+                    {/* EL PANEL DEL REPARTO VA PEGADO A SU FILA, no al final de la tabla.
+                        Es una fila aparte a todo el ancho porque el formulario no cabe en una
+                        celda, pero tiene que salir DEBAJO del movimiento que se está dividiendo:
+                        al final de la tabla, con 50 filas en pantalla, abrirlo desde la tercera
+                        lo dejaba cuarenta y siete filas más abajo y el botón parecía no hacer
+                        nada. Reportado por el Director Financiero el 13-oct-2026. */}
+                    {dividiendo === m.id && (
+                      <TR>
+                        <TD colSpan={estado === "CLASIFICADO" ? 8 : 7}>
+                          <DividirMovimiento
+                            movimientoId={m.id}
+                            esDebito={esDebito}
+                            onCerrar={() => setDividiendo(null)}
+                          />
+                        </TD>
+                      </TR>
+                    )}
+                    </Fragment>
                   );
                 })}
-                {/* El panel del reparto va como una fila aparte, a todo el ancho: el formulario
-                    no cabe en una celda y partirlo en dos lugares haría perder de vista la
-                    invariante, que es lo único que hay que mirar al dividir. */}
-                {dividiendo && (
-                  <TR>
-                    <TD colSpan={estado === "CLASIFICADO" ? 8 : 7}>
-                      <DividirMovimiento
-                        movimientoId={dividiendo}
-                        esDebito={
-                          toNumber(items.find((x) => x.id === dividiendo)?.debito ?? "0") > 0
-                        }
-                        onCerrar={() => setDividiendo(null)}
-                      />
-                    </TD>
-                  </TR>
-                )}
               </TBody>
             </Table>
           </TableContainer>

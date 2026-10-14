@@ -67,9 +67,19 @@ import { cn } from "@/lib/cn";
  */
 export const VEREDICTO = {
   sinDetalle:
-    "Todavía no hay detalle cargado. Las facturas del sistema entraron por Excel y traen solo el " +
-    "encabezado; el detalle de qué se compró vive en el XML de Hacienda. Subí la carpeta de XML y " +
-    "cada uno busca su factura solo, por la clave.",
+    "Todavía no hay detalle cargado. El detalle de qué se compró vive en el XML de Hacienda: las " +
+    "facturas que llegan por el buzón lo traen, y las que se cargaron por Excel solo tienen el " +
+    "encabezado. Si tenés la carpeta de XML, subila y cada uno busca su factura solo, por la clave.",
+  /**
+   * Cuando el buzón YA dejó los XML guardados, no hay nada que subir.
+   *
+   * «Esto se alimenta de la recepción, ya que el importador no lo usamos, porque se automatizó ese
+   * proceso» (Director Financiero, 13-oct-2026). Pedirle que baje del correo unos archivos que el
+   * sistema ya tiene en la base sería trabajo inventado.
+   */
+  hayQueRellenar:
+    "Las facturas que entraron por el buzón ya tienen su XML guardado acá: el detalle se puede " +
+    "sacar de ahí sin subir nada.",
   coberturaBaja:
     "Este análisis cubre una parte del gasto. Los ítems que se ven son reales, pero los montos son " +
     "los de las facturas que YA tienen su XML cargado.",
@@ -103,6 +113,35 @@ export function GastoPage() {
     queryKey: ["cxp", empresaId, "gasto-compras", abierto, filtros],
     queryFn: () => gastoApi.compras(abierto as string, filtros),
     enabled: !!empresaId && !!abierto,
+  });
+
+  /**
+   * El relleno desde lo YA recibido: no sube archivos, lee los XML que el buzón dejó guardados.
+   *
+   * Es el camino normal en esta operación —las facturas llegan solas por correo— y por eso el
+   * aviso correspondiente va ARRIBA del de «subí la carpeta»: mandar a buscar al correo unos
+   * archivos que el sistema ya tiene es trabajo inventado.
+   */
+  const rellenar = useMutation({
+    mutationFn: () => gastoApi.rellenarDesdeRecepcion(),
+    onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: ["cxp", empresaId] });
+      if (r.facturas > 0) {
+        toast.success(
+          `${r.facturas} factura(s) con detalle, ${r.lineas} línea(s)` +
+            (r.faltan > 0 ? ` · faltan ${r.faltan}` : ""),
+        );
+      } else {
+        // Cero facturas con algo procesado no es un éxito callado: o los XML no se pudieron leer,
+        // o no traían detalle. Las dos cosas se dicen.
+        toast.info(
+          r.procesadas === 0
+            ? "No hay facturas con XML guardado pendientes de detalle."
+            : `Se revisaron ${r.procesadas}: ${r.ilegibles} ilegible(s), ${r.sin_lineas} sin líneas de detalle.`,
+        );
+      }
+    },
+    onError: (e) => toast.error(mensajeError(e)),
   });
 
   const subir = useMutation({
@@ -178,6 +217,25 @@ export function GastoPage() {
             sinCabys={analisis.data.cobertura.lineas_sin_cabys}
             sinConvertir={analisis.data.cobertura.lineas_sin_convertir}
           />
+
+          {/* LO PRIMERO, CUANDO HAY XML GUARDADO: rellenar desde el buzón. Va antes que todo lo
+              demás porque es el camino real de esta operación y no pide subir nada — el sistema
+              ya tiene los archivos. */}
+          {analisis.data.cobertura.pendientes_de_relleno > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  {analisis.data.cobertura.pendientes_de_relleno} factura(s) con su XML ya guardado
+                </CardTitle>
+                <CardDescription>{VEREDICTO.hayQueRellenar}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button onClick={() => rellenar.mutate()} loading={rellenar.isPending}>
+                  {rellenar.isPending ? "Leyendo los XML…" : "Sacar el detalle de lo ya recibido"}
+                </Button>
+              </CardContent>
+            </Card>
+          )}
 
           {!hayDetalle ? (
             <EmptyState message={VEREDICTO.sinDetalle} />

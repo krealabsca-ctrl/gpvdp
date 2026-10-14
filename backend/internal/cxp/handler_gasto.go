@@ -143,3 +143,20 @@ func filtrosGastoDe(c *gin.Context) FiltrosGasto {
 		Limite:      limite,
 	}
 }
+
+// RellenarDetalle POST /v1/cxp/detalle/desde-recepcion
+//
+// Extrae el detalle de los XML que YA están guardados en la base, sin pedirle al usuario que
+// vuelva a subir nada: las facturas entran por el buzón y su `xml_crudo` queda guardado.
+func (h *Handler) RellenarDetalle(c *gin.Context) {
+	empresaID, _, ok := ctxEmpresa(c)
+	if !ok {
+		return
+	}
+	res, err := h.svc.RellenarDetalleDesdeRecepcion(c.Request.Context(), empresaID)
+	if err != nil {
+		h.responderError(c, err, "rellenar-detalle")
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}

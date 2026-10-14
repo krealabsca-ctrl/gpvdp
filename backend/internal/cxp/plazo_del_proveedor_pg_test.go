@@ -34,9 +34,9 @@ func dosProveedores(t *testing.T) *pgRepository {
 			t.Fatalf("sembrar: %v", err)
 		}
 	}
-	exec(`INSERT INTO proveedor (id, empresa_id, nombre, condicion_pago, plazo_credito_dias, plazo_manda)
+	exec(`INSERT INTO proveedor (id, empresa_id, nombre, condicion_pago, plazo_credito_dias, convenio_manda)
 	      VALUES ($1::uuid, $2::uuid, 'PROVEEDOR QUE DECLARA 90', 'CREDITO', 30, 'XML')`, provXML, empresaLote)
-	exec(`INSERT INTO proveedor (id, empresa_id, nombre, condicion_pago, plazo_credito_dias, plazo_manda)
+	exec(`INSERT INTO proveedor (id, empresa_id, nombre, condicion_pago, plazo_credito_dias, convenio_manda)
 	      VALUES ($1::uuid, $2::uuid, 'PROVEEDOR CON CONVENIO', 'CREDITO', 30, 'PROVEEDOR')`, provConv, empresaLote)
 	return repo
 }
@@ -107,7 +107,7 @@ func TestUnProveedorDeContadoNoTieneVencimiento(t *testing.T) {
 	ctx := context.Background()
 	const provContado = "aa333333-3333-4333-a333-333333333333"
 	if _, err := repo.pool.Exec(ctx,
-		`INSERT INTO proveedor (id, empresa_id, nombre, condicion_pago, plazo_credito_dias, plazo_manda)
+		`INSERT INTO proveedor (id, empresa_id, nombre, condicion_pago, plazo_credito_dias, convenio_manda)
 		 VALUES ($1::uuid, $2::uuid, 'DE CONTADO', 'CONTADO', 0, 'PROVEEDOR')`,
 		provContado, empresaLote); err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestElDefaultEsXMLYNoMueveNada(t *testing.T) {
 	repo := baseDeLotes(t)
 	ctx := context.Background()
 	const prov = "aa444444-4444-4444-a444-444444444444"
-	// Se crea SIN decir plazo_manda: tiene que nacer en 'XML'.
+	// Se crea SIN decir convenio_manda: tiene que nacer en 'XML'.
 	if _, err := repo.pool.Exec(ctx,
 		`INSERT INTO proveedor (id, empresa_id, nombre, condicion_pago, plazo_credito_dias)
 		 VALUES ($1::uuid, $2::uuid, 'SIN CONFIGURAR', 'CREDITO', 30)`, prov, empresaLote); err != nil {
@@ -131,11 +131,11 @@ func TestElDefaultEsXMLYNoMueveNada(t *testing.T) {
 	}
 	var manda string
 	if err := repo.pool.QueryRow(ctx,
-		`SELECT plazo_manda FROM proveedor WHERE id = $1::uuid`, prov).Scan(&manda); err != nil {
+		`SELECT convenio_manda FROM proveedor WHERE id = $1::uuid`, prov).Scan(&manda); err != nil {
 		t.Fatal(err)
 	}
 	if manda != "XML" {
-		t.Fatalf("un proveedor nuevo nació con plazo_manda = %q; el default tiene que ser XML para "+
+		t.Fatalf("un proveedor nuevo nació con convenio_manda = %q; el default tiene que ser XML para "+
 			"que la migración no recalcule en silencio los vencimientos de toda la cartera", manda)
 	}
 	if venc := crearConVencimiento(t, repo, prov, "2026-09-01", "2026-11-30", "DEF-1"); venc != "2026-11-30" {

@@ -479,6 +479,19 @@ func (f *fakeRepo) PagosSinComprobante(context.Context, string, string, bool) ([
 // casi todos SQL de agregación, y un fake que devuelva lo que se le pida no probaría ni el
 // GROUP BY ni la conversión de moneda ni el NULL del tipo de cambio, que es justo donde se rompen.
 // Se prueban en `gasto_pg_test.go` contra Postgres de verdad.
+// Liberar el candado del contado. El fake solo satisface la interfaz: lo que hay que probar acá
+// es que el UPDATE lleve la condición adentro y que la huella quede escrita, y eso no se ve
+// detrás de un doble. Se prueba en `liberar_pg_test.go` contra Postgres de verdad.
+func (f *fakeRepo) LiberarParaPago(context.Context, string, string, []string, string, string) ([]FacturaLiberada, error) {
+	return nil, nil
+}
+func (f *fakeRepo) FacturasDeContado(context.Context, string, string) ([]FacturaDeContado, error) {
+	return nil, nil
+}
+func (f *fakeRepo) EstadoDeBloqueo(context.Context, string, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
 func (f *fakeRepo) DocumentoDeClave(context.Context, string, string) (DocumentoBreve, error) {
 	return DocumentoBreve{}, ErrDocumentoNoEncontrado
 }
@@ -486,6 +499,10 @@ func (f *fakeRepo) GuardarDetalle(context.Context, string, string, []LineaDetall
 func (f *fakeRepo) LineasDeDocumento(context.Context, string, string) ([]LineaGuardada, error) {
 	return nil, nil
 }
+func (f *fakeRepo) RecepcionesSinDetalle(context.Context, string, int) ([]RecepcionConXML, error) {
+	return nil, nil
+}
+func (f *fakeRepo) ContarRecepcionesSinDetalle(context.Context, string) (int, error) { return 0, nil }
 func (f *fakeRepo) ItemsDeGasto(context.Context, string, FiltrosGasto) ([]ItemGasto, string, int, error) {
 	return nil, "0", 0, nil
 }

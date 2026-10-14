@@ -86,6 +86,9 @@ var Catalogo = []PermisoDef{
 	// El resultado del banco sobre un lote ya enviado: rebotó o se reintenta.
 	{"cxp.resultado_pago", "Cuentas por pagar", "Registrar el resultado del banco", "Marcar un pago como rebotado o reintentarlo", true},
 	{"cxp.aprobar", "Cuentas por pagar", "Aprobar facturas", "Aprobación según matriz de montos", true},
+	// CRÍTICO: levanta la única barrera que queda contra el doble pago de una factura que pudo
+	// haberse pagado ya por caja chica. Exige motivo y queda registrado quién lo hizo.
+	{"cxp.liberar_pago", "Cuentas por pagar", "Liberar una factura de contado para pagarla por banco", "El emisor la declaró de contado y nació bloqueada. Liberarla afirma que NO se pagó por caja chica ni tarjeta.", true},
 	{"cxp.tesoreria", "Cuentas por pagar", "Programar y pagar", "Programar, generar lote/macro, pagar y conciliar", true},
 	{"cxp.comprobante", "Cuentas por pagar", "Gestionar comprobantes", "Adjuntar y enviar el comprobante al proveedor", false},
 	{"cxp.proveedores", "Cuentas por pagar", "Gestionar proveedores", "Crear, editar y desactivar proveedores", false},
@@ -281,7 +284,7 @@ var MatrizDefault = map[string][]string{
 		"inventario.ver", "inventario.entrada", "inventario.servicio", "inventario.traslado", "inventario.conteo",
 	),
 	// Gerencia General: lectura + validación de área + escalamiento + aprobación (firma mancomunada).
-	"GERENCIA_GENERAL": conLecturaBancos("cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.gasto", "cxp.validar_depto", "cxp.validar_escalado", "cxp.aprobar", "cxp.aprobar_contabilidad", "cxp.parametros", "cxp.fuentes", "cxp.caja_ver", "cxc.ver", "cxc.ver_todas_sedes", "inventario.ver"),
+	"GERENCIA_GENERAL": conLecturaBancos("cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.gasto", "cxp.validar_depto", "cxp.validar_escalado", "cxp.aprobar", "cxp.liberar_pago", "cxp.aprobar_contabilidad", "cxp.parametros", "cxp.fuentes", "cxp.caja_ver", "cxc.ver", "cxc.ver_todas_sedes", "inventario.ver"),
 	// Auditor Interno: solo lectura.
 	"AUDITOR_INTERNO": conLecturaBancos("cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.gasto", "cxp.caja_ver", "cxc.ver", "cxc.ver_todas_sedes", "inventario.ver"),
 	// Supervisor de Piso: la autoridad de la operación de cobro. Es un cargo real que el

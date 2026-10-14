@@ -100,6 +100,19 @@ func (r *pgRepository) ListarContratos(ctx context.Context, empresaID string, f 
 	if f.ConSaldo {
 		where += " AND COALESCE(s.saldo,0) > 0"
 	}
+	// SOLO LO VENCIDO: la cartera de RECUPERACIÓN.
+	//
+	// «Todo lo que tiene fecha de próximo pago en noviembre ya no es parte de la cartera actual
+	// de recuperación, pero lo anterior sí» (Director Financiero, 13-oct-2026). Un contrato cuya
+	// próxima cuota todavía no venció no se gestiona: no se le llama, no entra en el reparto de
+	// gestores, no cuenta en la mora.
+	//
+	// «Con saldo» no sirve para eso: incluye al que debe la cuota de noviembre que vence la
+	// semana que viene. La diferencia es `vencido`, que ya se calcula contra el día de operación
+	// de Costa Rica en la subconsulta de arriba.
+	if f.SoloVencido {
+		where += " AND COALESCE(s.vencido,0) > 0"
+	}
 	pageSize := f.PageSize
 	if pageSize <= 0 || pageSize > 500 {
 		pageSize = 50
@@ -314,6 +327,7 @@ func (r *pgRepository) ContratosParaGenerar(ctx context.Context, empresaID strin
 	// no tiene (el archivo de Coopeprofa trae «Semanal») desaparecería sin dejar rastro.
 	q := `
 		SELECT c.id::text, c.numero, c.fecha_primer_cobro, COALESCE(c.dia_pago,0), c.cuota_vigente,
+		       c.fecha_proximo_pago,
 		       COALESCE(m.meses_ciclo,0), COALESCE(m.quincenal,false),
 		       ` + sqlMotivoNoGenerable + `
 		FROM contrato_cxc c
@@ -330,16 +344,20 @@ func (r *pgRepository) ContratosParaGenerar(ctx context.Context, empresaID strin
 		var (
 			g       ContratoGenerable
 			primer  *time.Time // nullable: ahora vienen también los contratos sin fecha, con su motivo
+			proximo *time.Time // nullable: el archivo puede no traerla
 			dia     int16
 			ciclo   int16
 			cuota   decimal.Decimal
 			quincen bool
 		)
-		if err := rows.Scan(&g.ID, &g.Numero, &primer, &dia, &cuota, &ciclo, &quincen, &g.Motivo); err != nil {
+		if err := rows.Scan(&g.ID, &g.Numero, &primer, &dia, &cuota, &proximo, &ciclo, &quincen, &g.Motivo); err != nil {
 			return nil, fmt.Errorf("cxc: scan generable: %w", err)
 		}
 		if primer != nil {
 			g.PrimerCobro = primer.Format("2006-01-02")
+		}
+		if proximo != nil {
+			g.ProximoPago = proximo.Format("2006-01-02")
 		}
 		g.DiaPago, g.Cuota, g.MesesCiclo, g.Quincenal = int(dia), cuota, int(ciclo), quincen
 		out = append(out, g)

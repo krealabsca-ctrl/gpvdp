@@ -51,8 +51,7 @@ func (h *Handler) responder(c *gin.Context, err error) {
 	case errors.Is(err, ErrSinEmpresasVisibles):
 		httpx.Abort(c, http.StatusForbidden, httpx.CodeSinPermiso, sinPrefijo(err))
 	default:
-		h.log.Error("grupo: resumen", zap.Error(err))
-		httpx.Abort(c, http.StatusInternalServerError, httpx.CodeErrorInterno, "error interno")
+		httpx.AbortInterno(c, h.log, "grupo: resumen", err)
 	}
 }
 

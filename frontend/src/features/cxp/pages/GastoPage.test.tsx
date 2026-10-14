@@ -22,7 +22,7 @@ vi.mock("@/api/cxp", async (original) => {
   const mod = await original<typeof import("@/api/cxp")>();
   return {
     ...mod,
-    gastoApi: { analisis: vi.fn(), compras: vi.fn(), lineasDeDocumento: vi.fn(), cargarXML: vi.fn() },
+    gastoApi: { analisis: vi.fn(), compras: vi.fn(), lineasDeDocumento: vi.fn(), cargarXML: vi.fn(), rellenarDesdeRecepcion: vi.fn() },
   };
 });
 
@@ -46,6 +46,7 @@ const SIN_DETALLE: AnalisisGasto = {
     porcentaje_monto: "0",
     lineas_sin_cabys: 0,
     lineas_sin_convertir: 0,
+    pendientes_de_relleno: 0,
   },
   items: [],
   total: "0",
@@ -61,6 +62,7 @@ const PARCIAL: AnalisisGasto = {
     porcentaje_monto: "2.0",
     lineas_sin_cabys: 4,
     lineas_sin_convertir: 3,
+    pendientes_de_relleno: 0,
   },
   items: [
     {

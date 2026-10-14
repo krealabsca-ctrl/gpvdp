@@ -52,7 +52,7 @@ export interface Proveedor {
   condicion_pago: "CONTADO" | "CREDITO";
   plazo_credito_dias: number;
   /** De dónde sale el vencimiento de sus facturas: «XML» (el comprobante) o «PROVEEDOR» (este plazo). */
-  plazo_manda: "XML" | "PROVEEDOR";
+  convenio_manda: "XML" | "PROVEEDOR";
   /** Gasto predeterminado (memoria AUTO): sus facturas nacen pre-clasificadas con esto. */
   gasto_concepto_id: string;
   gasto_clasificacion_id: string;
@@ -78,7 +78,7 @@ export interface ProveedorInput {
   exento_iva?: boolean;
   condicion_pago?: string;
   plazo_credito_dias?: number;
-  plazo_manda?: "XML" | "PROVEEDOR";
+  convenio_manda?: "XML" | "PROVEEDOR";
   gasto_concepto_id?: string;
   gasto_clasificacion_id?: string;
   gasto_subclasificacion_id?: string;
@@ -2086,6 +2086,8 @@ export interface CoberturaGasto {
   monto_total: string;
   monto_con_detalle: string;
   porcentaje_monto: string;
+  /** Facturas que entraron por el buzón, con su XML ya guardado, y sin detalle: se rellenan sin subir nada. */
+  pendientes_de_relleno: number;
   lineas_sin_cabys: number;
   lineas_sin_convertir: number;
 }
@@ -2175,6 +2177,10 @@ export const gastoApi = {
       },
     });
   },
+  /** Cuántas facturas ya recibidas se pueden rellenar, y el parte de una corrida. */
+  rellenarDesdeRecepcion(): Promise<ResultadoRelleno> {
+    return apiFetch<ResultadoRelleno>("/cxp/detalle/desde-recepcion", { method: "POST" });
+  },
   /** El detalle guardado de UNA factura. */
   lineasDeDocumento(id: string): Promise<{ lineas: LineaFactura[] }> {
     return apiFetch<{ lineas: LineaFactura[] }>(`/cxp/documentos/${id}/lineas`, { method: "GET" });
@@ -2190,3 +2196,74 @@ export const gastoApi = {
     return apiFetch<ResultadoDetalleCarga>("/cxp/detalle/xml", { method: "POST", raw: fd });
   },
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// El candado del contado y su llave (mig 0097)
+//
+// Una factura que el comprobante declara «contado» nace bloqueada para pago: suele estar ya
+// pagada por caja chica, y pagarla otra vez por banco saca el gasto dos veces. Cuando el emisor
+// se equivocó —escribe «contado» por costumbre pero el convenio es a crédito— hay que poder
+// levantarlo, dejando constancia de quién lo hizo y por qué.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Una factura trancada por el candado del contado. */
+export interface FacturaDeContado {
+  documento_id: string;
+  consecutivo: string;
+  fecha_emision: string;
+  total: string;
+  moneda: string;
+  /** Por qué quedó trancada (el motivo que escribió el importador). */
+  motivo: string;
+}
+
+export interface FacturaLiberada {
+  documento_id: string;
+  consecutivo: string;
+  proveedor: string;
+  total: string;
+  moneda: string;
+}
+
+export interface ResultadoLiberacion {
+  liberadas: FacturaLiberada[];
+  /** id → por qué no se pudo. Vacío si entraron todas. */
+  no_se_pudo: Record<string, string>;
+}
+
+export const candadoApi = {
+  /** Lo que quedó trancado para un proveedor. Se consulta al abrir su ficha. */
+  bloqueadas(proveedorId: string): Promise<{ facturas: FacturaDeContado[] }> {
+    return apiFetch<{ facturas: FacturaDeContado[] }>(`/cxp/proveedores/${proveedorId}/bloqueadas`, {
+      method: "GET",
+    });
+  },
+  /**
+   * Levanta el candado de las facturas elegidas. El motivo es obligatorio y queda guardado en
+   * cada una: es lo único que permite reconstruir, meses después, quién autorizó pagarlas por
+   * banco y con qué argumento.
+   */
+  liberar(proveedorId: string, documentoIds: string[], motivo: string): Promise<ResultadoLiberacion> {
+    return apiFetch<ResultadoLiberacion>(`/cxp/proveedores/${proveedorId}/liberar`, {
+      method: "POST",
+      json: { documento_ids: documentoIds, motivo },
+    });
+  },
+};
+
+/**
+ * El parte de una corrida de relleno del detalle desde los XML ya recibidos.
+ *
+ * `ilegibles` y `sin_lineas` se cuentan aparte de `faltan` a propósito: no son «todavía no se
+ * procesaron» sino «no hay nada que sacarles», y si se mezclaran el contador nunca bajaría a cero
+ * y parecería que el relleno no avanza.
+ */
+export interface ResultadoRelleno {
+  procesadas: number;
+  facturas: number;
+  lineas: number;
+  ilegibles: number;
+  sin_lineas: number;
+  /** Cuántas quedan para la próxima corrida. 0 = terminó. */
+  faltan: number;
+}

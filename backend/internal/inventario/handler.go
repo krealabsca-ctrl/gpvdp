@@ -99,8 +99,7 @@ func (h *Handler) responder(c *gin.Context, err error, donde string) {
 		h.log.Error("inventario " + donde + ": sin facturador de CxP conectado")
 		httpx.Abort(c, http.StatusServiceUnavailable, httpx.CodeErrorInterno, sinPrefijo(err))
 	default:
-		h.log.Error("inventario "+donde, zap.Error(err))
-		httpx.Abort(c, http.StatusInternalServerError, httpx.CodeErrorInterno, "error interno")
+		httpx.AbortInterno(c, h.log, "inventario "+donde, err)
 	}
 }
 

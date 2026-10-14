@@ -162,9 +162,10 @@ func (h *Handler) responder(c *gin.Context, err error) {
 		// Lo único que llega acá es un fallo de infraestructura (base caída, bug). Se loguea con el
 		// error real porque del lado del cliente sale «error interno» a propósito: si tampoco queda
 		// del lado del servidor, el reporte «guardé y se rompió» no tiene nada que mirar.
-		if h != nil && h.log != nil {
-			h.log.Error("correo: error interno", zap.Error(err))
+		var log *zap.Logger
+		if h != nil {
+			log = h.log
 		}
-		httpx.Abort(c, http.StatusInternalServerError, httpx.CodeErrorInterno, "error interno")
+		httpx.AbortInterno(c, log, "correo", err)
 	}
 }
