@@ -226,7 +226,14 @@ func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, 
 		       COALESCE(dcxp.huella, rcxp.huella, ''),
 		       CASE WHEN rcxp.id IS NOT NULL
 		            THEN (SELECT COUNT(*) FROM documento_cxp dr WHERE dr.remesa_id = rcxp.id)
-		            WHEN dcxp.id IS NOT NULL THEN 1 ELSE 0 END
+		            WHEN dcxp.id IS NOT NULL THEN 1 ELSE 0 END,
+		       -- EL TIPO DE GASTO DE LO QUE SE PAGÓ, si la factura ya está clasificada.
+		       --
+		       -- Es lo que vuelve útil la huella para quien está clasificando el movimiento: sin
+		       -- esto dice a QUIÉN se le pagó, y hay que abrir la factura para saber de QUÉ era.
+		       -- Viene vacío si la factura todavía no se clasificó, y eso está bien: no hay nada
+		       -- que decir todavía.
+		       COALESCE(gcxp.concepto, ''), COALESCE(gcxp.clasificacion, '')
 		FROM movimiento_bancario m
 		LEFT JOIN concepto co ON co.id = m.concepto_id
 		LEFT JOIN clasificacion cl ON cl.id = m.clasificacion_id
@@ -241,6 +248,26 @@ func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, 
 		    SELECT 'REM ' || to_char(lr.numero, 'FM0000') || '-' || to_char(rcxp.numero, 'FM00') AS referencia
 		    FROM lote_pago lr WHERE lr.id = rcxp.lote_id
 		) remref ON rcxp.id IS NOT NULL
+		-- EL GASTO DE LO QUE SE PAGÓ, con la misma regla que ya usa el cierre de remesa: si las
+		-- facturas de un pago agrupado mezclan gastos distintos, NO hay uno que describa el pago
+		-- y se devuelve vacío. Elegir cualquiera de ellos atribuiría la plata al rubro equivocado.
+		--
+		-- El FILTER no sobra: count(DISTINCT x) ignora los NULL, así que dos facturas —una
+		-- clasificada y otra sin clasificar— darían «distintos = 1» y mostrarían el gasto de la
+		-- primera como si describiera las dos.
+		LEFT JOIN LATERAL (
+		    SELECT CASE WHEN count(DISTINCT d2.concepto_id) = 1
+		                 AND count(*) FILTER (WHERE d2.concepto_id IS NULL) = 0
+		                THEN min(co2.nombre) END AS concepto,
+		           CASE WHEN count(DISTINCT d2.clasificacion_id) = 1
+		                 AND count(*) FILTER (WHERE d2.clasificacion_id IS NULL) = 0
+		                THEN min(cl2.nombre) END AS clasificacion
+		    FROM documento_cxp d2
+		    LEFT JOIN concepto co2 ON co2.id = d2.concepto_id
+		    LEFT JOIN clasificacion cl2 ON cl2.id = d2.clasificacion_id
+		    WHERE (m.documento_cxp_id IS NOT NULL AND d2.id = m.documento_cxp_id)
+		       OR (m.remesa_id IS NOT NULL AND d2.remesa_id = m.remesa_id)
+		) gcxp ON m.documento_cxp_id IS NOT NULL OR m.remesa_id IS NOT NULL
 		WHERE ` + where + fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", ordenSQL(f.Orden), limIdx, offIdx)
 
 	rows, err := r.pool.Query(ctx, listQ, args...)
@@ -266,7 +293,7 @@ func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, 
 			&row.Estado, &confianza, &row.EsTraslado, &row.Incluido,
 			&row.Banco, &row.Cuenta,
 			&pago.DocumentoID, &pago.Consecutivo, &pago.Proveedor, &pago.Huella,
-			&pago.Facturas); err != nil {
+			&pago.Facturas, &pago.Concepto, &pago.Clasificacion); err != nil {
 			return ListaMovimientos{}, fmt.Errorf("bancos: scan movimiento: %w", err)
 		}
 		// Solo cuando hay enlace de verdad. El id es la prueba: el consecutivo o el proveedor

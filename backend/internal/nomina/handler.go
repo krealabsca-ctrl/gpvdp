@@ -496,7 +496,6 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 			httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "dato inválido (id o fecha con formato incorrecto)")
 			return
 		}
-		h.log.Error("nomina "+op, zap.Error(err))
-		httpx.Abort(c, http.StatusInternalServerError, httpx.CodeErrorInterno, "error interno")
+		httpx.AbortInterno(c, h.log, "nomina "+op, err)
 	}
 }

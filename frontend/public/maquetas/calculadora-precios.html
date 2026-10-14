@@ -1,0 +1,357 @@
+<title>GPVDP · Calculadora de Precios — maqueta</title>
+<style>
+  :root{
+    color-scheme:light;
+    --surface:#F7F8F5; --raised:#FFFFFF; --muted:#EDF0EA; --border:#DCE2D9;
+    --ink:#1E2A24; --ink-2:#55645C; --ink-3:#69736C;
+    --accent:#0F6E4E; --accent-soft:#e3f0ea; --accent-fg:#fff;
+    /* --gold es la marca; --gold-ink es el dorado cuando hace de TEXTO, y --on-gold
+       lo que va ENCIMA del dorado. Separarlos es lo que deja pasar el contraste AA. */
+    --gold:#8A6A33; --gold-ink:#7D5F2C; --on-gold:#fff; --gold-soft:#F7EEDF;
+    --pos:#15803D; --neg:#B3542E; --warn:#A16207; --warn-soft:#FBF3E2; --neg-soft:#FBEDE6;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    color-scheme:dark;
+    --surface:#141714; --raised:#1E2320; --muted:#242A26; --border:#313832;
+    --ink:#E8EDE9; --ink-2:#A9B4AC; --ink-3:#97A199;
+    --accent:#35A578; --accent-soft:#22302a; --accent-fg:#032019;
+    --gold:#C9A468; --gold-ink:#D9B87A; --on-gold:#241C0C; --gold-soft:#2E2A20;
+    --pos:#4ADE80; --neg:#E08A63; --warn:#E0B44A; --warn-soft:#2E2A1C; --neg-soft:#32241E;
+  }}
+  :root[data-theme="dark"]{
+    color-scheme:dark;
+    --surface:#141714; --raised:#1E2320; --muted:#242A26; --border:#313832;
+    --ink:#E8EDE9; --ink-2:#A9B4AC; --ink-3:#97A199;
+    --accent:#35A578; --accent-soft:#22302a; --accent-fg:#032019;
+    --gold:#C9A468; --gold-ink:#D9B87A; --on-gold:#241C0C; --gold-soft:#2E2A20;
+    --pos:#4ADE80; --neg:#E08A63; --warn:#E0B44A; --warn-soft:#2E2A1C; --neg-soft:#32241E;
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{background:var(--surface);color:var(--ink);font:14.5px/1.62 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif}
+  .tnum{font-variant-numeric:tabular-nums lining-nums}
+  h1,h2,h3,h4{text-wrap:balance;margin:0}
+
+  .top{display:flex;align-items:center;gap:12px;padding:11px 18px;background:var(--raised);border-bottom:1px solid var(--border);flex-wrap:wrap}
+  .logo{width:32px;height:32px;border-radius:9px;background:var(--accent);display:grid;place-items:center;color:var(--accent-fg);font-weight:800;flex:none}
+  .top h1{font-size:15px;font-weight:700}
+  .top h1 small{color:var(--ink-3);font-weight:500;display:block;font-size:12px}
+  .tag{font-size:10px;font-weight:800;letter-spacing:.08em;padding:4px 9px;border-radius:999px;background:var(--gold);color:var(--on-gold);margin-left:auto}
+
+  .wrap{max-width:1100px;margin:0 auto;padding:22px 16px 72px}
+  .lede{color:var(--ink-2);max-width:80ch;margin:8px 0 0}
+  .sec{margin-top:30px}
+  .sec>h2{font-size:17px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .num{width:23px;height:23px;border-radius:7px;background:var(--accent-soft);color:var(--accent);
+       display:grid;place-items:center;font-size:12px;font-weight:800;flex:none}
+  .sec>p{color:var(--ink-2);margin:7px 0 13px;max-width:82ch}
+
+  .card{background:var(--raised);border:1px solid var(--border);border-radius:12px;padding:15px;margin-top:11px}
+  .card h3{font-size:14px;margin-bottom:3px}
+  .card .sub{color:var(--ink-3);font-size:12.5px}
+
+  /* color:inherit explícito: sin él, Chrome le pinta CanvasText del user-agent a las tablas
+     y en tema claro el texto sale casi blanco sobre la tarjeta blanca. */
+  table{width:100%;border-collapse:collapse;font-size:13px;color:inherit}
+  th{text-align:left;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);
+     padding:7px 9px;border-bottom:1px solid var(--border);font-weight:700;white-space:nowrap}
+  td{padding:8px 9px;border-bottom:1px solid var(--border);vertical-align:top;color:inherit}
+  tr:last-child td{border-bottom:0}
+  .r{text-align:right}
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+  .chip{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}
+  .ok{background:var(--accent-soft);color:var(--accent)}
+  .bad{background:var(--neg-soft);color:var(--neg)}
+  .wa{background:var(--warn-soft);color:var(--warn)}
+  .go{background:var(--gold-soft);color:var(--gold-ink)}
+
+  .alerta{border:1px solid var(--neg);background:var(--neg-soft);border-radius:12px;padding:15px;margin-top:14px}
+  .alerta h3{color:var(--neg);font-size:14.5px}
+  .nota{border-left:3px solid var(--gold);background:var(--gold-soft);padding:11px 13px;border-radius:0 9px 9px 0;margin-top:11px;font-size:13px}
+
+  .grid{display:grid;gap:11px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+  .kpi{background:var(--raised);border:1px solid var(--border);border-radius:11px;padding:12px}
+  .kpi .lbl{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:700}
+  .kpi .val{font-size:21px;font-weight:800;margin-top:3px}
+  .kpi .pie{font-size:12px;color:var(--ink-2);margin-top:2px}
+
+  /* Controles DIBUJADOS: la maqueta no ejecuta scripts, así que los mandos se ven pero no operan. */
+  .ctrl{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin:9px 0}
+  .ctrl .et{font-size:12px;color:var(--ink-2);min-width:150px}
+  .slider{flex:1;min-width:150px;height:5px;background:var(--muted);border-radius:99px;position:relative}
+  .slider i{position:absolute;top:0;left:0;height:100%;background:var(--accent);border-radius:99px}
+  .slider b{position:absolute;top:50%;width:15px;height:15px;border-radius:50%;background:var(--accent);
+            border:2px solid var(--raised);transform:translate(-50%,-50%)}
+  .val-ctrl{font-weight:800;min-width:74px;text-align:right}
+
+  .barra{height:7px;background:var(--muted);border-radius:99px;overflow:hidden;min-width:70px}
+  .barra i{display:block;height:100%;border-radius:99px}
+
+  .riel{display:flex;gap:5px;flex-wrap:wrap;margin-top:11px}
+  .riel span{font-size:12px;padding:6px 11px;border-radius:8px;border:1px solid var(--border);color:var(--ink-2);background:var(--raised)}
+  .riel span.on{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:700}
+
+  .sello{position:fixed;right:11px;bottom:11px;font-size:10px;font-weight:800;letter-spacing:.1em;
+         padding:6px 11px;border-radius:999px;background:var(--gold);color:var(--on-gold);opacity:.93}
+  @media (max-width:560px){.wrap{padding:16px 12px 70px} .kpi .val{font-size:18px}}
+</style>
+
+<div class="top">
+  <div class="logo">₡</div>
+  <h1>Calculadora de Precios <small>Costos · Rentabilidad · Simulación — Valle de Paz</small></h1>
+  <span class="tag">MAQUETA</span>
+</div>
+
+<div class="wrap">
+
+  <p class="lede">
+    Propuesta de las <b>seis pantallas</b> del módulo y del <b>simulador</b>. Los números son los del
+    costeo real (archivo <code>029 · Costeos 2023</code>) recalculados sobre la base de hoy:
+    <b>72.000 contratos activos</b>. Nada de esto está construido todavía.
+  </p>
+
+  <!-- ══ EL HALLAZGO ══ -->
+  <div class="alerta">
+    <h3>Lo primero que el módulo pondría sobre la mesa</h3>
+    <p style="margin:7px 0 0;color:var(--ink-2)">
+      Con 72.000 contratos el indirecto por contrato baja de ₡2.775 a <b>₡1.195 al mes</b>: el doble de
+      contratos reparte el mismo gasto. Eso deja más margen para cubrir el servicio… pero descubre otra
+      cosa. Cada plan aguanta una <b>frecuencia de uso máxima</b> antes de perder plata, y la frecuencia
+      que se observa en la operación está <b>por encima de la que aguantan dos de los cuatro planes</b>.
+    </p>
+    <div class="scroll"><table style="margin-top:11px">
+      <tr><th>Plan</th><th class="r">Cuota</th><th class="r">− Indirecto</th><th class="r">Disponible/año</th>
+          <th class="r">Severidad</th><th class="r">Frecuencia que aguanta</th><th>Contra 5,05 % observado</th></tr>
+      <tr><td><b>Gardenia</b></td><td class="r tnum">₡4.950</td><td class="r tnum">₡1.195</td><td class="r tnum">₡45.060</td>
+          <td class="r tnum">₡1.779.566</td><td class="r tnum"><b>2,53 %</b></td><td><span class="chip bad">Pierde</span></td></tr>
+      <tr><td><b>Olivo</b></td><td class="r tnum">₡4.950</td><td class="r tnum">₡1.195</td><td class="r tnum">₡45.060</td>
+          <td class="r tnum">₡1.785.566</td><td class="r tnum"><b>2,52 %</b></td><td><span class="chip bad">Pierde</span></td></tr>
+      <tr><td><b>Tulipán</b></td><td class="r tnum">₡7.800</td><td class="r tnum">₡1.195</td><td class="r tnum">₡79.260</td>
+          <td class="r tnum">₡1.878.365</td><td class="r tnum"><b>4,22 %</b></td><td><span class="chip wa">Al filo</span></td></tr>
+      <tr><td><b>Cedro</b></td><td class="r tnum">₡10.000</td><td class="r tnum">₡1.195</td><td class="r tnum">₡105.660</td>
+          <td class="r tnum">₡1.877.865</td><td class="r tnum"><b>5,63 %</b></td><td><span class="chip ok">Aguanta</span></td></tr>
+    </table></div>
+    <p style="margin:11px 0 0;font-size:12.5px;color:var(--ink-2)">
+      <b>De dónde sale el 5,05 %:</b> el propio archivo usa 360 servicios al mes para repartir indirectos.
+      Descontando los ~57 mensuales que vienen de venta directa, quedan ~3.636 al año sobre 72.000
+      contratos. Coincide con lo esperable: la mortalidad nacional (~5 por mil) sobre 648.000
+      beneficiarios da una cifra del mismo orden. <b>Es una estimación, no una medición</b> — y por eso
+      la pantalla 4 existe.
+    </p>
+  </div>
+
+  <!-- ══ 1 ══ -->
+  <div class="sec">
+    <h2><span class="num">1</span> Catálogo de insumos <span class="chip go">lee de CxP</span></h2>
+    <p>Cada insumo con su costo vigente y su proveedor. El costo no se teclea: se contrasta con lo que
+       CxP pagó de verdad, y la pantalla avisa cuando el modelo se despegó de la factura.</p>
+    <div class="card">
+      <div class="scroll"><table>
+        <tr><th>Insumo</th><th>Proveedor</th><th class="r">Costo del modelo</th><th class="r">Última compra (CxP)</th><th class="r">Δ</th><th>Estado</th></tr>
+        <tr><td>Cofre #24</td><td>Nazareno</td><td class="r tnum">₡135.000</td><td class="r tnum">₡148.500</td><td class="r tnum" style="color:var(--neg)">+10,0 %</td><td><span class="chip bad">Desactualizado</span></td></tr>
+        <tr><td>Cofre #24</td><td>Robles y Flores</td><td class="r tnum">₡120.001</td><td class="r tnum">₡120.001</td><td class="r tnum">—</td><td><span class="chip ok">Al día</span></td></tr>
+        <tr><td>Arreglo floral</td><td>Ebenezer (Sabana)</td><td class="r tnum">₡5.752</td><td class="r tnum">₡5.752</td><td class="r tnum">—</td><td><span class="chip ok">Al día</span></td></tr>
+        <tr><td>Sala de velación 24 h · A</td><td>Propia</td><td class="r tnum">₡275.000</td><td class="r">n/a</td><td class="r">—</td><td><span class="chip go">Costo interno</span></td></tr>
+        <tr><td><b>Cremación de adulto</b></td><td>—</td><td class="r"><b>sin costo</b></td><td class="r">—</td><td class="r">—</td><td><span class="chip bad">Falta · 6 planes</span></td></tr>
+      </table></div>
+      <div class="nota">
+        <b>Lo que esta pantalla resuelve el primer día:</b> el mismo cofre aparece hoy con tres
+        proveedores y tres precios sin regla de cuál manda, y «Cremación de adulto» sigue con la nota
+        <i>«Averiguar costos»</i> dentro de la receta de seis planes.
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 2 ══ -->
+  <div class="sec">
+    <h2><span class="num">2</span> Receta del plan <small style="font-weight:400;color:var(--ink-3)">(lista de materiales)</small></h2>
+    <p>La hoja <code>Costos</code> tal cual, pero viva y <b>versionada por fecha</b>: permite contestar
+       «¿qué costaba Diamante en enero?» sin abrir un archivo viejo.</p>
+    <div class="card">
+      <div class="riel">
+        <span>Jade</span><span>Bronce</span><span>Plata</span><span class="on">Oro</span><span>Diamante</span>
+        <span>Otoño</span><span>Primavera</span><span>Gardenia</span><span>Tulipán</span><span>Olivo</span><span>Cedro</span>
+      </div>
+      <div class="scroll"><table style="margin-top:11px">
+        <tr><th>Insumo</th><th class="r">Cant.</th><th class="r">Costo unit.</th><th class="r">Extendido</th><th>Tipo</th></tr>
+        <tr><td>Cofre #24</td><td class="r tnum">1</td><td class="r tnum">₡135.000</td><td class="r tnum">₡135.000</td><td><span class="chip go">Variable</span></td></tr>
+        <tr><td>Sala de velación 24 h · A</td><td class="r tnum">1</td><td class="r tnum">₡275.000</td><td class="r tnum">₡275.000</td><td><span class="chip go">Variable</span></td></tr>
+        <tr><td>Servicio musical + pista</td><td class="r tnum">1</td><td class="r tnum">₡115.000</td><td class="r tnum">₡115.000</td><td><span class="chip go">Variable</span></td></tr>
+        <tr><td>Arreglo floral</td><td class="r tnum">6</td><td class="r tnum">₡5.752</td><td class="r tnum">₡34.513</td><td><span class="chip go">Variable</span></td></tr>
+        <tr><td>Embalsame básico</td><td class="r tnum">1</td><td class="r tnum">₡65.000</td><td class="r tnum">₡65.000</td><td><span class="chip go">Variable</span></td></tr>
+        <tr><td>Nota de televisión Canal 7</td><td class="r tnum">1</td><td class="r tnum">₡22.000</td><td class="r tnum">₡22.000</td><td><span class="chip go">Variable</span></td></tr>
+        <tr><td style="color:var(--ink-3)">… 38 insumos más</td><td class="r"></td><td class="r"></td><td class="r tnum" style="color:var(--ink-3)">₡187.313</td><td></td></tr>
+        <tr style="background:var(--muted)"><td><b>Costo variable</b></td><td class="r"></td><td class="r"></td><td class="r tnum"><b>₡833.826</b></td><td></td></tr>
+        <tr><td>Comisión del vendedor</td><td class="r tnum">1</td><td class="r tnum">₡135.000</td><td class="r tnum">₡135.000</td><td><span class="chip go">Variable</span></td></tr>
+        <tr><td>Indirecto absorbido (ABC)</td><td class="r tnum">1</td><td class="r tnum">₡102.399</td><td class="r tnum">₡102.399</td><td><span class="chip wa">Fijo</span></td></tr>
+        <tr style="background:var(--accent-soft)"><td><b>Costo total · Oro</b></td><td class="r"></td><td class="r"></td><td class="r tnum"><b>₡936.225</b></td><td></td></tr>
+      </table></div>
+    </div>
+  </div>
+
+  <!-- ══ 3 ══ -->
+  <div class="sec">
+    <h2><span class="num">3</span> Reparto de indirectos <span class="chip go">lee de Bancos</span></h2>
+    <p>Reemplaza el «85 %» por un <b>driver defendible</b>: cada gasto se reparte por lo que de verdad
+       lo causa. Los conceptos ya vienen clasificados del módulo Bancos.</p>
+    <div class="card">
+      <div class="scroll"><table>
+        <tr><th>Concepto de gasto</th><th class="r">Mensual</th><th>Driver de reparto</th><th class="r">A planes</th><th class="r">A servicios</th></tr>
+        <tr><td>Planilla</td><td class="r tnum">₡64.167.998</td><td>Horas de personal por tipo</td><td class="r tnum">62 %</td><td class="r tnum">38 %</td></tr>
+        <tr><td>Alquileres</td><td class="r tnum">₡17.027.349</td><td>m² de sala · horas de uso</td><td class="r tnum">25 %</td><td class="r tnum">75 %</td></tr>
+        <tr><td>Operaciones bancarias</td><td class="r tnum">₡24.510.263</td><td>Recibos gestionados</td><td class="r tnum">92 %</td><td class="r tnum">8 %</td></tr>
+        <tr><td>Comisiones de cobro</td><td class="r tnum">₡4.139.212</td><td>Contratos en gestión</td><td class="r tnum">100 %</td><td class="r tnum">—</td></tr>
+        <tr><td>Mantenimiento de carrozas</td><td class="r tnum">₡4.012.762</td><td>Kilómetros recorridos</td><td class="r tnum">—</td><td class="r tnum">100 %</td></tr>
+      </table></div>
+      <div class="nota">
+        <b>Lo que corrige:</b> hoy una hoja reparte 30/70 y la otra 45/85 — y 45 + 85 da <b>130 %</b>.
+        Con drivers, el reparto suma 100 % por construcción y se puede defender ante auditoría.
+      </div>
+      <div class="grid" style="margin-top:12px">
+        <div class="kpi"><div class="lbl">Indirecto por contrato</div><div class="val tnum">₡1.195</div>
+          <div class="pie">al mes · 72.000 contratos</div></div>
+        <div class="kpi"><div class="lbl">Antes (31.000 contratos)</div><div class="val tnum" style="color:var(--ink-3)">₡2.775</div>
+          <div class="pie">el mismo gasto, menos contratos</div></div>
+        <div class="kpi"><div class="lbl">Indirecto por servicio</div><div class="val tnum">₡102.399</div>
+          <div class="pie">360 servicios al mes</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 4 ══ -->
+  <div class="sec">
+    <h2><span class="num">4</span> Modelo actuarial <span class="chip go">lee de CxC</span> <span class="chip go">valida con el Registro Civil</span></h2>
+    <p>Solo para los planes de suscripción. Las cuatro variables que gobiernan una póliza, medidas con
+       datos propios en vez de supuestas.</p>
+    <div class="card">
+      <div class="scroll"><table>
+        <tr><th>Variable</th><th>De dónde sale</th><th class="r">Hoy</th><th>Estado</th></tr>
+        <tr><td><b>Frecuencia de uso</b></td><td>Servicios prestados ÷ contratos vigentes, por tramo de edad</td>
+            <td class="r tnum">0,47 %</td><td><span class="chip bad">Base sin definir</span></td></tr>
+        <tr><td><b>Severidad</b></td><td>Receta del plan (pantalla 2)</td><td class="r tnum">₡1,78–1,88 M</td><td><span class="chip ok">Medida</span></td></tr>
+        <tr><td><b>Permanencia</b></td><td>CxC: historia real de los 72.000 contratos</td><td class="r tnum">36 meses</td><td><span class="chip wa">Supuesta</span></td></tr>
+        <tr><td><b>Cancelación (lapse)</b></td><td>CxC: contratos que dejaron de pagar</td><td class="r">—</td><td><span class="chip bad">No se mide</span></td></tr>
+        <tr><td><b>Inflación del servicio</b></td><td>Histórico de compras en CxP</td><td class="r">—</td><td><span class="chip bad">Ausente</span></td></tr>
+      </table></div>
+
+      <h3 style="margin-top:15px">Validación contra fuentes oficiales</h3>
+      <p class="sub" style="margin-bottom:9px">La frecuencia solo se puede medir bien si se sabe quién
+         falleció y quién no. Hoy se sabe cuando la familia avisa.</p>
+      <div class="scroll"><table>
+        <tr><th>Fuente</th><th>Qué confirma</th><th>Efecto en el modelo</th></tr>
+        <tr><td>Registro Civil (TSE)</td><td>Defunción y cédula del titular y de los 9 beneficiarios</td>
+            <td>Frecuencia <b>medida</b>, no estimada. Y detecta el contrato que sigue pagando por alguien que ya falleció.</td></tr>
+        <tr><td>Padrón electoral (TSE)</td><td>Edad y vigencia de la cédula</td>
+            <td>Permite tarifar <b>por tramo de edad</b>: hoy un titular de 70 y uno de 35 pagan igual.</td></tr>
+        <tr><td>CCSS</td><td>Condición del asegurado</td><td>Afina la segmentación de riesgo.</td></tr>
+      </table></div>
+      <div class="nota">
+        <b>El dato que nadie más tiene:</b> 72.000 contratos con su historia de pagos en CxC. La
+        permanencia y la cancelación se pueden <b>medir</b> con eso. Ninguna consultora externa puede
+        calcularlo mejor.
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 5 ══ SIMULADOR ══ -->
+  <div class="sec">
+    <h2><span class="num">5</span> Simulador <span class="chip go">el corazón del módulo</span></h2>
+    <p>Se mueve una variable y todo se recalcula. Abajo, el mismo plan bajo cuatro escenarios:
+       los mandos se muestran como se verían; esta maqueta no ejecuta nada.</p>
+
+    <div class="card">
+      <h3>Gardenia · cuota mensual ₡4.950</h3>
+      <div class="sub">Mové la cuota, la frecuencia o la inflación y mirá el resultado a 10 años.</div>
+
+      <div class="ctrl" style="margin-top:13px">
+        <span class="et">Cuota mensual</span>
+        <span class="slider"><i style="width:33%"></i><b style="left:33%"></b></span>
+        <span class="val-ctrl tnum">₡4.950</span>
+      </div>
+      <div class="ctrl">
+        <span class="et">Frecuencia anual</span>
+        <span class="slider"><i style="width:63%;background:var(--neg)"></i><b style="left:63%;background:var(--neg)"></b></span>
+        <span class="val-ctrl tnum">5,05 %</span>
+      </div>
+      <div class="ctrl">
+        <span class="et">Permanencia</span>
+        <span class="slider"><i style="width:30%"></i><b style="left:30%"></b></span>
+        <span class="val-ctrl tnum">36 m</span>
+      </div>
+      <div class="ctrl">
+        <span class="et">Inflación del servicio</span>
+        <span class="slider"><i style="width:40%"></i><b style="left:40%"></b></span>
+        <span class="val-ctrl tnum">5,0 %</span>
+      </div>
+
+      <div class="grid" style="margin-top:14px">
+        <div class="kpi"><div class="lbl">Prima técnica</div><div class="val tnum" style="color:var(--neg)">₡8.683</div>
+          <div class="pie">la cuota que <b>debería</b> cobrarse</div></div>
+        <div class="kpi"><div class="lbl">Cuota actual</div><div class="val tnum">₡4.950</div>
+          <div class="pie">₡3.733 por debajo</div></div>
+        <div class="kpi"><div class="lbl">Resultado por contrato</div><div class="val tnum" style="color:var(--neg)">−₡134.388</div>
+          <div class="pie">en 36 meses</div></div>
+        <div class="kpi"><div class="lbl">Frecuencia de equilibrio</div><div class="val tnum">2,53 %</div>
+          <div class="pie">el techo que aguanta</div></div>
+      </div>
+
+      <h3 style="margin-top:18px">Escenarios comparados</h3>
+      <div class="scroll"><table style="margin-top:7px">
+        <tr><th>Escenario</th><th class="r">Cuota</th><th class="r">Frecuencia</th><th class="r">Resultado / contrato</th><th>A 72.000 contratos</th></tr>
+        <tr><td><b>A · Hoy</b>, si la frecuencia es por contrato</td><td class="r tnum">₡4.950</td><td class="r tnum">0,47 %</td>
+            <td class="r tnum" style="color:var(--pos)">+₡122.052</td>
+            <td><span class="barra" style="display:inline-block;width:72px"><i style="width:100%;background:var(--pos)"></i></span> <span class="chip ok">Gana</span></td></tr>
+        <tr><td><b>B · Hoy</b>, con la frecuencia observada</td><td class="r tnum">₡4.950</td><td class="r tnum">5,05 %</td>
+            <td class="r tnum" style="color:var(--neg)">−₡134.388</td>
+            <td><span class="barra" style="display:inline-block;width:72px"><i style="width:100%;background:var(--neg)"></i></span> <span class="chip bad">Pierde</span></td></tr>
+        <tr><td><b>C ·</b> Cuota a ₡8.700</td><td class="r tnum">₡8.700</td><td class="r tnum">5,05 %</td>
+            <td class="r tnum" style="color:var(--pos)">+₡612</td>
+            <td><span class="barra" style="display:inline-block;width:72px"><i style="width:6%;background:var(--pos)"></i></span> <span class="chip wa">Empata</span></td></tr>
+        <tr><td><b>D ·</b> Cuota a ₡10.000 + 1 beneficiario menos</td><td class="r tnum">₡10.000</td><td class="r tnum">4,49 %</td>
+            <td class="r tnum" style="color:var(--pos)">+₡62.496</td>
+            <td><span class="barra" style="display:inline-block;width:72px"><i style="width:48%;background:var(--pos)"></i></span> <span class="chip ok">Gana</span></td></tr>
+      </table></div>
+      <div class="nota">
+        <b>Lo que el simulador contesta y hoy nadie puede:</b> si el cofre sube 12 %, qué pasa con el
+        margen de Oro · a qué cuota empata Gardenia con inflación del 5 % · si Jade sube a ₡550.000 y se
+        pierde 8 % de volumen, si se gana o se pierde · cuántos beneficiarios aguanta cada cuota.
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 6 ══ -->
+  <div class="sec">
+    <h2><span class="num">6</span> Tablero de rentabilidad <span class="chip go">la foto para GG</span></h2>
+    <div class="card">
+      <div class="scroll"><table>
+        <tr><th>Plan</th><th>Familia</th><th class="r">Costo</th><th class="r">Precio</th><th class="r">Margen</th><th class="r">%</th><th>Escalón</th></tr>
+        <tr><td><b>Jade</b></td><td>Funerarios</td><td class="r tnum">₡377.541</td><td class="r tnum">₡500.000</td><td class="r tnum">₡122.459</td><td class="r tnum">24 %</td><td><span class="barra" style="display:inline-block;width:60px"><i style="width:24%;background:var(--warn)"></i></span></td></tr>
+        <tr><td><b>Bronce</b></td><td>Funerarios</td><td class="r tnum">₡419.811</td><td class="r tnum">₡650.000</td><td class="r tnum">₡230.189</td><td class="r tnum">35 %</td><td><span class="barra" style="display:inline-block;width:60px"><i style="width:35%;background:var(--pos)"></i></span></td></tr>
+        <tr><td><b>Plata</b></td><td>Funerarios</td><td class="r tnum">₡559.236</td><td class="r tnum">₡850.000</td><td class="r tnum">₡290.764</td><td class="r tnum">34 %</td><td><span class="barra" style="display:inline-block;width:60px"><i style="width:34%;background:var(--pos)"></i></span></td></tr>
+        <tr><td><b>Oro</b></td><td>Funerarios</td><td class="r tnum">₡936.225</td><td class="r tnum">₡1.350.000</td><td class="r tnum">₡413.775</td><td class="r tnum">31 %</td><td><span class="barra" style="display:inline-block;width:60px"><i style="width:31%;background:var(--warn)"></i></span></td></tr>
+        <tr><td><b>Diamante</b></td><td>Funerarios</td><td class="r tnum">₡1.254.607</td><td class="r tnum">₡2.750.000</td><td class="r tnum">₡1.495.393</td><td class="r tnum">54 %</td><td><span class="barra" style="display:inline-block;width:60px"><i style="width:54%;background:var(--pos)"></i></span></td></tr>
+        <tr><td><b>Otoño</b></td><td>Cremación</td><td class="r tnum">₡350.674</td><td class="r tnum">₡650.000</td><td class="r tnum">₡299.326</td><td class="r tnum">46 %</td><td><span class="chip bad">Costo incompleto</span></td></tr>
+        <tr><td><b>Primavera</b></td><td>Cremación</td><td class="r tnum">₡899.344</td><td class="r tnum">₡1.250.000</td><td class="r tnum">₡350.656</td><td class="r tnum">28 %</td><td><span class="chip bad">Costo incompleto</span></td></tr>
+        <tr style="background:var(--neg-soft)"><td><b>Gardenia</b></td><td>Corporativo</td><td class="r tnum">₡1.779.566</td><td class="r tnum">₡4.950/m</td><td class="r tnum">−₡134.388</td><td class="r">—</td><td><span class="chip bad">Bajo el piso</span></td></tr>
+        <tr><td><b>Tulipán</b></td><td>Corporativo</td><td class="r tnum">₡1.878.365</td><td class="r tnum">₡7.800/m</td><td class="r tnum">−₡29.016</td><td class="r">—</td><td><span class="chip wa">Al filo</span></td></tr>
+        <tr style="background:var(--neg-soft)"><td><b>Olivo</b></td><td>Hogar</td><td class="r tnum">₡1.785.566</td><td class="r tnum">₡4.950/m</td><td class="r tnum">−₡135.108</td><td class="r">—</td><td><span class="chip bad">Bajo el piso</span></td></tr>
+        <tr><td><b>Cedro</b></td><td>Hogar</td><td class="r tnum">₡1.877.865</td><td class="r tnum">₡10.000/m</td><td class="r tnum">+₡66.168</td><td class="r">—</td><td><span class="chip ok">Gana</span></td></tr>
+      </table></div>
+      <div class="nota">
+        <b>Dos lecturas que saltan solas.</b> En directos, el margen no escala: Jade (el de entrada)
+        rinde 24 % y Diamante 54 %. En suscripción, los cuatro planes dependen de una variable que hoy
+        no está medida — y bajo la frecuencia observada, tres de los cuatro no se sostienen.
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h2>Lo que esta maqueta no decide</h2>
+    <p>Los resultados en rojo salen de la frecuencia <b>estimada</b> en 5,05 %. Si la frecuencia real
+    medida contra el Registro Civil es la mitad, tres de esos planes cambian de signo. Por eso la
+    pantalla 4 va antes que cualquier cambio de precio: <b>primero se mide, después se tarifa.</b></p>
+  </div>
+
+</div>
+
+<div class="sello">MUESTRA</div>

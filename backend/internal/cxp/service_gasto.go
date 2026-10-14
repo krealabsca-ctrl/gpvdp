@@ -12,6 +12,11 @@ func (s *Service) AnalisisGasto(ctx context.Context, empresaID string, f Filtros
 	if err != nil {
 		return AnalisisGasto{}, err
 	}
+	// Cuántas se pueden rellenar con lo que el buzón ya dejó guardado. Se pide siempre: es la
+	// respuesta a «la pantalla está vacía y mis facturas entran solas por correo».
+	if n, err := s.repo.ContarRecepcionesSinDetalle(ctx, empresaID); err == nil {
+		cob.PendientesDeRelleno = n
+	}
 	items, total, cuantos, err := s.repo.ItemsDeGasto(ctx, empresaID, f)
 	if err != nil {
 		return AnalisisGasto{}, err

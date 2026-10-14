@@ -100,6 +100,9 @@ type FiltrosContratos struct {
 	Estado       string
 	// ConSaldo: solo los que deben algo.
 	ConSaldo bool
+	// SoloVencido: la cartera de RECUPERACIÓN — los que ya tienen al menos una cuota vencida.
+	// Distinto de ConSaldo: ése incluye al que debe una cuota que todavía no venció.
+	SoloVencido bool
 	// EnRevision: solo los que quedaron en cuarentena al importar.
 	EnRevision bool
 	Orden      string

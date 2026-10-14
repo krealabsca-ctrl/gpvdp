@@ -106,8 +106,7 @@ func (h *Handler) Login(c *gin.Context) {
 		case errors.Is(err, ErrUsuarioInactivo):
 			httpx.Abort(c, http.StatusForbidden, httpx.CodeSinPermiso, "usuario inactivo")
 		default:
-			h.log.Error("login", zap.Error(err))
-			httpx.Abort(c, http.StatusInternalServerError, httpx.CodeErrorInterno, "error interno")
+			httpx.AbortInterno(c, h.log, "login", err)
 		}
 		return
 	}
@@ -148,8 +147,7 @@ func (h *Handler) Refresh(c *gin.Context) {
 		case errors.Is(err, ErrUsuarioInactivo):
 			httpx.Abort(c, http.StatusForbidden, httpx.CodeSinPermiso, "usuario inactivo")
 		default:
-			h.log.Error("refresh", zap.Error(err))
-			httpx.Abort(c, http.StatusInternalServerError, httpx.CodeErrorInterno, "error interno")
+			httpx.AbortInterno(c, h.log, "refresh", err)
 		}
 		return
 	}
@@ -183,8 +181,7 @@ func (h *Handler) SelectEmpresa(c *gin.Context) {
 		case errors.Is(err, ErrUsuarioInactivo):
 			httpx.Abort(c, http.StatusForbidden, httpx.CodeSinPermiso, "usuario inactivo")
 		default:
-			h.log.Error("select-empresa", zap.Error(err))
-			httpx.Abort(c, http.StatusInternalServerError, httpx.CodeErrorInterno, "error interno")
+			httpx.AbortInterno(c, h.log, "select-empresa", err)
 		}
 		return
 	}
@@ -207,8 +204,7 @@ func (h *Handler) Me(c *gin.Context) {
 	}
 	res, err := h.svc.Me(c.Request.Context(), claims)
 	if err != nil {
-		h.log.Error("me", zap.Error(err))
-		httpx.Abort(c, http.StatusInternalServerError, httpx.CodeErrorInterno, "error interno")
+		httpx.AbortInterno(c, h.log, "me", err)
 		return
 	}
 
@@ -239,8 +235,7 @@ func (h *Handler) Empresas(c *gin.Context) {
 	}
 	res, err := h.svc.Me(c.Request.Context(), claims)
 	if err != nil {
-		h.log.Error("empresas", zap.Error(err))
-		httpx.Abort(c, http.StatusInternalServerError, httpx.CodeErrorInterno, "error interno")
+		httpx.AbortInterno(c, h.log, "empresas", err)
 		return
 	}
 	c.JSON(http.StatusOK, toEmpresaDTOs(res.Empresas))
@@ -284,8 +279,7 @@ func (h *Handler) CambiarPassword(c *gin.Context) {
 		case errors.Is(err, ErrPasswordDebil):
 			httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, err.Error())
 		default:
-			h.log.Error("cambiar-password", zap.Error(err))
-			httpx.Abort(c, http.StatusInternalServerError, httpx.CodeErrorInterno, "error interno")
+			httpx.AbortInterno(c, h.log, "cambiar-password", err)
 		}
 		return
 	}

@@ -168,11 +168,20 @@ type Repository interface {
 	// que corresponde uno a uno con un archivo del banco.
 	PagosSinComprobante(ctx context.Context, empresaID, loteID string, soloFaltantes bool) ([]PagoConRecibo, error)
 
+	// Liberar el candado del contado (mig 0097), con su huella: quién, cuándo y por qué.
+	LiberarParaPago(ctx context.Context, empresaID, proveedorID string, ids []string, motivo, usuarioID string) ([]FacturaLiberada, error)
+	FacturasDeContado(ctx context.Context, empresaID, proveedorID string) ([]FacturaDeContado, error)
+	EstadoDeBloqueo(ctx context.Context, empresaID string, ids []string) (map[string]bool, error)
+
 	// Detalle de factura: las líneas del XML (CABYS, cantidad, precio unitario) guardadas para
 	// poder analizar QUÉ se compró, no solo cuánto se pagó.
 	DocumentoDeClave(ctx context.Context, empresaID, clave string) (DocumentoBreve, error)
 	GuardarDetalle(ctx context.Context, empresaID, documentoID string, lineas []LineaDetalle) error
 	LineasDeDocumento(ctx context.Context, empresaID, documentoID string) ([]LineaGuardada, error)
+	// Relleno del detalle desde los XML que YA están guardados en la base: el camino real de
+	// las facturas es el buzón, no la carga manual.
+	RecepcionesSinDetalle(ctx context.Context, empresaID string, limite int) ([]RecepcionConXML, error)
+	ContarRecepcionesSinDetalle(ctx context.Context, empresaID string) (int, error)
 	// Análisis de gasto: el detalle agrupado por CABYS. Devuelve además el total de TODOS los
 	// ítems del filtro y cuántos son, porque la lista viene recortada.
 	ItemsDeGasto(ctx context.Context, empresaID string, f FiltrosGasto) ([]ItemGasto, string, int, error)
@@ -234,7 +243,7 @@ func NewRepository(pool *pgxpool.Pool) Repository { return &pgRepository{pool: p
 
 const proveedorCols = `id::text, nombre, COALESCE(tipo_identificacion, ''), COALESCE(identificacion, ''),
 	COALESCE(email, ''), COALESCE(telefono, ''), COALESCE(iban, ''), retencion_renta_pct::text, exento_iva, activo,
-	condicion_pago, plazo_credito_dias, plazo_manda,
+	condicion_pago, plazo_credito_dias, convenio_manda,
 	COALESCE(gasto_concepto_id::text, ''), COALESCE(gasto_clasificacion_id::text, ''), COALESCE(gasto_subclasificacion_id::text, ''),
 	COALESCE(departamento, ''), es_contabilidad`
 
@@ -244,7 +253,7 @@ func scanProveedor(row scanner) (Proveedor, error) {
 	var p Proveedor
 	err := row.Scan(&p.ID, &p.Nombre, &p.TipoIdentificacion, &p.Identificacion, &p.Email,
 		&p.Telefono, &p.IBAN, &p.RetencionRentaPct, &p.ExentoIVA, &p.Activo,
-		&p.CondicionPago, &p.PlazoCreditoDias, &p.PlazoManda,
+		&p.CondicionPago, &p.PlazoCreditoDias, &p.ConvenioManda,
 		&p.GastoConceptoID, &p.GastoClasificacionID, &p.GastoSubclasificacionID,
 		&p.Departamento, &p.EsContabilidad)
 	return p, err
@@ -375,7 +384,7 @@ func (r *pgRepository) Actualizar(ctx context.Context, empresaID, id string, in 
 		    condicion_pago = COALESCE(NULLIF($11, ''), 'CONTADO'), plazo_credito_dias = $12,
 		    -- Vacío conserva lo que ya estaba: una edición que no toca este campo no puede
 		    -- devolverle el proveedor al plazo del XML sin que nadie lo pida (mig 0095).
-		    plazo_manda = COALESCE(NULLIF($17, ''), plazo_manda),
+		    convenio_manda = COALESCE(NULLIF($17, ''), convenio_manda),
 		    gasto_concepto_id = (SELECT c.id FROM concepto c WHERE c.id = NULLIF($13, '')::uuid AND c.empresa_id = $1::uuid AND c.visible_cxp),
 		    gasto_clasificacion_id = (SELECT cl.id FROM clasificacion cl WHERE cl.id = NULLIF($14, '')::uuid AND cl.empresa_id = $1::uuid),
 		    gasto_subclasificacion_id = (SELECT sc.id FROM subclasificacion sc WHERE sc.id = NULLIF($15, '')::uuid AND sc.empresa_id = $1::uuid),
@@ -383,9 +392,14 @@ func (r *pgRepository) Actualizar(ctx context.Context, empresaID, id string, in 
 		    actualizado_en = now()
 		WHERE empresa_id = $1::uuid AND id = $2::uuid
 		RETURNING ` + proveedorCols
+	// $17 es `convenio_manda` y va AL FINAL de la lista aunque en el SQL aparezca en el medio: el
+	// número del placeholder manda, no el orden en que se lee la sentencia. Que faltara este
+	// argumento dejó la edición de proveedores rota entera —pgx rechaza la consulta con
+	// «expected 17 arguments, got 16» antes de tocar la base—, así que no fallaba solo el campo
+	// nuevo: no se podía guardar ningún cambio de ningún proveedor.
 	p, err := scanProveedor(r.pool.QueryRow(ctx, q, empresaID, id, in.Nombre, in.TipoIdentificacion, in.Identificacion,
 		in.Email, in.Telefono, in.IBAN, in.RetencionRentaPct, in.ExentoIVA, in.CondicionPago, in.PlazoCreditoDias,
-		in.GastoConceptoID, in.GastoClasificacionID, in.GastoSubclasificacionID, in.Departamento))
+		in.GastoConceptoID, in.GastoClasificacionID, in.GastoSubclasificacionID, in.Departamento, in.ConvenioManda))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Proveedor{}, ErrProveedorNoEncontrado
 	}

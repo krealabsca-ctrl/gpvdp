@@ -226,11 +226,38 @@ func (s *Service) juzgarRecepcion(
 			if e != nil {
 				return RecParqueada, "la factura ya existe pero no se pudo enlazar: " + e.Error(), "", ""
 			}
+			// El detalle se guarda IGUAL sobre la que ya existía: una factura cargada antes por
+			// Excel trae solo el encabezado, y este XML es justamente lo que le faltaba.
+			s.guardarDetalleDelXML(ctx, tok.EmpresaID, existente.ID, comprobantes[0])
 			return RecDuplicada, "esta factura ya estaba registrada", existente.ID, existente.Consecutivo
 		}
 		return RecParqueada, "no se pudo registrar la factura: " + err.Error(), "", ""
 	}
+	s.guardarDetalleDelXML(ctx, tok.EmpresaID, doc.ID, comprobantes[0])
 	return RecProcesada, "", doc.ID, doc.Consecutivo
+}
+
+// guardarDetalleDelXML guarda las líneas del comprobante (CABYS, cantidad, precio unitario) para
+// que el análisis de gasto por ítem tenga de qué alimentarse.
+//
+// VA ACÁ, EN LA RECEPCIÓN, porque es por donde entran las facturas de verdad: «esto se alimenta de
+// la recepción, ya que el importador no lo usamos, porque se automatizó ese proceso» (Director
+// Financiero, 13-oct-2026). Engancharlo solo a la carga manual de carpetas dejaba la pantalla de
+// gasto en cero para siempre en la operación real.
+//
+// UN FALLO ACÁ NO TUMBA LA RECEPCIÓN. La cuenta por pagar es lo esencial —es plata que se debe— y
+// el detalle es complementario: si no se puede guardar, la factura entra igual y queda el error en
+// el log. Al revés —perder la factura por no poder guardar sus líneas— sería cambiar algo
+// importante por algo útil.
+func (s *Service) guardarDetalleDelXML(ctx context.Context, empresaID, documentoID string, c comprobanteXML) {
+	d := DetalleDeXML(c)
+	if len(d.Lineas) == 0 {
+		return
+	}
+	if err := s.repo.GuardarDetalle(ctx, empresaID, documentoID, d.Lineas); err != nil {
+		s.log.Error("cxp: no se pudo guardar el detalle del comprobante",
+			zap.String("documento_id", documentoID), zap.Error(err))
+	}
 }
 
 // ReintentarRecepcion vuelve a procesar una recepción parqueada, después de arreglar lo que faltaba.

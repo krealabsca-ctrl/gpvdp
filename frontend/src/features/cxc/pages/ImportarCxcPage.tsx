@@ -39,6 +39,7 @@ import {
   usePrevisualizarContratos,
 } from "@/features/cxc/hooks";
 import { cxcApi } from "@/api/cxc";
+import { RehacerCargos } from "@/features/cxc/components/RehacerCargos";
 import type { ConciliacionCobros, ConciliacionCxc } from "@/api/cxc";
 
 export function ImportarCxcPage() {
@@ -371,6 +372,14 @@ export function ImportarCxcPage() {
               </div>
             </>
           )}
+
+          {/* REHACER LOS CARGOS CUANDO LA CARTERA SE CORRIGIÓ.
+              Generar es idempotente —no duplica— pero por eso mismo NO arregla un cargo que ya
+              existe y quedó mal. Cuando la cartera cambia (por ejemplo al entrar la fecha de
+              próximo pago, que bajó la deuda de 18.450 contratos en ₡1.042 millones), hay que
+              borrarlos y rehacerlos. Vive acá, debajo de Generar, porque es la misma operación
+              corregida y no una función aparte que haya que ir a buscar. */}
+          <RehacerCargos desde={desde} hasta={hasta} />
         </CardContent>
       </Card>
 

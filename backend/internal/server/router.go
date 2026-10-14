@@ -288,6 +288,10 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.GET("/cxp/proveedores", P("cxp.ver"), cxpH.ListarProveedores)
 			scoped.GET("/cxp/proveedores/:id", P("cxp.ver"), cxpH.ProveedorPorID)
 			scoped.GET("/cxp/proveedores/:id/gastos", P("cxp.ver"), cxpH.GastosDeProveedor)
+			// El candado del contado, desde la ficha del proveedor (mig 0097): ver qué quedó
+			// trancado es lectura; levantarlo tiene permiso propio, porque es la última barrera
+			// contra el doble pago de una factura que pudo haberse pagado por caja chica.
+			scoped.GET("/cxp/proveedores/:id/bloqueadas", P("cxp.ver"), cxpH.FacturasDeContado)
 			scoped.GET("/cxp/documentos", P("cxp.ver"), cxpH.ListarDocumentos)
 			scoped.GET("/cxp/documentos/:id", P("cxp.ver"), cxpH.DocumentoPorID)
 			scoped.GET("/cxp/documentos/:id/historial", P("cxp.ver"), cxpH.HistorialDocumento)
@@ -304,6 +308,9 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			// Análisis de gasto por ítem. La CARGA del detalle va con `cxp.importar` porque es
 			// cargar documentos; la LECTURA con `cxp.gasto`, que es la pantalla nueva.
 			scoped.POST("/cxp/detalle/xml", P("cxp.importar"), cxpH.CargarDetalleXML)
+			// El relleno desde lo YA recibido: no sube archivos, lee los XML que el buzón dejó
+			// guardados. Mismo permiso que la carga, porque es la misma operación por otra puerta.
+			scoped.POST("/cxp/detalle/desde-recepcion", P("cxp.importar"), cxpH.RellenarDetalle)
 			scoped.GET("/cxp/gasto", P("cxp.gasto"), cxpH.AnalisisGasto)
 			scoped.GET("/cxp/gasto/:cabys", P("cxp.gasto"), cxpH.ComprasDeItem)
 			scoped.GET("/cxp/anticipos/disponibles", P("cxp.ver"), cxpH.AnticiposDisponibles)
@@ -379,6 +386,7 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			// Proveedores
 			scoped.POST("/cxp/proveedores", P("cxp.proveedores"), cxpH.CrearProveedor)
 			scoped.PATCH("/cxp/proveedores/:id", P("cxp.proveedores"), cxpH.ActualizarProveedor)
+			scoped.POST("/cxp/proveedores/:id/liberar", P("cxp.liberar_pago"), cxpH.LiberarParaPago)
 			scoped.POST("/cxp/proveedores/:id/desactivar", P("cxp.proveedores"), cxpH.DesactivarProveedor)
 			// Departamentos (catálogo administrable)
 			scoped.POST("/cxp/departamentos", P("cxp.departamentos"), cxpH.CrearDepartamento)
@@ -622,6 +630,11 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.PATCH("/cxc/contratos/:numero", P("cxc.importar"), cxcH.CorregirContrato)
 			scoped.GET("/cxc/cargos/plan", P("cxc.ver"), cxcH.PlanCargos)
 			scoped.POST("/cxc/cargos/generar", P("cxc.importar"), cxcH.GenerarCargos)
+			// Rehacer los cargos cuando la cartera se corrige. Mismo permiso que generarlos: es
+			// la misma responsabilidad —armar la cartera— y el borrado solo saca lo que no tiene
+			// pagos ni notas ni factura, así que no puede destruir un cobro.
+			scoped.GET("/cxc/cargos/regenerar/plan", P("cxc.ver"), cxcH.PlanRegeneracion)
+			scoped.POST("/cxc/cargos/regenerar", P("cxc.importar"), cxcH.RegenerarCargos)
 			// El machote del archivo de cartera: se baja, se llena y se sube por el mismo camino.
 			scoped.GET("/cxc/importaciones/contratos/plantilla", P("cxc.importar"), cxcH.PlantillaCartera)
 			scoped.POST("/cxc/importaciones/contratos/previsualizar", P("cxc.importar"), cxcH.PrevisualizarImportacion)

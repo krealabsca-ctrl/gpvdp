@@ -77,8 +77,8 @@ func TestCatalogoSinDuplicados(t *testing.T) {
 	// detalle (CABYS, cantidad, precio unitario) del XML de cada factura. Va aparte de
 	// `cxp.dashboard` porque son dos preguntas distintas —cómo va el PROCESO contra en qué se va
 	// la plata— aunque hoy lo reciban los mismos roles.
-	if len(Catalogo) != 90 {
-		t.Errorf("catálogo tiene %d permisos, se esperaban 90", len(Catalogo))
+	if len(Catalogo) != 91 {
+		t.Errorf("catálogo tiene %d permisos, se esperaban 91", len(Catalogo))
 	}
 }
 

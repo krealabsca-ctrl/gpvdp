@@ -82,8 +82,11 @@ type FilaContrato struct {
 	Cuota        decimal.Decimal `json:"cuota"`
 	FechaInicial string          `json:"fecha_inicial"`
 	PrimerCobro  string          `json:"primer_cobro"`
-	TarjetaVence string          `json:"tarjeta_vence"`
-	Estado       string          `json:"estado"`
+	// ProximoPago: la próxima cuota que al cliente le toca pagar, del archivo de cartera. Es el
+	// PISO de su deuda — la generación no crea cargos anteriores a esta fecha.
+	ProximoPago  string `json:"proximo_pago"`
+	TarjetaVence string `json:"tarjeta_vence"`
+	Estado       string `json:"estado"`
 	// Datos del origen: informativos. El ERP calcula su propio tramo con la antigüedad
 	// real de los cargos; estos sirven para comparar contra el sistema viejo durante la
 	// corrida en paralelo.
@@ -184,11 +187,19 @@ func LeerContratos(h Hoja, r ReglasImportacion) ([]FilaContrato, error) {
 		// (d/m/aaaa) si vino escrita como tal. Ver fechaDeCelda.
 		f.FechaInicial = fecha("fecha_inicial")
 		f.PrimerCobro = fecha("primer_cobro")
+		// LA FECHA DE PRÓXIMO PAGO SE GUARDA SIEMPRE, no solo como respaldo.
+		//
+		// Es la próxima cuota que al cliente le toca pagar, o sea el PISO de su deuda: nada
+		// anterior a esa fecha se le cobra. Se leía desde el principio y solo se usaba cuando
+		// faltaba la de primer cobro; por no guardarla, la generación de cargos le aplicaba a
+		// todos el rango completo y la cartera quedó inflada en ₡1.042 millones sobre 18.450
+		// contratos (medido contra el saldo del propio archivo, 13-oct-2026).
+		f.ProximoPago = fecha("proximo_pago")
 		if f.PrimerCobro == "" {
 			// Sin fecha de primer cobro no se puede generar ni un cargo, y no se
 			// inventa: la fila entra marcada y no estorba a las demás.
-			if pp := fecha("proximo_pago"); pp != "" {
-				f.PrimerCobro = pp
+			if f.ProximoPago != "" {
+				f.PrimerCobro = f.ProximoPago
 				f.Motivos = append(f.Motivos, "sin fecha de primer cobro: se tomó la de próximo pago")
 			} else {
 				f.Motivos = append(f.Motivos, "sin fecha de primer cobro ni de próximo pago")

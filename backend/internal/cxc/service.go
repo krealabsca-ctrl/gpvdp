@@ -304,10 +304,33 @@ func planDe(c ContratoGenerable, desde, hasta time.Time) ([]CargoPlan, string) {
 	if err != nil {
 		return nil, "fecha de primer cobro ilegible"
 	}
+	// EL PISO DE CADA CONTRATO ES SU PROPIA FECHA DE PRÓXIMO PAGO.
+	//
+	// El rango que se elige en pantalla —enero a octubre, por ejemplo— es el techo de la corrida,
+	// no la deuda de cada cliente. Aplicárselo completo a todos le cobra meses que ya pagó: el
+	// contrato CO118040 debía UNA cuota de ₡500.000 según el archivo y se le generaron NUEVE,
+	// ₡4.500.000. Sobre la cartera entera eran 18.450 contratos y ₡1.042.683.725 de más.
+	//
+	// «Fecha próximo pago» es la próxima cuota que le toca pagar, así que nada anterior se le
+	// debe. Se toma la MÁS TARDÍA entre el desde del rango y esa fecha.
+	//
+	// Si el archivo no la trajo, el contrato se comporta como antes: manda el rango. No se
+	// inventa un piso —eso escondería deuda real— y el que no la tiene queda igual que siempre.
+	desdeContrato := desde
+	if c.ProximoPago != "" {
+		if pp, err := time.Parse("2006-01-02", c.ProximoPago); err == nil && pp.After(desdeContrato) {
+			desdeContrato = pp
+		}
+	}
+	if desdeContrato.After(hasta) {
+		// Está al día más allá del final del rango: no debe nada de este período. No es un
+		// error ni un dato incompleto, así que no lleva motivo: simplemente no genera cargos.
+		return nil, ""
+	}
 	cargos, err := PlanDeCargos(
 		ContratoParaGenerar{Numero: c.Numero, FechaPrimerCobro: primer, DiaPago: c.DiaPago, Cuota: c.Cuota},
 		ModalidadCiclo{MesesCiclo: c.MesesCiclo, Quincenal: c.Quincenal},
-		desde, hasta,
+		desdeContrato, hasta,
 	)
 	switch {
 	case err == nil:

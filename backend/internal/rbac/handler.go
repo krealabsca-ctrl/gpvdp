@@ -6,14 +6,22 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"go.uber.org/zap"
+
 	"github.com/gpvdp/erp/internal/auth"
 	"github.com/gpvdp/erp/internal/httpx"
 )
 
 // Handler expone la administración de la matriz RBAC.
-type Handler struct{ svc *Service }
+//
+// Lleva logger porque un error inesperado acá tiene que quedar escrito: sin él, el 500 sale con
+// una referencia que no lleva a ninguna línea de log y la trazabilidad es una promesa vacía.
+type Handler struct {
+	svc *Service
+	log *zap.Logger
+}
 
-func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
+func NewHandler(svc *Service, log *zap.Logger) *Handler { return &Handler{svc: svc, log: log} }
 
 // Permisos GET /v1/rbac/permisos — catálogo completo de permisos.
 func (h *Handler) Permisos(c *gin.Context) {
@@ -154,6 +162,6 @@ func (h *Handler) error(c *gin.Context, err error) {
 		httpx.Abort(c, http.StatusForbidden, httpx.CodeSinPermiso,
 			"no tenés acceso a la empresa de origen, así que no se pueden leer sus roles")
 	default:
-		httpx.Abort(c, http.StatusInternalServerError, httpx.CodeErrorInterno, "error interno")
+		httpx.AbortInterno(c, h.log, "rbac", err)
 	}
 }

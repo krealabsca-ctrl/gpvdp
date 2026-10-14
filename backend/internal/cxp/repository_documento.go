@@ -177,14 +177,14 @@ func (r *pgRepository) CrearDocumento(ctx context.Context, empresaID string, in 
 		       NULLIF($4, ''), $5::date, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), $14::uuid,
 		       -- DE DÓNDE SALE EL VENCIMIENTO (mig 0095).
 		       --
-		       -- Con plazo_manda = 'PROVEEDOR' gana el convenio: emisión + el plazo de la ficha,
+		       -- Con convenio_manda = 'PROVEEDOR' gana el convenio: emisión + el plazo de la ficha,
 		       -- aunque el comprobante traiga otro. Es el caso del proveedor que declara 90 días en
 		       -- su catálogo y tiene pactado otro — medido: 154 facturas de 36 proveedores con el
 		       -- vencimiento del XML distinto del plazo pactado.
 		       --
 		       -- Con 'XML' (el default, y lo que el sistema hacía siempre) manda el comprobante y
 		       -- el plazo de la ficha solo se usa si el XML no trajo vencimiento.
-		       CASE WHEN p.plazo_manda = 'PROVEEDOR' AND p.condicion_pago = 'CREDITO'
+		       CASE WHEN p.convenio_manda = 'PROVEEDOR' AND p.condicion_pago = 'CREDITO'
 		            THEN $5::date + p.plazo_credito_dias
 		            ELSE COALESCE(NULLIF($15, '')::date,
 		                          CASE WHEN p.condicion_pago = 'CREDITO'
@@ -194,7 +194,23 @@ func (r *pgRepository) CrearDocumento(ctx context.Context, empresaID string, in 
 		       p.gasto_concepto_id, p.gasto_clasificacion_id, p.gasto_subclasificacion_id, (p.gasto_concepto_id IS NOT NULL),
 		       -- Enrutamiento automático: hereda el departamento (centro de costo) del proveedor.
 		       (SELECT dep.id FROM departamento dep WHERE dep.empresa_id = $1::uuid AND dep.nombre = p.departamento AND dep.activo),
-		       $17, NULLIF($18, '')
+		       -- EL CANDADO DEL CONTADO, Y CUÁNDO NO SE PONE (mig 0097).
+		       --
+		       -- La factura de contado nace bloqueada para pago: suele estar ya pagada por caja
+		       -- chica, y pagarla otra vez por banco saca el dinero dos veces (ver
+		       -- service_importacion.go). Pero hay emisores que escriben «contado» en el
+		       -- comprobante aunque el convenio sea a crédito, y entonces el candado tranca una
+		       -- factura que SÍ hay que pagar por banco.
+		       --
+		       -- Con convenio_manda = 'PROVEEDOR' y una ficha que dice CRÉDITO, gana la ficha:
+		       -- con ese proveedor no se compra en el mostrador, así que no hay vale de caja chica
+		       -- con el que se pueda duplicar el pago. Es la MISMA decisión que resuelve el
+		       -- vencimiento tres líneas arriba, y por eso vive acá y no en el importador: así
+		       -- vale igual para el XML y para el Excel, sin repetir la regla en dos caminos.
+		       CASE WHEN p.convenio_manda = 'PROVEEDOR' AND p.condicion_pago = 'CREDITO'
+		            THEN false ELSE $17 END,
+		       CASE WHEN p.convenio_manda = 'PROVEEDOR' AND p.condicion_pago = 'CREDITO'
+		            THEN NULL ELSE NULLIF($18, '') END
 		FROM proveedor p WHERE p.id = $2::uuid AND p.empresa_id = $1::uuid
 		RETURNING id::text`
 	var id string

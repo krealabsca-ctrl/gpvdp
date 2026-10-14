@@ -99,13 +99,16 @@ type CompraDeItem struct {
 // 300, la lista de ítems es verdadera pero PARCIAL: "gastamos ₡3 M en papel" puede ser ₡30 M.
 // Sin este bloque, el número se lee como si fuera el total y nadie tiene forma de notarlo.
 type CoberturaGasto struct {
-	Facturas         int    `json:"facturas"`
-	FacturasConDet   int    `json:"facturas_con_detalle"`
-	MontoTotal       string `json:"monto_total"`
-	MontoConDetalle  string `json:"monto_con_detalle"`
-	PorcentajeMonto  string `json:"porcentaje_monto"`
-	LineasSinCABYS   int    `json:"lineas_sin_cabys"`
-	LineasSinConvert int    `json:"lineas_sin_convertir"`
+	Facturas        int    `json:"facturas"`
+	FacturasConDet  int    `json:"facturas_con_detalle"`
+	MontoTotal      string `json:"monto_total"`
+	MontoConDetalle string `json:"monto_con_detalle"`
+	PorcentajeMonto string `json:"porcentaje_monto"`
+	// PendientesDeRelleno: facturas que entraron por el buzón, tienen su XML guardado en la base
+	// y todavía no tienen detalle. Son las que se pueden rellenar SIN subir nada.
+	PendientesDeRelleno int `json:"pendientes_de_relleno"`
+	LineasSinCABYS      int `json:"lineas_sin_cabys"`
+	LineasSinConvert    int `json:"lineas_sin_convertir"`
 }
 
 // AnalisisGasto es la respuesta completa de la pantalla.

@@ -2775,6 +2775,7 @@ function TabPagadas(props: {
   enviandoId: string | null;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
   const [paraId, setParaId] = useState<string | null>(null);
   /** El documento cuyo REENVÍO se está confirmando (null = no hay diálogo abierto). */
   const [reenviando, setReenviando] = useState<Documento | null>(null);
@@ -2789,9 +2790,29 @@ function TabPagadas(props: {
   return (
     <div className="flex flex-col gap-3">
       <input ref={fileRef} type="file" accept="application/pdf,.pdf" onChange={onFile} className="sr-only" aria-label="Comprobante de pago (PDF)" />
-      <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-content-muted">
-        📎 Adjuntá el comprobante del banco y envialo — el proveedor recibe su respaldo por correo.
-        Si ya salió, se puede reenviar; el detalle de cada envío está en «Ver».
+      {/* DOS CAMINOS, Y EL DE A UNO NO ES EL NORMAL.
+          Acá se adjunta UN recibo a UNA factura, que sirve para el que llegó tarde o hay que
+          reemplazar. Lo habitual es volver del banco con la corrida entera —cien pagos, cien
+          recibos—, y para eso está «Comprobantes», que los reparte solos leyendo el código del
+          nombre. Esa pantalla existe desde el 7-oct y vive en el menú, pero quien tiene los cien
+          archivos en la mano está mirando ESTA fila, no el menú: sin el enlace acá, la función
+          rápida no se encuentra justo cuando hace falta. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-content-muted">
+        <span>
+          📎 Adjuntá el comprobante del banco y envialo — el proveedor recibe su respaldo por
+          correo. Si ya salió, se puede reenviar; el detalle de cada envío está en «Ver».
+        </span>
+        <span className="text-content-muted">
+          ¿Tenés la carpeta de una corrida entera?{" "}
+          <button
+            type="button"
+            className="font-medium text-accent underline underline-offset-2"
+            onClick={() => navigate("/cxp/comprobantes")}
+          >
+            Subilos todos de una vez
+          </button>{" "}
+          — se reparten solos por el código del nombre.
+        </span>
       </div>
       <TableContainer>
         <Table>

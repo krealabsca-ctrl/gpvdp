@@ -161,6 +161,14 @@ type PagoCxPDeMovimiento struct {
 	// pago AGRUPADO por proveedor (remesa), donde `Consecutivo` trae la referencia del grupo
 	// («REM 0029-01») en vez del número de una factura — porque no hay una sola que nombrar.
 	Facturas int `json:"facturas"`
+	// Concepto y Clasificacion: el TIPO DE GASTO de lo que se pagó, tal como está clasificado en
+	// CxP. Vacíos si la factura todavía no se clasificó, y eso es correcto: no hay nada que decir.
+	//
+	// En un pago AGRUPADO solo vienen con valor si TODAS las facturas comparten el mismo gasto.
+	// Si mezclan, van vacíos: es la misma regla que usa el cierre de remesa, y por la misma razón
+	// —elegir uno de varios atribuiría la plata al rubro equivocado—.
+	Concepto      string `json:"concepto"`
+	Clasificacion string `json:"clasificacion"`
 }
 
 // ListaMovimientos es la respuesta paginada con totales.

@@ -40,6 +40,10 @@ type Repository interface {
 	ContratosParaGenerar(ctx context.Context, empresaID string, sedeIDs []string) ([]ContratoGenerable, error)
 	// InsertarCargos es idempotente: ON CONFLICT (contrato_id, periodo) DO NOTHING.
 	InsertarCargos(ctx context.Context, empresaID string, cargos []CargoAInsertar) (int, error)
+	// Rehacer los cargos generados cuando la cartera se corrige. El borrado solo saca lo que no
+	// tiene pagos, notas ni factura: ver el guardarraíl en repository_regenerar.go.
+	PlanDeRegeneracion(ctx context.Context, empresaID string) (RegeneracionPlan, error)
+	BorrarCargosRegenerables(ctx context.Context, empresaID string) (int, error)
 
 	// Cobros (fase 2). Registrar aplica en la MISMA transacción; reversar devuelve los
 	// cargos a su saldo con la antigüedad original.
@@ -127,6 +131,10 @@ type ContratoGenerable struct {
 	ID          string
 	Numero      string
 	PrimerCobro string
+	// ProximoPago: hasta dónde está al día el cliente, según el archivo de cartera. Es el PISO
+	// de la generación — no se crean cargos de períodos anteriores a esta fecha. "" = el archivo
+	// no la traía y entonces manda la de primer cobro, como antes.
+	ProximoPago string
 	DiaPago     int
 	Cuota       decimal.Decimal
 	MesesCiclo  int
@@ -410,37 +418,63 @@ func (r *pgRepository) GuardarContratos(ctx context.Context, empresaID string, f
 			servicio, tipo_servicio, modalidad_id, forma_pago_id, asociacion_id,
 			dia_pago, cuota_vigente, fecha_inicial, fecha_primer_cobro, tarjeta_vence,
 			score_origen, estado_origen, morosidad_origen, dias_vencidos_origen, saldo_origen,
-			revision_pendiente, revision_motivo
+			revision_pendiente, revision_motivo, fecha_proximo_pago
 		) VALUES (
 			$1::uuid, $2, NULLIF($3,'')::uuid, $4, $5, $6, $7,
 			$8, $9, NULLIF($10,'')::uuid, NULLIF($11,'')::uuid, NULLIF($12,'')::uuid,
 			NULLIF($13,'')::smallint, $14::numeric, NULLIF($15,'')::date, NULLIF($16,'')::date, NULLIF($17,'')::date,
 			NULLIF($18,'')::int, $19, $20, NULLIF($21,'')::int, NULLIF($22,'')::numeric,
-			$23, $24
+			$23, $24, NULLIF($25,'')::date
 		)
 		ON CONFLICT (empresa_id, numero) DO UPDATE SET
+			-- UN CAMPO QUE EL ARCHIVO NO TRAE NO BORRA EL QUE YA HABÍA.
+			--
+			-- El archivo de cartera se reimporta todas las semanas y no siempre llega completo:
+			-- a veces es un recorte con las columnas que cambiaron. Con «= EXCLUDED» a secas,
+			-- una columna ausente llegaba vacía y PISABA el dato bueno. Medido antes del
+			-- arreglo: 12.231 teléfonos y 11.513 correos se habrían borrado con un archivo que
+			-- no los trajera.
+			--
+			-- NULLIF del vacío lo convierte en NULL y el COALESCE conserva lo anterior. Un
+			-- dato se cambia escribiéndolo distinto, nunca dejándolo en blanco.
 			sede_id = COALESCE(EXCLUDED.sede_id, contrato_cxc.sede_id),
-			cliente_nombre = EXCLUDED.cliente_nombre,
-			documento = EXCLUDED.documento,
-			telefonos = EXCLUDED.telefonos,
-			correos = EXCLUDED.correos,
-			servicio = EXCLUDED.servicio,
-			tipo_servicio = EXCLUDED.tipo_servicio,
+			cliente_nombre = COALESCE(NULLIF(EXCLUDED.cliente_nombre,''), contrato_cxc.cliente_nombre),
+			documento = COALESCE(NULLIF(EXCLUDED.documento,''), contrato_cxc.documento),
+			telefonos = COALESCE(NULLIF(EXCLUDED.telefonos,''), contrato_cxc.telefonos),
+			correos = COALESCE(NULLIF(EXCLUDED.correos,''), contrato_cxc.correos),
+			servicio = COALESCE(NULLIF(EXCLUDED.servicio,''), contrato_cxc.servicio),
+			tipo_servicio = COALESCE(NULLIF(EXCLUDED.tipo_servicio,''), contrato_cxc.tipo_servicio),
 			modalidad_id = COALESCE(EXCLUDED.modalidad_id, contrato_cxc.modalidad_id),
 			forma_pago_id = COALESCE(EXCLUDED.forma_pago_id, contrato_cxc.forma_pago_id),
 			asociacion_id = COALESCE(EXCLUDED.asociacion_id, contrato_cxc.asociacion_id),
 			dia_pago = COALESCE(EXCLUDED.dia_pago, contrato_cxc.dia_pago),
-			cuota_vigente = EXCLUDED.cuota_vigente,
+			-- LA CUOTA EN CERO NO PISA UNA CUOTA BUENA.
+			--
+			-- El lector deja la cuota en 0 cuando no la entiende o viene negativa, y la marca
+			-- con su motivo. Si ese 0 llegara a la tabla, el contrato dejaría de generar cargos
+			-- para siempre: la deuda no se vería mal, se volvería INVISIBLE. Son 32.900
+			-- contratos con cuota buena hoy, y cualquiera podría quedar en cero por una celda
+			-- mal escrita en una reimportación.
+			cuota_vigente = CASE WHEN EXCLUDED.cuota_vigente > 0
+			                     THEN EXCLUDED.cuota_vigente ELSE contrato_cxc.cuota_vigente END,
 			fecha_inicial = COALESCE(EXCLUDED.fecha_inicial, contrato_cxc.fecha_inicial),
 			-- La fecha de primer cobro NO se sobreescribe con nulo: es el ancla del ciclo
 			-- de cargos y perderla desalinearía todos los períodos del contrato.
 			fecha_primer_cobro = COALESCE(EXCLUDED.fecha_primer_cobro, contrato_cxc.fecha_primer_cobro),
+			-- El archivo nuevo manda cuando la TRAE: es el que dice hasta dónde pagó el cliente
+			-- hoy, y esa fecha avanza con cada pago. Pero si el archivo no la trae, se conserva
+			-- la que había: borrarla devolvería al contrato toda la deuda que ya había pagado,
+			-- que es justo el problema de ₡1.042 millones que esta columna vino a arreglar.
+			fecha_proximo_pago = COALESCE(EXCLUDED.fecha_proximo_pago, contrato_cxc.fecha_proximo_pago),
 			tarjeta_vence = COALESCE(EXCLUDED.tarjeta_vence, contrato_cxc.tarjeta_vence),
-			score_origen = EXCLUDED.score_origen,
-			estado_origen = EXCLUDED.estado_origen,
-			morosidad_origen = EXCLUDED.morosidad_origen,
-			dias_vencidos_origen = EXCLUDED.dias_vencidos_origen,
-			saldo_origen = EXCLUDED.saldo_origen,
+			-- Las fotos del origen (riesgo, morosidad, saldo) también se conservan si el archivo
+			-- no las trae: son el punto de comparación contra lo que calcula el sistema, y un
+			-- recorte sin esas columnas dejaría a la cartera sin con qué contrastarse.
+			score_origen = COALESCE(EXCLUDED.score_origen, contrato_cxc.score_origen),
+			estado_origen = COALESCE(NULLIF(EXCLUDED.estado_origen,''), contrato_cxc.estado_origen),
+			morosidad_origen = COALESCE(NULLIF(EXCLUDED.morosidad_origen,''), contrato_cxc.morosidad_origen),
+			dias_vencidos_origen = COALESCE(EXCLUDED.dias_vencidos_origen, contrato_cxc.dias_vencidos_origen),
+			saldo_origen = COALESCE(EXCLUDED.saldo_origen, contrato_cxc.saldo_origen),
 			revision_pendiente = EXCLUDED.revision_pendiente,
 			revision_motivo = EXCLUDED.revision_motivo,
 			actualizado_en = now()
@@ -458,13 +492,32 @@ func (r *pgRepository) GuardarContratos(ctx context.Context, empresaID string, f
 		if f.FormaPago != "" && formaID == "" {
 			motivos = agregarMotivo(motivos, "forma de pago desconocida: "+f.FormaPago)
 		}
+		// UNA CUOTA NEGATIVA NO PUEDE TUMBAR EL ARCHIVO ENTERO.
+		//
+		// `contrato_cxc.cuota_vigente` tiene CHECK (>= 0) —y con razón: una cuota negativa
+		// generaría cargos negativos—. El lector ya marcaba la fila con «cuota en cero o
+		// negativa», pero la pasaba igual al upsert, y como esto corre DENTRO de una
+		// transacción, un solo contrato así abortaba la importación completa: 23.144 contratos
+		// sin entrar por culpa de uno. Así salió el incidente 87CA1C (contrato CO139774).
+		//
+		// Entra en CERO, no se descarta: el contrato existe y su deuda existe, y hacerlo
+		// desaparecer del sistema es peor que registrarlo marcado. Cero acá significa «sin cuota
+		// válida» —no un dato inventado— y el motivo conserva el valor original para poder
+		// corregirlo. Como `motivos` queda no vacío, el contrato nace con `revision_pendiente`
+		// y nadie le genera cargos sin mirarlo antes.
+		cuota := f.Cuota
+		if cuota.Sign() < 0 {
+			motivos = agregarMotivo(motivos,
+				"cuota negativa en el archivo ("+f.Cuota.String()+"): entra en cero hasta que se corrija")
+			cuota = decimal.Zero
+		}
 		var insertado bool
 		err := tx.QueryRow(ctx, upsert,
 			empresaID, f.Numero, res.Sedes[nombreSede(f)], f.Cliente, f.Documento, f.Telefonos, f.Correos,
 			f.Servicio, f.TipoServicio, modID, formaID, res.Asociaciones[f.Asociacion],
-			textoODefecto(f.DiaPago), f.Cuota.String(), f.FechaInicial, f.PrimerCobro, f.TarjetaVence,
+			textoODefecto(f.DiaPago), cuota.String(), f.FechaInicial, f.PrimerCobro, f.TarjetaVence,
 			punteroInt(f.ScoreOrigen), f.EstadoOrigen, f.MorosidadOrigen, punteroInt(f.DiasVencidosOrigen),
-			punteroDecimal(f.SaldoOrigen), motivos != "", motivos,
+			punteroDecimal(f.SaldoOrigen), motivos != "", motivos, f.ProximoPago,
 		).Scan(&insertado)
 		if err != nil {
 			return Aplicado{}, fmt.Errorf("cxc: guardar contrato %s: %w", f.Numero, err)
