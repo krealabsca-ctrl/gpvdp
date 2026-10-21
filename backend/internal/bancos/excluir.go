@@ -19,6 +19,16 @@ var (
 	// ErrMotivoExclusionRequerido: sacar plata de los libros sin decir por qué deja un faltante que
 	// nadie puede distinguir de un error del sistema.
 	ErrMotivoExclusionRequerido = errors.New("bancos: decí por qué se saca este movimiento de los libros")
+	// ErrExclusionConCxP: el movimiento es el pago de una factura o de una remesa.
+	//
+	// Sacarlo de los libros deja a la factura CONCILIADA contra plata que ya no está, y el barrido
+	// de huellas no puede volver a mirarla: filtra por `incluido` Y por `documento_cxp_id IS NULL`,
+	// así que el enlace queda huérfano para siempre y no hay forma de repararlo desde la aplicación.
+	//
+	// La reversa de la carga entera ya bloquea por esto (ver BloqueosReversa.FacturasCxP) y dividir
+	// también (ErrDivisionConCxP). Excluir suelto es el tercer camino hacia `incluido = false` y
+	// durante un tiempo fue el único sin la guarda.
+	ErrExclusionConCxP = errors.New("bancos: ese movimiento es el pago de una factura de CxP; desenlazalo antes de sacarlo de los libros")
 	// ErrRangoDuplicadosRequerido: el detector cruza la tabla contra sí misma y necesita un rango.
 	ErrRangoDuplicadosRequerido = errors.New("bancos: decí desde y hasta qué fecha buscar duplicados")
 )

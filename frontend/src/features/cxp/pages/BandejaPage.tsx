@@ -35,11 +35,11 @@ import {
   useToast,
 } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { formatFecha, formatFechaHora, formatMoneda, hoyCR, toNumber } from "@/lib/format";
+import { formatFecha, formatMoneda, hoyCR, toNumber } from "@/lib/format";
 import { mensajeError } from "@/lib/apiError";
 import { copiarAlPortapapeles } from "@/lib/portapapeles";
 import { useTienePermiso } from "@/features/auth/permisos";
-import { ETIQUETA_ESTADO, ETIQUETA_TIPO, PERMISO_COMPROBANTE, TONO_ESTADO, esViaExpresa, puedeAccion, sePuedeCortar, textoRequisitoAprobacion } from "@/features/cxp/dominio";
+import { ETIQUETA_ESTADO, ETIQUETA_TIPO, PERMISO_COMPROBANTE, TONO_ESTADO, esViaExpresa, puedeAccion, sePuedeCortar, textoRequisitoAprobacion, totalesPorMoneda, seVaciaLaPestanaDeBanco } from "@/features/cxp/dominio";
 import { fraseEnvioOK } from "@/features/cxp/comprobanteDominio";
 import {
   useAdjuntarComprobante,
@@ -49,6 +49,7 @@ import {
   useClasificarMasivo,
   useCrearLote,
   useDepartamentos,
+  useCerrarPorOtroMedio,
   useDevolverDoc,
   useDocumentos,
   useEnviarComprobante,
@@ -70,14 +71,20 @@ import {
   cxpApi,
   etiquetaOrigenContabilidad,
   etiquetaMotivoValidacion,
+  ETIQUETA_MEDIO_PAGO,
   type AccionMasiva,
   type Documento,
+  type MedioPagoAlterno,
   type DocumentoFueraDelLote,
   type FiltrosDocumentos,
   type LotePago,
   type ModoPago,
   type TipoFactura,
 } from "@/api/cxp";
+import { ReenviarComprobante } from "@/features/cxp/components/ReenviarComprobante";
+import { ExpedienteDelPago } from "@/features/cxp/components/ExpedienteDelPago";
+import { EnviarComprobante } from "@/features/cxp/components/EnviarComprobante";
+import { WhatsAppComprobante } from "@/features/cxp/components/WhatsAppComprobante";
 import { ApiError } from "@/api/client";
 
 /**
@@ -355,7 +362,9 @@ export function BandejaPage() {
   // vence en agosto»— y un solo par de campos con un selector evita tres pares en la barra.
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
-  const [campoFecha, setCampoFecha] = useState<"emision" | "vencimiento" | "pago">("emision");
+  const [campoFecha, setCampoFecha] = useState<"emision" | "vencimiento" | "pago" | "pagado">(
+    "emision",
+  );
   // El selector de fecha del navegador dispara en CADA tecla del año, así que tecleando «2026» la
   // pantalla llegaría a pedir «0002-08-01». No se manda hasta que la fecha existe de verdad.
   const fechaLista = (v: string) => (/^[1-9]\d{3}-\d{2}-\d{2}$/.test(v) ? v : undefined);
@@ -417,6 +426,10 @@ export function BandejaPage() {
 
   // Diálogo de motivo (contrapartida del archivo: denegar/anular/liquidar/rebotar).
   const [motivo, setMotivo] = useState<{ accion: AccionMasiva; ids: string[]; titulo: string; ok: string } | null>(null);
+  // «Ya se pagó por otro medio» (mig 0102): la salida honesta para una factura de contado que ya
+  // se pagó con caja chica, viáticos, tarjeta o efectivo. Antes solo se podía anular.
+  const [medioPago, setMedioPago] = useState<Documento | null>(null);
+  const cerrarOtroMedio = useCerrarPorOtroMedio();
   // Diálogos de la validación por departamento.
   const [validar, setValidar] = useState<Documento | null>(null);
   const [escalar, setEscalar] = useState<Documento | null>(null);
@@ -796,6 +809,9 @@ export function BandejaPage() {
             { value: "emision", label: "Emisión" },
             { value: "vencimiento", label: "Vencimiento" },
             { value: "pago", label: "Pago programado" },
+            // «Pagado» es cuándo salió el dinero; «Pago programado» cuándo se pensaba pagar. La
+            // diferencia es justo lo que se audita, así que son dos filtros y no uno.
+            { value: "pagado", label: "Pagado (real)" },
           ]}
           className="min-w-40"
         />
@@ -838,6 +854,30 @@ export function BandejaPage() {
           pendiente={trans.isPending}
           onCancelar={() => setMotivo(null)}
           onConfirmar={(nota) => accion(motivo.ids, motivo.accion, motivo.ok, undefined, nota)}
+        />
+      )}
+
+      {/* «Ya se pagó por otro medio»: la salida honesta que antes no existía (mig 0102) */}
+      {medioPago && (
+        <MedioPagoDialog
+          doc={medioPago}
+          pendiente={cerrarOtroMedio.isPending}
+          onCancelar={() => setMedioPago(null)}
+          onConfirmar={(medio, mot, valeId) =>
+            cerrarOtroMedio.mutate(
+              { id: medioPago.id, medio, motivo: mot, valeId },
+              {
+                onSuccess: (res) => {
+                  setMedioPago(null);
+                  toast.success(
+                    `Archivada como pagada por ${ETIQUETA_MEDIO_PAGO[medio]}` +
+                      (res.salio_de_un_lote ? " · salió del corte en el que estaba" : ""),
+                  );
+                },
+                onError: (err) => toast.error(mensajeError(err)),
+              },
+            )
+          }
         />
       )}
 
@@ -908,7 +948,12 @@ export function BandejaPage() {
         <LoadingState label="Cargando facturas" />
       ) : docsQ.isError ? (
         <ErrorState message={mensajeError(docsQ.error)} onRetry={() => docsQ.refetch()} />
-      ) : items.length === 0 ? (
+      ) : seVaciaLaPestanaDeBanco({
+          fase,
+          items: items.length,
+          lotes: lotesQ.data?.length ?? 0,
+          hayFiltros,
+        }) ? (
         <EmptyState message={hayFiltros ? "Sin resultados con estos filtros." : fase === "rec" ? "Nada pendiente. Importá facturación para empezar." : "Nada pendiente en esta fase ✓"} />
       ) : fase === "rec" ? (
         <TabRecibidas
@@ -1007,6 +1052,7 @@ export function BandejaPage() {
           onAccionFila={(id, acc, ok) =>
             acc === "anular" ? pedirMotivo(acc, [id], "Anular factura", ok) : accion([id], acc, ok)
           }
+          onCerrarOtroMedio={setMedioPago}
           onVer={(id) => navigate(`/cxp/documentos/${id}`)}
           onVerComprobante={setViendoComprobante}
           puedeAprobar={puedeAprobar}
@@ -1148,6 +1194,7 @@ export function BandejaPage() {
           onAccionFila={(id, acc, ok) =>
             acc === "anular" ? pedirMotivo(acc, [id], "Anular factura", ok) : accion([id], acc, ok)
           }
+          onCerrarOtroMedio={setMedioPago}
           onVer={(id) => navigate(`/cxp/documentos/${id}`)}
           onVerComprobante={setViendoComprobante}
           puedePagar={puedePagar}
@@ -1190,9 +1237,9 @@ export function BandejaPage() {
               },
             );
           }}
-          onEnviar={(id) => {
+          onEnviar={(id, destino) => {
             setEnviandoId(id);
-            enviar.mutate(id, {
+            enviar.mutate({ id, destino }, {
               onSuccess: (r) => toast.success(fraseEnvioOK(r)),
               // El fallo del correo QUEDA REGISTRADO en la bitácora del documento: el mensaje del
               // servidor ya viene escrito para el operador, así que se muestra tal cual.
@@ -1273,6 +1320,152 @@ function MotivoDialog({
       </div>
     </div>,
     document.body,
+  );
+}
+
+/**
+ * «Ya se pagó por otro medio» (mig 0102).
+ *
+ * Existe porque la única salida que había para una factura de contado ya pagada era ANULARLA, y
+ * anular dice «esta factura no existió» cuando el dinero salió de verdad: el gasto desaparece de
+ * los libros y el proveedor queda sin su cuenta saldada.
+ *
+ * El motivo es obligatorio (20 caracteres) por la misma razón que al liberar: el vale de caja
+ * chica no lleva la clave del comprobante, así que esta frase es lo único que permite reconstruir
+ * un doble pago meses después.
+ */
+function MedioPagoDialog({
+  doc,
+  pendiente,
+  onConfirmar,
+  onCancelar,
+}: {
+  doc: Documento;
+  pendiente: boolean;
+  onConfirmar: (medio: MedioPagoAlterno, motivo: string, valeId: string) => void;
+  onCancelar: () => void;
+}) {
+  const [medio, setMedio] = useState<MedioPagoAlterno>("CAJA_CHICA");
+  const [motivo, setMotivo] = useState("");
+  const [valeId, setValeId] = useState("");
+  const faltan = 20 - motivo.trim().length;
+  const listo = faltan <= 0;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[95] flex items-center justify-center bg-black/40 p-4"
+      onMouseDown={(e) => e.target === e.currentTarget && onCancelar()}
+    >
+      <div className="w-full max-w-lg rounded-xl border border-border bg-surface-raised p-5 shadow-lifted">
+        <h2 className="mb-1 text-base font-semibold text-content">Ya se pagó por otro medio</h2>
+        <p className="mb-4 text-xs text-content-muted">
+          {doc.proveedor} · {doc.consecutivo || "sin consecutivo"} ·{" "}
+          {formatMoneda(doc.total, doc.moneda)}
+        </p>
+
+        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-content-muted">Con qué se pagó</p>
+        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {(Object.keys(ETIQUETA_MEDIO_PAGO) as MedioPagoAlterno[]).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => {
+                setMedio(m);
+                // El vale es del fondo fijo: con otro medio no aplica, y dejarlo escrito haría
+                // que el servidor rechace el envío por una casilla que ya no se ve.
+                if (m !== "CAJA_CHICA") setValeId("");
+              }}
+              className={cn(
+                "rounded-lg border px-3 py-2 text-sm capitalize transition-colors",
+                medio === m
+                  ? "border-accent bg-accent/10 font-medium text-accent"
+                  : "border-border text-content hover:border-accent/50",
+              )}
+            >
+              {ETIQUETA_MEDIO_PAGO[m]}
+            </button>
+          ))}
+        </div>
+
+        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-content-muted">
+          Cómo y cuándo se pagó
+        </label>
+        <textarea
+          value={motivo}
+          onChange={(e) => setMotivo(e.target.value)}
+          autoFocus
+          placeholder="ej. «vale 214 del fondo de Cartago, pagado el 3 de setiembre»"
+          className="min-h-20 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-content placeholder:text-content-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        />
+        <p className="mb-3 mt-1 text-[11px] text-content-muted">
+          {listo
+            ? "Queda en el expediente con tu nombre y la fecha."
+            : `Faltan ${faltan} caracteres — es lo único que permite reconstruir un doble pago meses después.`}
+        </p>
+
+        {medio === "CAJA_CHICA" && (
+          <div className="mb-4">
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-content-muted">
+              Vale del fondo <span className="normal-case text-content-muted">(opcional)</span>
+            </label>
+            <input
+              value={valeId}
+              onChange={(e) => setValeId(e.target.value)}
+              placeholder="id del vale, si ya está cargado"
+              className="w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs text-content placeholder:font-sans placeholder:text-content-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            />
+          </div>
+        )}
+
+        {doc.lote_id && (
+          <p className="mb-3 rounded-lg border border-pendiente/40 bg-pendiente/5 px-3 py-2 text-xs text-pendiente">
+            Esta factura está en el corte #{doc.lote_numero || "—"}. Al cerrarla sale de ese corte,
+            así que la macro va a llevar una línea menos.
+          </p>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onCancelar}>
+            Cancelar
+          </Button>
+          <Button disabled={!listo} onClick={() => onConfirmar(medio, motivo.trim(), valeId.trim())} loading={pendiente}>
+            Archivar como pagada
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * El total de un corte o de un lote, en LA MONEDA EN QUE SE VA A PAGAR.
+ *
+ * Antes se sumaba `total_crc` y se rotulaba ₡ siempre, así que un corte de USD 384,20 se anunciaba
+ * como «₡174 015,71» — mientras la fila de abajo, en la misma pantalla, decía «USD 384,20». El
+ * archivo que se sube al banco va en dólares; el número que se lee antes de subirlo tiene que ir
+ * en dólares también.
+ *
+ * Cuando la moneda no es colones se muestra el equivalente al lado: el monto en colones sigue
+ * haciendo falta para cuadrar contra el presupuesto, solo que ya no es el titular.
+ */
+function TotalEnSuMoneda({ docs }: { docs: { moneda?: string; total?: string; total_crc?: string }[] }) {
+  const grupos = totalesPorMoneda(docs);
+  if (grupos.length === 0) return <>{formatMoneda("0", "CRC")}</>;
+  return (
+    <>
+      {grupos.map((g, i) => (
+        <span key={g.moneda}>
+          {i > 0 && <span className="text-content-muted"> + </span>}
+          {formatMoneda(String(g.total), g.moneda)}
+          {g.moneda !== "CRC" && (
+            <span className="ml-1 text-xs font-normal text-content-muted">
+              = {formatMoneda(String(g.totalCRC), "CRC")}
+            </span>
+          )}
+        </span>
+      ))}
+    </>
   );
 }
 
@@ -1664,6 +1857,16 @@ function CeldaPagoBanco({ d }: { d: Documento }) {
       {p ? (
         <span className="block">
           {formatFecha(p.fecha)} · {p.cuenta || p.banco || "—"}
+        </span>
+      ) : d.pagado_en ? (
+        /* CUÁNDO se marcó pagada, cuando el banco todavía no la confirmó.
+           Son dos fechas distintas y la de arriba es la buena: la del MOVIMIENTO es la del
+           estado de cuenta. Esta es la que el sistema registró, y mientras no haya movimiento
+           es lo único que hay — decir solo «sin enlazar al banco» escondía que la factura sí
+           tiene una fecha de pago declarada (19-oct-2026). */
+        <span className="block">
+          {formatFecha(d.pagado_en)}
+          <span className="ml-1 text-[10.5px] text-content-muted">· sin enlazar al banco</span>
         </span>
       ) : (
         <span className="block text-content-muted">Sin enlazar al banco</span>
@@ -2258,6 +2461,8 @@ function TabAprobar(props: {
   onBulk: () => void;
   onPrioridad: (d: Documento) => void;
   onAccionFila: (id: string, acc: AccionMasiva, ok: string) => void;
+  /** «Ya se pagó por otro medio» (mig 0102): abre el diálogo para esta factura. */
+  onCerrarOtroMedio?: (d: Documento) => void;
   onVer: (id: string) => void;
   onVerComprobante: (recepcionId: string) => void;
   puedeAprobar: boolean;
@@ -2329,6 +2534,10 @@ function TabAprobar(props: {
                     )}
                     <Dots
                       items={[
+                        // Igual que en «Por pagar»: la salida honesta antes que anular.
+                        ...(props.puedeRevision && props.onCerrarOtroMedio
+                          ? [{ label: "💵 Ya se pagó por otro medio…", onClick: () => props.onCerrarOtroMedio!(d) }]
+                          : []),
                         ...(props.puedeRevision ? [{ label: "Anular", tono: "neg" as const, onClick: () => props.onAccionFila(d.id, "anular", "Anulada") }] : []),
                         ...(props.puedeAnticipos && d.proveedor_anticipo_disponible && props.onAplicarAnticipo
                           ? [{ label: "🔗 Aplicar anticipo", onClick: () => props.onAplicarAnticipo!(d.id) }]
@@ -2369,6 +2578,8 @@ function TabPagar(props: {
   onPrioridad: (d: Documento) => void;
   onAccionFila: (id: string, acc: AccionMasiva, ok: string) => void;
   onVer: (id: string) => void;
+  /** «Ya se pagó por otro medio» (mig 0102): abre el diálogo para esta factura. */
+  onCerrarOtroMedio?: (d: Documento) => void;
   onVerComprobante: (recepcionId: string) => void;
   puedePagar: boolean;
   puedeRevision: boolean;
@@ -2404,7 +2615,6 @@ function TabPagar(props: {
       ]
     : [[etiquetaOrden(props.orden), items]];
   const selDocs = items.filter((d) => sel.has(d.id));
-  const total = selDocs.reduce((a, d) => a + toNumber(d.total_crc), 0);
   // Cuántas transferencias saldrían si se agrupa: es el número que hace valer la pena el modo.
   const proveedoresMarcados = new Set(selDocs.map((d) => d.proveedor_id)).size;
 
@@ -2544,6 +2754,14 @@ function TabPagar(props: {
                         <div className="flex justify-end">
                           <Dots
                             items={[
+                              // La salida HONESTA va primera, antes que anular: es la que
+                              // corresponde cuando la factura sí se pagó, y es la que faltaba.
+                              // Mientras anular fue lo único ofrecido acá, se usó para cerrar
+                              // facturas pagadas por caja chica — y eso borra el gasto de los
+                              // libros y deja al proveedor sin su cuenta saldada.
+                              ...(props.puedeRevision && props.onCerrarOtroMedio
+                                ? [{ label: "💵 Ya se pagó por otro medio…", onClick: () => props.onCerrarOtroMedio!(d) }]
+                                : []),
                               ...(props.puedeRevision ? [{ label: "Anular", tono: "neg" as const, onClick: () => props.onAccionFila(d.id, "anular", "Anulada") }] : []),
                               // «Ver factura» solo aparece si la factura entró por el buzón y conserva su XML.
                           // Las que entraron por Excel no tienen comprobante guardado en ninguna
@@ -2570,7 +2788,7 @@ function TabPagar(props: {
         <div>
           <p className="text-[11px] font-bold uppercase tracking-wider text-content-muted">Corte de pago</p>
           <p className="text-lg font-semibold tabular-nums text-content">
-            {sel.size} facturas · {formatMoneda(String(total), "CRC")}
+            {sel.size} facturas · <TotalEnSuMoneda docs={selDocs} />
           </p>
         </div>
         <Input label="Fecha de corte" type="date" value={corte} onChange={(e) => setCorte(e.target.value)} className="max-w-40" />
@@ -2635,11 +2853,30 @@ function TabBanco(props: {
     return [...m.entries()].sort((a, b) => Number(b[0]) - Number(a[0]));
   }, [props.items]);
 
+  // Sin facturas pendientes la pestaña NO se vacía: el histórico de cortes vive acá, y es justo
+  // después de pagar cuando se vuelve a necesitar la macro (para respaldar, o para rehacer un
+  // envío). Antes esta pestaña se reemplazaba entera por «Nada pendiente en esta fase ✓» y los
+  // cortes ya pagados se quedaban sin ninguna puerta en la aplicación.
+  const sinPendientes = props.items.length === 0;
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-content-muted">
-        🏦 Subiste la macro al banco. Cuando procese: marcá <b className="text-content">Pagada</b> o <b className="text-content">Rebotó</b> por línea.
+        {sinPendientes ? (
+          <span>
+            ✓ No queda ninguna factura esperando al banco. Los cortes ya pagados están abajo, con
+            su macro y su reporte.
+          </span>
+        ) : (
+          <span>
+            🏦 Subiste la macro al banco. Cuando procese: marcá <b className="text-content">Pagada</b>{" "}
+            o <b className="text-content">Rebotó</b> por línea.
+          </span>
+        )}
       </div>
+      {/* La tabla de pendientes se omite cuando no hay ninguno: una tabla con encabezados y cero
+          filas se lee como un error de carga. */}
+      {!sinPendientes && (
       <TableContainer>
         <Table>
           <THead>
@@ -2658,7 +2895,7 @@ function TabBanco(props: {
                     <span className="text-[11px] font-bold uppercase tracking-wider text-content-muted">
                       {/* FACTURAS, no «pagos»: cuando el corte se agrupó por proveedor, varias de
                           estas salieron en una sola transferencia. El detalle está en el reporte. */}
-                      Lote #{numero} · {docs.length} factura(s) · {formatMoneda(String(docs.reduce((a, d) => a + toNumber(d.total_crc), 0)), "CRC")}
+                      Lote #{numero} · {docs.length} factura(s) · <TotalEnSuMoneda docs={docs} />
                     </span>
                     {docs[0] && (
                       <>
@@ -2707,12 +2944,18 @@ function TabBanco(props: {
           </TBody>
         </Table>
       </TableContainer>
+      )}
 
-      {/* Histórico de cortes (auditoría, sin ensuciar el trabajo activo) */}
+      {/* Histórico de cortes. Se abre SOLO cuando no hay nada pendiente: ahí deja de ser historia
+          y pasa a ser lo único que hay en la pestaña — es el momento en que alguien viene a buscar
+          la macro de un corte que ya pagó. Con trabajo activo sigue cerrado para no taparlo. */}
       {props.lotes.length > 0 && (
-        <details className="rounded-lg border border-border bg-surface-raised px-4 py-3">
+        <details
+          open={sinPendientes}
+          className="rounded-lg border border-border bg-surface-raised px-4 py-3"
+        >
           <summary className="cursor-pointer text-sm font-semibold text-content-muted">
-            🗄 Histórico de lotes ({props.lotes.length})
+            🗄 Cortes y macros ({props.lotes.length})
           </summary>
           <div className="mt-3 overflow-x-auto">
             <table className="w-full min-w-[560px] border-collapse text-sm">
@@ -2766,7 +3009,8 @@ function TabBanco(props: {
 function TabPagadas(props: {
   items: Documento[];
   onAdjuntar: (id: string, archivo: File) => void;
-  onEnviar: (id: string) => void;
+  /** `destino` vacío = al correo de la ficha; con valor, a esa dirección. */
+  onEnviar: (id: string, destino?: string) => void;
   onVer: (id: string) => void;
   onVerComprobante: (recepcionId: string) => void;
   /** `cxp.comprobante` — el permiso que exige el backend para adjuntar, enviar y reenviar. */
@@ -2779,6 +3023,9 @@ function TabPagadas(props: {
   const [paraId, setParaId] = useState<string | null>(null);
   /** El documento cuyo REENVÍO se está confirmando (null = no hay diálogo abierto). */
   const [reenviando, setReenviando] = useState<Documento | null>(null);
+  // El envío por WhatsApp: el diálogo pide el número y el PDF se adjunta a mano (el enlace wa.me
+  // no admite archivos).
+  const [porWhatsApp, setPorWhatsApp] = useState<Documento | null>(null);
 
   function onFile(e: ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -2786,6 +3033,7 @@ function TabPagadas(props: {
     if (fileRef.current) fileRef.current.value = "";
     setParaId(null);
   }
+
 
   return (
     <div className="flex flex-col gap-3">
@@ -2824,7 +3072,9 @@ function TabPagadas(props: {
               {/* Con qué movimiento se cerró y cuál es su código interno: sin esto, una factura
                   «pagada» no dice de cuál cuenta salió el dinero ni cómo encontrarlo en el banco. */}
               <TH>Pago</TH>
-              <TH>Comprobante</TH>
+              {/* «Documentos» y no «Comprobante»: la columna ahora lleva los DOS papeles del
+                  expediente, y el nombre viejo escondía justo el que se acababa de agregar. */}
+              <TH>Documentos</TH>
               <TH className="text-right">Acción</TH>
             </TR>
           </THead>
@@ -2835,52 +3085,34 @@ function TabPagadas(props: {
                 <TD className="text-sm">{gastoRuta(d) || "—"}</TD>
                 <CeldaMonto d={d} />
                 <CeldaPagoBanco d={d} />
+                {/* EL EXPEDIENTE: los dos papeles como estado y acción a la vez. Reemplaza a la
+                    insignia «Adjunto/Pendiente», que decía si había comprobante pero no dejaba
+                    abrirlo ni mencionaba la factura — la otra mitad de lo que hay que cruzar para
+                    verificar un pago. La hora del último envío se movió junto al botón de enviar,
+                    que es donde decide algo. */}
                 <TD>
-                  {d.comprobante_enviado_en ? (
-                    <div className="flex flex-col gap-0.5">
-                      <Badge tone="positivo" className="w-fit">Enviado ✓</Badge>
-                      {/* La HORA, no solo el día: al reenviar hay que poder distinguir el envío
-                          de hace un rato del de la semana pasada. */}
-                      <span className="text-[10.5px] text-content-muted">
-                        {formatFechaHora(d.comprobante_enviado_en)}
-                      </span>
-                    </div>
-                  ) : d.tiene_comprobante ? (
-                    <Badge tone="accent">Adjunto ✓</Badge>
-                  ) : (
-                    <Badge tone="pendiente">Pendiente</Badge>
-                  )}
+                  <ExpedienteDelPago
+                    doc={d}
+                    puedeAdjuntar={props.puede}
+                    compacto
+                  />
                 </TD>
+                {/* UN control de envío, no dos botones sueltos. Correo y WhatsApp son la misma
+                    decisión —mandarle el comprobante al proveedor— por canales distintos; el
+                    primario es el correo porque deja rastro solo en la bitácora, mientras que por
+                    WhatsApp el envío lo termina una persona y eso no se puede registrar.
+                    Sin comprobante no hay nada que mandar, así que el control no aparece. */}
                 <TD>
                   <div className="flex items-center justify-end gap-1.5">
-                    {props.puede && (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        loading={props.adjuntandoId === d.id}
-                        onClick={() => {
-                          setParaId(d.id);
-                          fileRef.current?.click();
-                        }}
-                      >
-                        {d.tiene_comprobante ? "📎 Reemplazar" : "📎 Adjuntar"}
-                      </Button>
-                    )}
-                    {/* El botón YA NO DESAPARECE al enviar: reenviar es la misma llamada, y hasta
-                        ahora la única forma de reintentar un correo que rebotó era reemplazar el
-                        PDF para que el botón volviera a aparecer. El reenvío pide confirmación
-                        porque le vuelve a escribir al proveedor. */}
                     {props.puede && d.tiene_comprobante && (
-                      <Button
-                        size="sm"
-                        variant={d.comprobante_enviado_en ? "secondary" : "primary"}
-                        loading={props.enviandoId === d.id}
-                        onClick={() =>
+                      <EnviarComprobante
+                        doc={d}
+                        pendiente={props.enviandoId === d.id}
+                        onCorreo={() =>
                           d.comprobante_enviado_en ? setReenviando(d) : props.onEnviar(d.id)
                         }
-                      >
-                        {d.comprobante_enviado_en ? "✉ Reenviar" : "✉ Enviar"}
-                      </Button>
+                        onWhatsApp={() => setPorWhatsApp(d)}
+                      />
                     )}
                     <Button size="sm" variant="ghost" onClick={() => props.onVer(d.id)}>
                       Ver
@@ -2893,17 +3125,24 @@ function TabPagadas(props: {
         </Table>
       </TableContainer>
 
+      {porWhatsApp && (
+        <WhatsAppComprobante
+          documentoId={porWhatsApp.id}
+          proveedor={porWhatsApp.proveedor}
+          telefonoFicha={porWhatsApp.proveedor_telefono}
+          onCerrar={() => setPorWhatsApp(null)}
+        />
+      )}
+
       {reenviando && (
-        <ConfirmDialog
-          titulo={`Reenviar el comprobante a ${reenviando.proveedor}`}
-          descripcion={`Se le vuelve a mandar el mismo PDF al correo del proveedor, con copia oculta a quien aprobó el pago. Último envío: ${formatFechaHora(reenviando.comprobante_enviado_en)}`}
-          textoConfirmar="Reenviar"
+        <ReenviarComprobante
+          doc={reenviando}
           pendiente={props.enviandoId === reenviando.id}
-          onConfirmar={() => {
-            props.onEnviar(reenviando.id);
+          onEnviar={(destino) => {
+            props.onEnviar(reenviando.id, destino);
             setReenviando(null);
           }}
-          onCancelar={() => setReenviando(null)}
+          onCerrar={() => setReenviando(null)}
         />
       )}
     </div>

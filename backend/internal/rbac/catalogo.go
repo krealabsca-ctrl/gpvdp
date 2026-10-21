@@ -155,6 +155,13 @@ var Catalogo = []PermisoDef{
 	{"rrhh.vacaciones.mias", "RRHH / Nómina", "Pedir mis vacaciones", "Ver el saldo propio y solicitar días. No abre ninguna ficha, salario ni dato de otro empleado", false},
 	{"rrhh.vacaciones.equipo", "RRHH / Nómina", "Aprobar vacaciones del equipo", "Ver el calendario y los días disponibles de su departamento y aprobar o rechazar. Sin salarios, deducciones, finiquitos ni incapacidades", false},
 	// Inventario — cofres, urnas y suministros por sede.
+	// ── Calculadora de precios ───────────────────────────────────────────────────────
+	//
+	// Ver y editar separados: consultar el costeo lo necesita cualquiera que cotice;
+	// cambiarlo mueve el precio de todo lo que se vende.
+	{"precios.ver", "Calculadora de precios", "Ver el costeo y los márgenes", "Catálogo de insumos, receta de cada plan, costo y margen (lectura)", false},
+	{"precios.editar", "Calculadora de precios", "Editar insumos, costos y recetas", "Capturar costos, armar la receta de un plan y fijar precios", true},
+
 	{"inventario.ver", "Inventario", "Ver inventario", "Existencias por sede, unidades, movimientos y rotación (lectura)", false},
 	{"inventario.catalogo", "Inventario", "Gestionar el catálogo", "Categorías, artículos y los mínimos y máximos por sede", false},
 	{"inventario.entrada", "Inventario", "Registrar entradas", "Dar de alta la mercadería que llega, con su costo y su factura", false},
@@ -284,9 +291,9 @@ var MatrizDefault = map[string][]string{
 		"inventario.ver", "inventario.entrada", "inventario.servicio", "inventario.traslado", "inventario.conteo",
 	),
 	// Gerencia General: lectura + validación de área + escalamiento + aprobación (firma mancomunada).
-	"GERENCIA_GENERAL": conLecturaBancos("cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.gasto", "cxp.validar_depto", "cxp.validar_escalado", "cxp.aprobar", "cxp.liberar_pago", "cxp.aprobar_contabilidad", "cxp.parametros", "cxp.fuentes", "cxp.caja_ver", "cxc.ver", "cxc.ver_todas_sedes", "inventario.ver"),
+	"GERENCIA_GENERAL": conLecturaBancos("cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.gasto", "cxp.validar_depto", "cxp.validar_escalado", "cxp.aprobar", "cxp.liberar_pago", "cxp.aprobar_contabilidad", "cxp.parametros", "cxp.fuentes", "cxp.caja_ver", "cxc.ver", "cxc.ver_todas_sedes", "inventario.ver", "precios.ver", "precios.editar"),
 	// Auditor Interno: solo lectura.
-	"AUDITOR_INTERNO": conLecturaBancos("cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.gasto", "cxp.caja_ver", "cxc.ver", "cxc.ver_todas_sedes", "inventario.ver"),
+	"AUDITOR_INTERNO": conLecturaBancos("cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.gasto", "cxp.caja_ver", "cxc.ver", "cxc.ver_todas_sedes", "inventario.ver", "precios.ver"),
 	// Supervisor de Piso: la autoridad de la operación de cobro. Es un cargo real que el
 	// negocio nombró como quien autoriza las excepciones — notas de crédito sin tope, arreglos
 	// a plazo largo y el corte del servicio por mora.

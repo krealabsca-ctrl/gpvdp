@@ -271,21 +271,91 @@ export function DashboardPage() {
 
 function KpiGrid({ data }: { data: DashboardData }) {
   const cmp = data.comparativo;
+  const prom = data.promedio_anio;
   return (
     <div className="flex flex-col gap-3">
+      <AvisoDelCorte data={data} />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
           label="Ingresos"
           valor={data.ingresos}
           anterior={cmp.ingresos}
+          promedio={prom.ingresos}
           moneda
           buenoSiSube
         />
-        <KpiCard label="Gastos" valor={data.gastos} anterior={cmp.gastos} moneda buenoSiSube={false} />
-        <KpiCard label="EBITDA" valor={data.ebitda} anterior={cmp.ebitda} moneda buenoSiSube />
+        <KpiCard
+          label="Gastos"
+          valor={data.gastos}
+          anterior={cmp.gastos}
+          promedio={prom.gastos}
+          moneda
+          buenoSiSube={false}
+        />
+        <KpiCard
+          label="EBITDA"
+          valor={data.ebitda}
+          anterior={cmp.ebitda}
+          promedio={prom.ebitda}
+          moneda
+          buenoSiSube
+        />
         <NoIdentificadosCard cantidad={data.no_identificados} />
       </div>
       <AvisoFueraDelEbitda data={data} />
+    </div>
+  );
+}
+
+/**
+ * Hasta qué día se midió todo lo de arriba, y cuánto de eso tiene el banco cargado.
+ *
+ * El corte es el día de HOY cuando el mes está en curso (decisión del Director Financiero: «sería
+ * al 19, porque si algo no se ha cargado se termine de cargar»). Esa decisión usa el tablero como
+ * empuje para mantener la carga al día — y para que empuje en vez de confundir hay que decir
+ * cuántos días faltan: con el corte en el calendario, los días sin estado de cuenta entran a la
+ * comparación como ceros, y un atraso de carga se lee igual que una caída de ventas.
+ */
+function AvisoDelCorte({ data }: { data: DashboardData }) {
+  const c = data.corte;
+  if (!c.en_curso) return null; // mes cerrado: se midió entero y no hay nada que aclarar
+  const faltan = c.dias_sin_cargar;
+  return (
+    <div
+      className={cn(
+        "rounded-xl border px-4 py-2.5 text-sm",
+        faltan > 0 ? "border-pendiente/40 bg-pendiente/10" : "border-border bg-surface-muted",
+      )}
+    >
+      <span className="text-content">
+        Mes en curso: todo lo de abajo va <b>del 1 al {c.dia}</b>, y se compara contra el mismo
+        tramo del mes anterior y del promedio del año.
+      </span>
+      {faltan > 0 && (
+        <span className="text-pendiente">
+          {" "}
+          {/* «hasta el día 0» no se lee: cuando no hay NADA del mes hay que decirlo así. */}
+          {c.ultimo_dia_cargado === 0 ? (
+            <>
+              Del banco <b>todavía no se cargó nada de este mes</b>, así que los{" "}
+              <b>{faltan} días</b> entran en cero
+            </>
+          ) : (
+            <>
+              El banco está cargado hasta el <b>día {c.ultimo_dia_cargado}</b>:{" "}
+              <b>
+                {faltan} día{faltan === 1 ? "" : "s"}
+              </b>{" "}
+              entran en cero
+            </>
+          )}{" "}
+          y empujan la comparación hacia abajo.{" "}
+          <Link to="/importador" className="text-accent underline">
+            Terminar de cargar
+          </Link>
+          .
+        </span>
+      )}
     </div>
   );
 }
@@ -326,19 +396,69 @@ interface KpiCardProps {
   label: string;
   valor: string;
   anterior: string;
+  /** Promedio de los meses previos del año, al mismo tramo. "" = todavía no hay con qué comparar. */
+  promedio?: string;
   moneda: boolean;
   /** true si un aumento es "positivo" (ingresos/EBITDA); false para gastos. */
   buenoSiSube: boolean;
 }
 
-function KpiCard({ label, valor, anterior, moneda, buenoSiSube }: KpiCardProps) {
-  const actualN = toNumber(valor);
-  const anteriorN = toNumber(anterior);
-  const delta = actualN - anteriorN;
-  const pct = anteriorN !== 0 ? (delta / Math.abs(anteriorN)) * 100 : null;
+/**
+ * Una comparación contra una referencia, a paridad de tramo.
+ *
+ * Se extrajo de KpiCard para que las dos —mes anterior y promedio del año— se calculen y se pinten
+ * EXACTAMENTE igual. Con dos copias, una podía quedar midiendo distinto que la otra y nadie lo
+ * notaría leyendo la pantalla.
+ */
+function Delta({
+  valor,
+  referencia,
+  buenoSiSube,
+  etiqueta,
+}: {
+  valor: string;
+  referencia: string;
+  buenoSiSube: boolean;
+  etiqueta: string;
+}) {
+  const refN = toNumber(referencia);
+  const delta = toNumber(valor) - refN;
+  const pct = refN !== 0 ? (delta / Math.abs(refN)) * 100 : null;
   const sube = delta > 0;
   const bueno = delta === 0 ? null : sube === buenoSiSube;
+  return (
+    <p className="flex flex-wrap items-center gap-x-1.5 text-sm">
+      <span
+        className={cn(
+          "font-medium tabular-nums",
+          bueno === null ? "text-content-muted" : bueno ? "text-positivo" : "text-negativo",
+        )}
+      >
+        {delta === 0 ? "±0" : `${sube ? "▲" : "▼"} ${formatMonto(String(Math.abs(delta)))}`}
+      </span>
+      {pct !== null && (
+        <span className="tabular-nums text-content-muted">
+          ({sube ? "+" : ""}
+          {pct.toFixed(1)}%)
+        </span>
+      )}
+      <span className="text-content-muted">{etiqueta}</span>
+    </p>
+  );
+}
 
+/**
+ * Un KPI con sus DOS comparaciones a paridad de día (pedido de Gerencia General, 19-oct-2026).
+ *
+ * Hasta ahora el mes en curso se comparaba contra el mes anterior COMPLETO, así que el porcentaje
+ * medía cuántos días habían pasado y no cómo iba el negocio: setiembre, cargado hasta el día 14,
+ * salía «−62 % vs agosto» cuando a paridad la caída real era del 35 % — y contra el promedio del
+ * año venía 3 % ARRIBA. Una alarma que aparece todos los meses por construcción deja de leerse.
+ *
+ * El promedio del año es la segunda mitad del pedido: un mes puede ir abajo del anterior y aun así
+ * ir bien contra cómo viene el año, y esas dos cosas se deciden distinto.
+ */
+function KpiCard({ label, valor, anterior, promedio, moneda, buenoSiSube }: KpiCardProps) {
   return (
     <Card>
       <CardContent className="py-4">
@@ -346,23 +466,18 @@ function KpiCard({ label, valor, anterior, moneda, buenoSiSube }: KpiCardProps) 
         <p className="mt-1 text-2xl font-semibold tabular-nums text-content">
           {moneda ? formatMoneda(valor) : formatMonto(valor)}
         </p>
-        <p className="mt-2 flex items-center gap-1.5 text-sm">
-          <span
-            className={cn(
-              "font-medium tabular-nums",
-              bueno === null ? "text-content-muted" : bueno ? "text-positivo" : "text-negativo",
-            )}
-          >
-            {delta === 0 ? "±0" : `${sube ? "▲" : "▼"} ${formatMonto(String(Math.abs(delta)))}`}
-          </span>
-          {pct !== null && (
-            <span className="text-content-muted tabular-nums">
-              ({sube ? "+" : ""}
-              {pct.toFixed(1)}%)
-            </span>
+        <div className="mt-2 flex flex-col gap-0.5">
+          <Delta valor={valor} referencia={anterior} buenoSiSube={buenoSiSube} etiqueta="vs mes anterior" />
+          {/* Sin meses previos cargados no se pinta: una comparación contra cero diría «+∞ %». */}
+          {promedio && toNumber(promedio) !== 0 && (
+            <Delta
+              valor={valor}
+              referencia={promedio}
+              buenoSiSube={buenoSiSube}
+              etiqueta="vs promedio del año"
+            />
           )}
-          <span className="text-content-muted">vs mes anterior</span>
-        </p>
+        </div>
       </CardContent>
     </Card>
   );

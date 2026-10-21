@@ -400,6 +400,62 @@ func (s *Service) Liquidar(ctx context.Context, empresaID, id, usuarioID string)
 	return s.transicionarMulti(ctx, empresaID, id, []string{EstRecibido, EstRevisado}, EstLiquidada, "LIQUIDAR_DOCUMENTO", usuarioID)
 }
 
+// estadosQueSePuedenCerrarPorOtroMedio son los mismos desde los que se puede ANULAR.
+//
+// Es deliberado: hasta la 0102, anular era la única salida ofrecida en «Por pagar», y por eso se
+// usaba para facturas que SÍ se habían pagado. Si el cierre honesto no llegara igual de lejos que
+// el deshonesto, la gente seguiría anulando — que es exactamente el problema.
+var estadosQueSePuedenCerrarPorOtroMedio = []string{
+	EstRecibido, EstRevisado, EstValidadoDepto, EstAprobado, EstProgramado,
+}
+
+// CerrarPorOtroMedio archiva una factura que ya se pagó por fuera del banco (mig 0102).
+//
+// Va a LIQUIDADA y NO a PAGADO. Una factura en PAGADO entra en la partida conciliatoria del
+// tablero —lo declarado como pagado que el banco no confirmó— y esta nunca conciliaría, porque no
+// salió por el banco y no hay débito con huella que la respalde: inflaría esa cifra para siempre.
+//
+// El medio se escribe ANTES de mover el estado. Si se hiciera al revés y la escritura del medio
+// fallara, quedaría una LIQUIDADA sin decir con qué se pagó, que es indistinguible de un viático
+// archivado y deja el expediente sin la única explicación que importa.
+func (s *Service) CerrarPorOtroMedio(ctx context.Context, empresaID, id string, in MedioPagoInput, usuarioID string) (Documento, bool, error) {
+	if err := in.Normalizar(); err != nil {
+		return Documento{}, false, err
+	}
+	// El vale se verifica antes de guardarlo: un id que no existe dejaría una referencia muerta, y
+	// el expediente diría que hay respaldo donde no lo hay.
+	if in.ValeID != "" {
+		existe, err := s.repo.ValeDeCajaChicaExiste(ctx, empresaID, in.ValeID)
+		if err != nil {
+			return Documento{}, false, err
+		}
+		if !existe {
+			return Documento{}, false, ErrValeNoEncontrado
+		}
+	}
+	// El estado se mueve PRIMERO para que la validación de la transición decida: si la factura ya
+	// está CONCILIADA o ANULADA, nada se escribe. Al revés habría dejado el medio puesto sobre una
+	// factura que después rechaza el cambio de estado.
+	n, err := s.repo.CambiarEstadoMulti(ctx, empresaID, id, estadosQueSePuedenCerrarPorOtroMedio, EstLiquidada)
+	if err != nil {
+		return Documento{}, false, err
+	}
+	if n == 0 {
+		doc, err := s.conflictoOTransicion(ctx, empresaID, id)
+		return doc, false, err
+	}
+	salioDeUnLote, err := s.repo.GuardarMedioPago(ctx, empresaID, id, in, usuarioID)
+	if err != nil {
+		return Documento{}, false, err
+	}
+	// Va por `auditarDocNota` y no por un evento nuevo: así aparece en la línea de tiempo del
+	// documento, que es donde alguien va a buscar por qué esta factura está liquidada.
+	s.auditarDocNota(ctx, empresaID, id, "CERRAR_POR_OTRO_MEDIO", usuarioID,
+		NotaDeCierre(in.Medio, in.Motivo, salioDeUnLote))
+	doc, err := s.repo.DocumentoPorID(ctx, empresaID, id)
+	return doc, salioDeUnLote, err
+}
+
 // Rebotar: PROGRAMADO → REBOTADA (el banco rechazó el pago dentro de un lote).
 func (s *Service) Rebotar(ctx context.Context, empresaID, id, usuarioID string) (Documento, error) {
 	return s.transicionarMulti(ctx, empresaID, id, []string{EstProgramado}, EstRebotada, "REBOTAR_DOCUMENTO", usuarioID)

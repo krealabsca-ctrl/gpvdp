@@ -137,6 +137,18 @@ export interface ListaProveedores {
 export interface Documento {
   id: string;
   proveedor_id: string;
+  /** Correo de la ficha del proveedor. Precarga el «Para» del reenvío; vacío en 643 de 649. */
+  proveedor_email: string;
+  /** Teléfono de la ficha. Precarga el número del envío por WhatsApp; vacío en los 649 de hoy. */
+  proveedor_telefono: string;
+  /**
+   * CUÁNDO se pagó de verdad (aaaa-mm-dd), leído del evento de pago.
+   *
+   * Distinto de `fecha_pago_programada`, que es cuándo se PENSABA pagar: una factura programada
+   * para el 15 se paga el 22, y esa diferencia es justo lo que se audita. Vacío = todavía no se
+   * pagó, o se pagó antes de que hubiera bitácora (carga histórica).
+   */
+  pagado_en: string;
   proveedor: string;
   clave: string;
   consecutivo: string;
@@ -162,6 +174,8 @@ export interface Documento {
   lote_id: string;
   lote_numero: string;
   tiene_comprobante: boolean;
+  /** La factura del PROVEEDOR está adjunta: la otra mitad del expediente (mig 0103). */
+  tiene_factura: boolean;
   comprobante_enviado_en: string | null;
   /** La clasificación vino de la memoria del proveedor (pendiente de confirmar). */
   clasif_auto: boolean;
@@ -224,11 +238,19 @@ export interface Documento {
    */
   pago_banco?: PagoBancoDelDocumento;
   /**
+   * Con qué se pagó, cuando la factura se cerró por FUERA del banco: caja chica, viáticos,
+   * tarjeta o efectivo (mig 0102).
+   *
+   * Ausente = no se cerró por esa vía. Es lo único que explica por qué una LIQUIDADA no tiene
+   * movimiento bancario: sin esto se ve igual que un viático archivado.
+   */
+  medio_pago?: MedioPagoDelDocumento;
+  /**
    * El pago AGRUPADO dentro del que se fue esta factura, cuando el lote se cortó por proveedor.
    * Ausente = se paga sola, y entonces su propia huella es la que viaja al banco.
    *
    * Es lo que hace que la pantalla y la macro digan lo mismo: en un pago agrupado la huella de la
-   * factura no sale en ninguna parte del estado de cuenta —lo que sale es «REM 0035-01 CXPR-…»— y
+   * factura no sale en ninguna parte del estado de cuenta —lo que sale es «REM 003501 CXPR…»— y
    * mostrarla ahí mandaba a buscar un código que el banco nunca devuelve.
    */
   remesa?: RemesaDelDocumento;
@@ -239,11 +261,38 @@ export interface RemesaDelDocumento {
   id: string;
   /** Código interno del pago agrupado («CXPR-…»), el que vuelve del banco. */
   huella: string;
-  /** La mitad legible («REM 0035-01»), la que una persona lee y busca. */
+  /** La mitad legible («REM 003501»), la que una persona lee y busca. */
   referencia: string;
   /** Cuántas facturas cubre la transferencia, contando esta. Siempre ≥ 1. */
   facturas: number;
 }
+
+/**
+ * Los cuatro medios por los que una factura puede haberse pagado sin pasar por el banco.
+ * Espejan el CHECK de la migración 0102: el servidor rechaza cualquier otro.
+ */
+export type MedioPagoAlterno = "CAJA_CHICA" | "VIATICOS" | "TARJETA" | "EFECTIVO";
+
+/** Cómo se cerró una factura que no salió por el banco. */
+export interface MedioPagoDelDocumento {
+  medio: MedioPagoAlterno;
+  /** Por qué y cuándo se pagó. Obligatorio: es la única barrera contra el doble pago. */
+  motivo: string;
+  /** El vale del fondo fijo, cuando se ligó uno. Opcional por decisión del Director Financiero. */
+  vale_id?: string;
+  vale_detalle?: string;
+  vale_monto?: string;
+  registrado_en: string;
+  registrado_por: string;
+}
+
+/** Cómo se muestra cada medio. El servidor usa las mismas palabras en la línea de tiempo. */
+export const ETIQUETA_MEDIO_PAGO: Record<MedioPagoAlterno, string> = {
+  CAJA_CHICA: "caja chica",
+  VIATICOS: "viáticos",
+  TARJETA: "tarjeta",
+  EFECTIVO: "efectivo",
+};
 
 /** El movimiento bancario que pagó una factura, con lo mínimo para reconocerlo. */
 export interface PagoBancoDelDocumento {
@@ -522,7 +571,7 @@ export interface Remesa {
   lote_id: string;
   proveedor_id: string;
   proveedor: string;
-  /** Consecutivo dentro del lote: la mitad legible de la referencia («REM 0043-07»). */
+  /** Consecutivo dentro del lote: la mitad legible de la referencia («REM 004307»). */
   numero: number;
   /** Código interno («CXPR-…»), lo que vuelve del banco. */
   huella: string;
@@ -550,7 +599,7 @@ export interface LineaDeAviso {
  * este lado, para el proveedor y como respaldo de qué cubrió esa transferencia.
  */
 export interface AvisoDePago {
-  /** Lo que aparece en el banco: «REM 0043-07», o «FC 000487» si se pagó suelta. */
+  /** Lo que aparece en el banco: «REM 004307», o «FC 000487» si se pagó suelta. */
   referencia: string;
   huella: string;
   lote_numero: number;
@@ -647,7 +696,14 @@ export interface FiltrosDocumentos {
    */
   desde?: string;
   hasta?: string;
-  campo_fecha?: "emision" | "vencimiento" | "pago";
+  /**
+   * Sobre cuál fecha filtran `desde`/`hasta`.
+   *
+   * «pago» es la PROGRAMADA (cuándo se pensaba pagar) y «pagado» la REAL (cuándo salió el
+   * dinero, leída del evento). Son dos filtros y no uno porque la diferencia entre ambas es justo
+   * lo que se audita: una factura programada para el 15 se paga el 22.
+   */
+  campo_fecha?: "emision" | "vencimiento" | "pago" | "pagado";
   lote_id?: string;
   /** "sin" = sin lote asignado · "con" = con lote. */
   lote?: string;
@@ -766,6 +822,14 @@ export interface CarteraCxp {
   vencido: Cubo;
   vence_semana: Cubo;
   rebotadas: Cubo;
+  /**
+   * La partida conciliatoria de tesorería: facturas que el sistema da por PAGADAS y que ningún
+   * movimiento bancario confirmó (no llegaron a CONCILIADO). Es la diferencia entre «lo que
+   * dijimos que pagamos» y «lo que el banco debitó».
+   */
+  por_confirmar: Cubo;
+  /** Antigüedad del pago declarado más viejo que sigue sin confirmar, en días. */
+  dias_sin_confirmar: number;
   prioridad_aa: Cubo;
   aa_vencidas: number;
   dias_mas_antigua: number;
@@ -1072,6 +1136,29 @@ export interface EnvioComprobante {
 }
 
 /** Lo que devuelve el POST de enviar: la pantalla ya puede decir «se envió a X con copia a Y». */
+/**
+ * Lo que hace falta para abrir WhatsApp con el comprobante listo para adjuntar.
+ *
+ * No hay un «enviado»: WhatsApp no admite adjuntar por enlace, así que el sistema deja todo listo
+ * —el chat abierto con el texto y el PDF descargado— y el envío lo termina una persona.
+ */
+/**
+ * Los dos documentos del expediente de un pago (mig 0103).
+ *
+ * COMPROBANTE es el recibo del banco y FACTURA el que emitió el proveedor. Verificar un pago es
+ * cruzarlos: con uno solo se puede ver el pago, no comprobarlo.
+ */
+export type TipoAdjunto = "COMPROBANTE" | "FACTURA";
+
+export interface MensajeWhatsApp {
+  /** Número normalizado con código de país, como lo pide wa.me. */
+  telefono: string;
+  /** El mensaje, idéntico al que iría por correo (misma plantilla). */
+  texto: string;
+  /** Nombre del comprobante que hay que arrastrar al chat. */
+  archivo: string;
+}
+
 export interface ResultadoEnvioComprobante {
   ok: boolean;
   destinatario: string;
@@ -1517,14 +1604,27 @@ export const cxpApi = {
 
   // --- Comprobante de pago ---
   /** Adjunta el comprobante de pago (PDF) a una factura pagada/conciliada. */
-  adjuntarComprobante(id: string, archivo: File): Promise<{ ok: boolean; filename: string }> {
+  /**
+   * Adjunta uno de los DOS documentos del expediente (mig 0103).
+   *
+   * Sin `tipo` es el COMPROBANTE del banco, que es lo que esta llamada significó siempre.
+   */
+  adjuntarComprobante(id: string, archivo: File, tipo?: TipoAdjunto): Promise<{ ok: boolean; filename: string }> {
     const fd = new FormData();
     fd.append("archivo", archivo);
-    return apiFetch(`/cxp/documentos/${id}/comprobante`, { method: "POST", raw: fd });
+    return apiFetch(`/cxp/documentos/${id}/comprobante`, {
+      method: "POST",
+      raw: fd,
+      query: tipo ? { tipo } : undefined,
+    });
   },
-  /** Descarga el comprobante adjunto de una factura. */
-  descargarComprobante(id: string): Promise<Blob> {
-    return apiFetch<Blob>(`/cxp/documentos/${id}/comprobante`, { method: "GET", blob: true });
+  /** Descarga uno de los dos documentos adjuntos. Sin `tipo`, el comprobante del banco. */
+  descargarComprobante(id: string, tipo?: TipoAdjunto): Promise<Blob> {
+    return apiFetch<Blob>(`/cxp/documentos/${id}/comprobante`, {
+      method: "GET",
+      blob: true,
+      query: tipo ? { tipo } : undefined,
+    });
   },
   /**
    * Envía el comprobante al correo del proveedor. REENVIAR ES ESTA MISMA LLAMADA.
@@ -1532,9 +1632,24 @@ export const cxpApi = {
    * Sin cuerpo: a quién le llega lo decide el dato (el correo del proveedor, con copia a quien
    * aprobó el pago), no quien aprieta el botón.
    */
-  enviarComprobante(id: string): Promise<ResultadoEnvioComprobante> {
+  enviarComprobante(id: string, destino?: string): Promise<ResultadoEnvioComprobante> {
     return apiFetch<ResultadoEnvioComprobante>(`/cxp/documentos/${id}/comprobante/enviar`, {
       method: "POST",
+      // Sin destino el servidor usa el correo de la ficha, que es el camino normal.
+      json: destino ? { destino } : undefined,
+    });
+  },
+  /**
+   * El texto del comprobante para mandarlo por WhatsApp, con el número ya normalizado.
+   *
+   * NO ENVÍA NADA: el enlace wa.me solo admite texto, así que el PDF lo adjunta a mano quien
+   * manda. El texto sale de la MISMA plantilla del correo — con dos armados, en seis meses dicen
+   * cosas distintas.
+   */
+  mensajeWhatsApp(id: string, telefono: string): Promise<MensajeWhatsApp> {
+    return apiFetch<MensajeWhatsApp>(`/cxp/documentos/${id}/comprobante/whatsapp`, {
+      method: "GET",
+      query: { telefono },
     });
   },
   /** La bitácora de envíos de ese comprobante, del más reciente al más viejo. */
@@ -1757,6 +1872,28 @@ export const cxpApi = {
   },
   reabrirPeriodo(id: string, motivo: string): Promise<{ ok: boolean }> {
     return apiFetch<{ ok: boolean }>(`/cxp/responsabilidades/periodos/${id}/reabrir`, { method: "POST", json: { motivo } });
+  },
+
+  /**
+   * Archiva una factura que ya se pagó por FUERA del banco (mig 0102).
+   *
+   * Queda en LIQUIDADA con el medio guardado, no en PAGADO: una factura en PAGADO entra en la
+   * partida conciliatoria del tablero y esta nunca conciliaría, porque no hay débito con huella
+   * que la respalde.
+   *
+   * Si la factura estaba en un corte, sale de él — y la respuesta lo dice, porque es un efecto
+   * sobre el trabajo de otra persona.
+   */
+  cerrarPorOtroMedio(
+    documentoId: string,
+    medio: MedioPagoAlterno,
+    motivo: string,
+    valeId?: string,
+  ): Promise<{ documento: Documento; salio_de_un_lote: boolean }> {
+    return apiFetch<{ documento: Documento; salio_de_un_lote: boolean }>(
+      `/cxp/documentos/${documentoId}/cerrar-otro-medio`,
+      { method: "POST", json: { medio, motivo, vale_id: valeId ?? "" } },
+    );
   },
 };
 

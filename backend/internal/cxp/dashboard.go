@@ -128,6 +128,20 @@ type CarteraCxP struct {
 	VenceSemana Cubo `json:"vence_semana"`
 	// Rebotadas por el banco: siguen abiertas y exigen acción.
 	Rebotadas Cubo `json:"rebotadas"`
+	// PorConfirmar es la PARTIDA CONCILIATORIA de tesorería: facturas que el sistema da por
+	// PAGADAS y que ningún movimiento bancario confirmó todavía (no llegaron a CONCILIADO).
+	//
+	// Es la diferencia entre «lo que dijimos que pagamos» y «lo que el banco debitó», que es la
+	// primera cifra que se pide en un arqueo y la que el tablero no mostraba: PAGADO y CONCILIADO
+	// se leían juntos, así que un pago que nunca salió del banco se veía igual que uno cobrado.
+	//
+	// Las dos lecturas de un saldo alto acá son incompatibles entre sí —el pago no se ejecutó, o
+	// se ejecutó y el reconocimiento falló— y las dos exigen que alguien mire.
+	PorConfirmar Cubo `json:"por_confirmar"`
+	// DiasSinConfirmar es la antigüedad del pago declarado más viejo que sigue sin confirmar. Sin
+	// esto, el monto no distingue lo normal (se pagó ayer, el estado de cuenta llega mañana) de
+	// lo que ya es un hallazgo (se declaró pagado en julio y estamos en octubre).
+	DiasSinConfirmar int `json:"dias_sin_confirmar"`
 	// Prioridad AA («se paga sí o sí») y cuántas de esas ya están vencidas.
 	PrioridadAA    Cubo `json:"prioridad_aa"`
 	AAVencidas     int  `json:"aa_vencidas"`

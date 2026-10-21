@@ -10,6 +10,7 @@
 
 import type { BadgeTone } from "@/components/ui";
 import type { EstadoDocumento } from "@/api/cxp";
+import type { Moneda } from "@/lib/format";
 
 /** Orden lineal del flujo del documento CxP. */
 export const FLUJO_ESTADOS: EstadoDocumento[] = [
@@ -220,4 +221,78 @@ export function accionSiguiente(
     default:
       return null;
   }
+}
+
+// ── Totales de un corte o de un lote, por moneda ────────────────────────────────────────────
+
+/** Un total en su moneda, con el equivalente en colones cuando no es colones. */
+export interface TotalPorMoneda {
+  /**
+   * `documento_cxp.moneda` es NOT NULL con CHECK (CRC|USD), así que solo pueden salir esas dos.
+   * Lo que no sea USD se cuenta como colones: es el mismo criterio de `SepararPorMoneda` en el
+   * backend, para que la pantalla y el archivo que va al banco no puedan discrepar.
+   */
+  moneda: Moneda;
+  /** La suma en la moneda de las facturas. */
+  total: number;
+  /** La misma suma en colones. Igual a `total` cuando la moneda ya es CRC. */
+  totalCRC: number;
+}
+
+/**
+ * Agrupa por moneda lo que se va a pagar, con colones primero.
+ *
+ * EL PROBLEMA QUE RESUELVE (Director Financiero, 16-oct-2026): «las macros de dólares, a pesar de
+ * estar en dólares, muestran el tema en colones».
+ *
+ * La barra del corte y el encabezado del lote sumaban `total_crc` y lo rotulaban ₡ siempre, así
+ * que una factura de USD 384,20 se anunciaba como «₡174 015,71». La fila sí lo mostraba bien, y
+ * esa contradicción dentro de la misma pantalla es peor que cualquiera de las dos solas: el
+ * archivo que se sube al banco va en dólares, y el número que se leyó antes de subirlo estaba en
+ * colones.
+ *
+ * Colones primero porque es la moneda de casi toda la operación; el resto, alfabético. Una factura
+ * sin moneda declarada cuenta como colones: así nacieron las que vinieron por Excel, y tratarlas
+ * como desconocidas las dejaría fuera de los dos grupos. Mismo criterio que `SepararPorMoneda` en
+ * el backend, para que la pantalla y el archivo no puedan discrepar.
+ */
+export function totalesPorMoneda(
+  docs: { moneda?: string; total?: string; total_crc?: string }[],
+): TotalPorMoneda[] {
+  const porMoneda = new Map<Moneda, TotalPorMoneda>();
+  for (const d of docs) {
+    const m: Moneda = (d.moneda ?? "").trim().toUpperCase() === "USD" ? "USD" : "CRC";
+    const acc = porMoneda.get(m) ?? { moneda: m, total: 0, totalCRC: 0 };
+    acc.total += Number(d.total ?? 0) || 0;
+    acc.totalCRC += Number(d.total_crc ?? 0) || 0;
+    porMoneda.set(m, acc);
+  }
+  return [...porMoneda.values()].sort((a, b) => {
+    if (a.moneda === "CRC") return -1;
+    if (b.moneda === "CRC") return 1;
+    return a.moneda.localeCompare(b.moneda);
+  });
+}
+
+/**
+ * Si la pestaña de la Bandeja se reemplaza por el estado vacío.
+ *
+ * EL CASO QUE ESTO ARREGLA (19-oct-2026): «En banco» tiene contenido PROPIO además de la lista de
+ * facturas —el histórico de cortes, con la macro de cada uno— y el estado vacío la reemplazaba
+ * entera. Al marcar la última factura como pagada, 64 cortes de producción se quedaban sin ninguna
+ * puerta en la aplicación, con la pantalla diciendo «Nada pendiente en esta fase ✓».
+ *
+ * Pasa justo cuando más se necesita: la macro se vuelve a bajar DESPUÉS de pagar.
+ *
+ * Con FILTROS puestos gana «sin resultados»: ahí la causa del vacío es el filtro, y mostrar el
+ * histórico haría creer que no se aplicó.
+ */
+export function seVaciaLaPestanaDeBanco(p: {
+  fase: string;
+  items: number;
+  lotes: number;
+  hayFiltros: boolean;
+}): boolean {
+  if (p.items > 0) return false;
+  return !(p.fase === "bco" && !p.hayFiltros && p.lotes > 0);
 }

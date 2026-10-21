@@ -186,8 +186,10 @@ func TestLaMacroDeUnLotePorProveedorTraeUnaLineaPorProveedor(t *testing.T) {
 	if !strings.HasPrefix(desc, "REM ") {
 		t.Errorf("la descripción %q no arranca con la referencia legible de la remesa", desc)
 	}
-	if !strings.HasSuffix(desc, alfa.Descripcion) {
-		t.Errorf("la descripción %q no termina con el código interno %q", desc, alfa.Descripcion)
+	// Termina con el código interno tal como VIAJA (sin guion: el banco lo borra igual), no con
+	// la forma canónica que guarda la base.
+	if !strings.HasSuffix(desc, ParaElBanco(alfa.Descripcion)) {
+		t.Errorf("la descripción %q no termina con el código interno %q", desc, ParaElBanco(alfa.Descripcion))
 	}
 	// Y tiene que poder volver a leerse, que es de lo que depende la conciliación.
 	h, ok := extraerHuella(desc)

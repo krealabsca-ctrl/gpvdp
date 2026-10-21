@@ -159,7 +159,10 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 	// actual, y su frase entera dice qué hacer en su lugar.
 	case errors.Is(err, ErrMovimientoNoExcluible), errors.Is(err, ErrMovimientoNoIncluible):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoPaquete(err))
-	case errors.Is(err, ErrMotivoExclusionRequerido), errors.Is(err, ErrRangoDuplicadosRequerido):
+	// `ErrExclusionConCxP` va con el mismo 422 que `ErrDivisionConCxP`: es el mismo hecho —el
+	// movimiento está enlazado a una factura— y el mismo arreglo.
+	case errors.Is(err, ErrMotivoExclusionRequerido), errors.Is(err, ErrRangoDuplicadosRequerido),
+		errors.Is(err, ErrExclusionConCxP):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoPaquete(err))
 	// Dividir un movimiento (mig 0094). Cada causa lleva su frase entera porque cada una tiene un
 	// arreglo distinto —devolverlo a los libros, desenlazarlo de CxP, dividir el principal, bajar

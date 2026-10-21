@@ -10,6 +10,8 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tansta
 import { queryKeys } from "@/api/queryKeys";
 import {
   cxpApi,
+  type MedioPagoAlterno,
+  type TipoAdjunto,
   type AccionMasiva,
   type DepartamentoInput,
   type DocumentoInput,
@@ -272,6 +274,26 @@ export function useValidarDepto() {
     mutationFn: (vars: { id: string; respaldo: string; nota?: string }) =>
       cxpApi.validarDepto(vars.id, vars.respaldo, vars.nota),
     onSuccess: (_data, vars) => invalidarDocs(qc, empresaId, [vars.id]),
+  });
+}
+
+/**
+ * «Ya se pagó por otro medio» (mig 0102): la factura queda LIQUIDADA con el medio guardado.
+ *
+ * Invalida también la lista de LOTES, no solo el documento: cerrar una factura que estaba en un
+ * corte le quita una línea a ese corte, y sin esta invalidación la pantalla del lote seguiría
+ * mostrando el total viejo hasta que alguien recargara.
+ */
+export function useCerrarPorOtroMedio() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; medio: MedioPagoAlterno; motivo: string; valeId?: string }) =>
+      cxpApi.cerrarPorOtroMedio(vars.id, vars.medio, vars.motivo, vars.valeId),
+    onSuccess: (_data, vars) => {
+      invalidarDocs(qc, empresaId, [vars.id]);
+      void qc.invalidateQueries({ queryKey: queryKeys.cxp.lotes(empresaId) });
+    },
   });
 }
 
@@ -705,7 +727,10 @@ export function useAdjuntarComprobante() {
   const empresaId = useEmpresaId();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { id: string; archivo: File }) => cxpApi.adjuntarComprobante(vars.id, vars.archivo),
+    // `tipo` opcional: sin él va el COMPROBANTE del banco, que es lo que esta llamada significó
+    // siempre. Con «FACTURA» adjunta el documento del proveedor (mig 0103).
+    mutationFn: (vars: { id: string; archivo: File; tipo?: TipoAdjunto }) =>
+      cxpApi.adjuntarComprobante(vars.id, vars.archivo, vars.tipo),
     onSuccess: (_d, vars) => invalidarDocumento(qc, empresaId, vars.id),
   });
 }
@@ -721,8 +746,10 @@ export function useEnviarComprobante() {
   const empresaId = useEmpresaId();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => cxpApi.enviarComprobante(id),
-    onSettled: (_d, _e, id) => invalidarDocumento(qc, empresaId, id),
+    // `destino` opcional: vacío va al correo de la ficha. Con valor, el servidor manda ahí y —si
+    // la ficha estaba sin correo— lo guarda para la próxima.
+    mutationFn: (v: { id: string; destino?: string }) => cxpApi.enviarComprobante(v.id, v.destino),
+    onSettled: (_d, _e, v) => invalidarDocumento(qc, empresaId, v.id),
   });
 }
 

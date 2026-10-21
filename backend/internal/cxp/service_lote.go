@@ -28,6 +28,22 @@ func (s *Service) Lotes(ctx context.Context, empresaID string) ([]LotePago, erro
 }
 
 // MacroLote devuelve las líneas de la macro (.txt) de todas las facturas de un lote.
-func (s *Service) MacroLote(ctx context.Context, empresaID, loteID string) ([]PagoRow, error) {
-	return s.repo.DocumentosParaPagoPorLote(ctx, empresaID, loteID)
+// MacroLote devuelve las líneas del corte y el NÚMERO del lote.
+//
+// El número viaja porque es lo que nombra el archivo: `NombreMacro` lo pone adelante
+// («macro-lote-0043-CRC.txt») para que dos cortes del mismo día no bajen con el mismo nombre. Sin
+// él, el navegador los guarda como «macro-pagos-CRC.txt» y «macro-pagos-CRC (1).txt», y cuál es
+// cuál se vuelve una adivinanza — la misma trampa que ya existía entre colones y dólares.
+func (s *Service) MacroLote(ctx context.Context, empresaID, loteID string) ([]PagoRow, int64, error) {
+	rows, err := s.repo.DocumentosParaPagoPorLote(ctx, empresaID, loteID)
+	if err != nil {
+		return nil, 0, err
+	}
+	// El número es para NOMBRAR el archivo: si no se pudiera leer, la macro igual se baja (con el
+	// nombre viejo) en vez de fallar. Bajar el archivo es lo que no puede perderse.
+	lote, err := s.repo.LotePorID(ctx, empresaID, loteID)
+	if err != nil {
+		return rows, 0, nil
+	}
+	return rows, lote.Numero, nil
 }

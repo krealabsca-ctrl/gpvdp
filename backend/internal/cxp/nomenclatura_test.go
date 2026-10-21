@@ -73,30 +73,30 @@ func TestLaNomenclaturaViajaAlBancoAdelante(t *testing.T) {
 		{
 			"una factura con su rubro codificado",
 			PagoRow{CodigoPago: "A8", Consecutivo: "00100001010000000487", Descripcion: "CXP-54A4281AE49A"},
-			"A8 FC 000487 CXP-54A4281AE49A",
+			"A8 FC 000487 CXP54A4281AE49A",
 		},
 		{
 			// Sin código el pago sale igual: la nomenclatura ayuda a leer, no es un requisito.
 			"la misma factura sin código",
 			PagoRow{Consecutivo: "00100001010000000487", Descripcion: "CXP-54A4281AE49A"},
-			"FC 000487 CXP-54A4281AE49A",
+			"FC 000487 CXP54A4281AE49A",
 		},
 		{
 			"un pago agrupado, todas del mismo rubro",
-			PagoRow{CodigoPago: "A9", Referencia: "REM 0043-07", Descripcion: "CXPR-7K2M9P4XQ1BT"},
-			"A9 REM 0043-07 CXPR-7K2M9P4XQ1BT",
+			PagoRow{CodigoPago: "A9", Referencia: "REM 004307", Descripcion: "CXPR-7K2M9P4XQ1BT"},
+			"A9 REM 004307 CXPR7K2M9P4XQ1BT",
 		},
 		{
 			// El repositorio devuelve vacío cuando la remesa mezcla rubros: etiquetarla con el de
 			// la primera diría que todo el débito es comisiones cuando la mitad es planilla.
 			"un pago agrupado que mezcla rubros va sin código",
-			PagoRow{Referencia: "REM 0043-07", Descripcion: "CXPR-7K2M9P4XQ1BT"},
-			"REM 0043-07 CXPR-7K2M9P4XQ1BT",
+			PagoRow{Referencia: "REM 004307", Descripcion: "CXPR-7K2M9P4XQ1BT"},
+			"REM 004307 CXPR7K2M9P4XQ1BT",
 		},
 		{
 			"minúsculas: al banco va en mayúsculas, como vuelve",
 			PagoRow{CodigoPago: "a8", Consecutivo: "1000", Descripcion: "CXP-0123456789AB"},
-			"A8 FC 001000 CXP-0123456789AB",
+			"A8 FC 001000 CXP0123456789AB",
 		},
 	}
 	for _, c := range casos {
@@ -112,6 +112,14 @@ func TestLaNomenclaturaViajaAlBancoAdelante(t *testing.T) {
 				if !ok || h != c.row.Descripcion {
 					t.Errorf("con la nomenclatura adelante ya no se reconoce el código interno: (%q, %v)", h, ok)
 				}
+			}
+			// LO QUE SE EMITE TIENE QUE SOBREVIVIR AL CANAL (19-oct-2026). El banco borra los
+			// guiones y conserva los espacios: si la descripción trae un carácter que no va a
+			// volver, lo que el sistema guarda y lo que el estado de cuenta trae son dos cadenas
+			// distintas, y copiar una para buscar la otra no encuentra nada.
+			if got != ParaElBanco(got) {
+				t.Errorf("la descripción lleva algo que el banco va a borrar: emitido %q, vuelve %q",
+					got, ParaElBanco(got))
 			}
 		})
 	}

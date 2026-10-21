@@ -160,9 +160,12 @@ export function NomenclaturasPanel({ onCerrar, puedeEditar }: { onCerrar: () => 
             <div className="flex flex-col gap-3">
               <p className="rounded-lg border border-border bg-surface-muted px-3 py-2 text-sm text-content-muted">
                 El código viaja <b className="text-content">adelante</b> en la descripción del pago:{" "}
-                <span className="font-mono text-xs">A8 FC 000487 CXP-54A4281AE49A</span>. Se carga en
+                <span className="font-mono text-xs">A8 FC 000487 CXP54A4281AE49A</span>. Se carga en
                 el rubro y lo heredan sus clasificaciones. Un rubro sin código se paga igual — esto
                 sirve para leer más rápido, no es un requisito.
+                {/* El ejemplo va SIN guion desde el 19-oct-2026, porque así es como vuelve del
+                    banco. Mientras mostró «CXP-54A4281AE49A», quien lo usaba de referencia para
+                    buscar en el estado de cuenta buscaba una cadena que el banco nunca trae. */}
               </p>
               {error && <p className="text-sm text-negativo">{error}</p>}
 

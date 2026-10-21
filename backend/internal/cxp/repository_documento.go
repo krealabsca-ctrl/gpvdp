@@ -55,7 +55,28 @@ const documentoCols = `d.id::text, d.proveedor_id::text, COALESCE(p.nombre, ''),
 	CASE WHEN rcxp.id IS NOT NULL THEN ` + referenciaRemesaSQL + ` ELSE '' END,
 	CASE WHEN rcxp.id IS NOT NULL
 	     THEN (SELECT count(*) FROM documento_cxp dr WHERE dr.remesa_id = rcxp.id)
-	     ELSE 0 END`
+	     ELSE 0 END,
+	-- Con qué se pagó, cuando se cerró por fuera del banco (mig 0102). Sin esto una LIQUIDADA se
+	-- ve igual que cualquier otra y nadie puede saber si fue un viático, la caja chica o una
+	-- tarjeta — que es justamente lo único que explica por qué esa factura no tiene movimiento.
+	-- El vale va por subquery escalar y no por JOIN: la enorme mayoría de las filas no tiene uno.
+	COALESCE(d.medio_pago, ''), COALESCE(d.medio_pago_motivo, ''),
+	COALESCE(d.medio_pago_vale_id::text, ''),
+	COALESCE((SELECT v.detalle FROM caja_chica_vale v WHERE v.id = d.medio_pago_vale_id), ''),
+	COALESCE((SELECT v.monto_crc::text FROM caja_chica_vale v WHERE v.id = d.medio_pago_vale_id), ''),
+	COALESCE(to_char(d.medio_pago_en, 'YYYY-MM-DD"T"HH24:MI:SSOF'), ''),
+	COALESCE(NULLIF(ump.nombre, ''), ump.email, ''),
+	-- El correo del proveedor: lo precarga el «Para» del reenvío, que desde el 19-oct se puede
+	-- cambiar. Sin esto el campo arrancaba vacío y había que buscarlo en la ficha.
+	COALESCE(p.email, ''),
+	-- El expediente del pago: qué papeles tiene esta factura (mig 0103). Los dos chips de la
+	-- pantalla salen de acá, y el que falta se ve apagado en vez de no verse.
+	(cfac.id IS NOT NULL),
+	COALESCE(p.telefono, ''),
+	-- CUÁNDO se pagó de verdad. Sale del EVENTO y no de actualizado_en, que se reescribe con
+	-- cualquier edición posterior —adjuntar el comprobante, reclasificar— y pondría la factura en
+	-- otro mes. Vacío = todavía no se pagó, o se pagó antes de que hubiera bitácora.
+	COALESCE(to_char(` + sqlFechaPagada + ` AT TIME ZONE 'America/Costa_Rica', 'YYYY-MM-DD'), '')`
 
 // contabilidadOrigenSQL resuelve la marca «de Contabilidad» en UNA expresión, y la resuelve acá
 // —en el SELECT común— para que la Bandeja, el detalle y el candado de aprobación lean todos el
@@ -88,9 +109,16 @@ const documentoFrom = `FROM documento_cxp d
 	LEFT JOIN clasificacion cl ON cl.id = d.clasificacion_id
 	LEFT JOIN subclasificacion sc ON sc.id = d.subclasificacion_id
 	LEFT JOIN lote_pago lp ON lp.id = d.lote_id
-	LEFT JOIN comprobante_pago cpz ON cpz.documento_id = d.id
+	-- EL TIPO VA EN EL JOIN, no solo en el SELECT (mig 0103). Desde que una factura puede tener
+	-- DOS adjuntos —el recibo del banco y su propia factura— un join sin filtrar devolvería dos
+	-- filas por documento y la Bandeja mostraría cada factura duplicada.
+	LEFT JOIN comprobante_pago cpz ON cpz.documento_id = d.id AND cpz.tipo = 'COMPROBANTE'
+	LEFT JOIN comprobante_pago cfac ON cfac.documento_id = d.id AND cfac.tipo = 'FACTURA'
 	LEFT JOIN departamento dep ON dep.id = d.departamento_id
 	LEFT JOIN usuario uv ON uv.id = d.validado_depto_por
+	-- Quién declaró que la factura se pagó por fuera del banco (mig 0102). Es la mitad del rastro
+	-- que convierte esa afirmación en algo auditable: la otra mitad es el motivo.
+	LEFT JOIN usuario ump ON ump.id = d.medio_pago_por
 	LEFT JOIN remesa_pago rcxp ON rcxp.id = d.remesa_id
 	LEFT JOIN lote_pago lrem ON lrem.id = rcxp.lote_id
 	-- El movimiento que pagó esta factura, por CUALQUIERA de los dos caminos: el enlace directo
@@ -116,6 +144,7 @@ func scanDocumento(row scanner) (Documento, error) {
 	var d Documento
 	var pago PagoBancoDelDocumento
 	var rem RemesaDelDocumento
+	var medio MedioPagoDelDocumento
 	err := row.Scan(&d.ID, &d.ProveedorID, &d.Proveedor, &d.Clave, &d.Consecutivo, &d.Tipo, &d.FechaEmision,
 		&d.Moneda, &d.Subtotal, &d.IVA, &d.Retencion, &d.Total, &d.TotalCRC, &d.Estado,
 		&d.FechaPagoProgramada, &d.Huella, &d.Descripcion,
@@ -128,11 +157,20 @@ func scanDocumento(row scanner) (Documento, error) {
 		&d.RequiereValidacion, &d.ValidacionMotivo,
 		&d.BloqueadoParaPago, &d.BloqueoMotivo, &d.RecepcionID,
 		&pago.MovimientoID, &pago.Fecha, &pago.Cuenta, &pago.Banco, &pago.Debito,
-		&rem.ID, &rem.Huella, &rem.Referencia, &rem.Facturas)
+		&rem.ID, &rem.Huella, &rem.Referencia, &rem.Facturas,
+		&medio.Medio, &medio.Motivo, &medio.ValeID, &medio.ValeDetalle, &medio.ValeMonto,
+		&medio.RegistradoEn, &medio.RegistradoPor, &d.ProveedorEmail, &d.TieneFactura,
+		&d.ProveedorTelefono, &d.PagadoEn)
 	// Solo si hay enlace de verdad: el id es la prueba, no el alias ni la fecha.
 	if pago.MovimientoID != "" {
 		p := pago
 		d.PagoBanco = &p
+	}
+	// El medio es la prueba de que se cerró por esta vía: el motivo no alcanza, porque
+	// `nota_revision` la escriben también otras acciones.
+	if medio.Medio != "" {
+		m := medio
+		d.MedioPago = &m
 	}
 	if rem.ID != "" {
 		r := rem
@@ -333,13 +371,21 @@ func (r *pgRepository) ListarDocumentos(ctx context.Context, empresaID string, f
 		// «CXP-B397CFFF40AD» y lo que vuelve —y lo que la persona copia— es «CXPB397CFFF40AD».
 		args = append(args, "%"+f.Q+"%")
 		like := len(args)
-		args = append(args, "%"+strings.ReplaceAll(f.Q, "-", "")+"%")
-		sinGuion := len(args)
+		// La llave normalizada: sin separadores de ningún tipo y en mayúsculas (ver
+		// ClaveDeBusqueda). Con ella da igual si lo pegado vino de una macro vieja («REM 0043-07»),
+		// del estado de cuenta («REM 004307») o lo escribió alguien a mano.
+		args = append(args, "%"+ClaveDeBusqueda(f.Q)+"%")
+		clave := len(args)
 		busqueda := fmt.Sprintf(
 			`p.nombre ILIKE $%[1]d OR d.consecutivo ILIKE $%[1]d OR d.clave ILIKE $%[1]d
-			 OR replace(d.huella, '-', '') ILIKE $%[2]d
-			 OR replace(rcxp.huella, '-', '') ILIKE $%[2]d
-			 OR %[3]s ILIKE $%[1]d`, like, sinGuion, referenciaRemesaSQL)
+			 OR upper(regexp_replace(d.huella, '[^A-Za-z0-9]', '', 'g')) LIKE $%[2]d
+			 OR upper(regexp_replace(rcxp.huella, '[^A-Za-z0-9]', '', 'g')) LIKE $%[2]d
+			 -- La REFERENCIA también se normaliza, no solo las huellas (19-oct-2026). Mientras se
+			 -- comparó tal cual, pegar «REM 004307» del estado de cuenta devolvía CERO resultados
+			 -- —medido— porque el sistema la tenía guardada como «REM 0043-07». El arreglo de los
+			 -- códigos se había hecho a medias y esta mitad quedó afuera.
+			 OR upper(regexp_replace(%[3]s, '[^A-Za-z0-9]', '', 'g')) LIKE $%[2]d`,
+			like, clave, referenciaRemesaSQL)
 		// «FC 000487», la otra mitad de la nomenclatura: la referencia legible del pago POR FACTURA,
 		// igual que «REM 0035-01» lo es del pago agrupado. Son los últimos 6 dígitos del consecutivo
 		// con ceros de relleno (ver macroDescripcion), así que se reconstruyen del mismo modo del

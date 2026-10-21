@@ -353,6 +353,33 @@ export const queryKeys = {
    * un servicio, un traslado o un ajuste cambian lo que hay, y dejar la pantalla con el número
    * viejo hace pensar que la operación no se guardó.
    */
+  precios: {
+    insumos: (empresaId: string, filtro: string) =>
+      ["precios", "insumos", empresaId, filtro] as const,
+    insumosRaiz: (empresaId: string) => ["precios", "insumos", empresaId] as const,
+    historial: (empresaId: string, insumoId: string) =>
+      ["precios", "historial", empresaId, insumoId] as const,
+    historialRaiz: (empresaId: string) => ["precios", "historial", empresaId] as const,
+    planes: (empresaId: string) => ["precios", "planes", empresaId] as const,
+    planesRaiz: (empresaId: string) => ["precios", "planes", empresaId] as const,
+    costeo: (empresaId: string, planId: string, fecha: string) =>
+      ["precios", "costeo", empresaId, planId, fecha] as const,
+    costeoRaiz: (empresaId: string) => ["precios", "costeo", empresaId] as const,
+    drivers: (empresaId: string, periodo: string) =>
+      ["precios", "drivers", empresaId, periodo] as const,
+    driversRaiz: (empresaId: string) => ["precios", "drivers", empresaId] as const,
+    reparto: (empresaId: string, desde: string, hasta: string) =>
+      ["precios", "reparto", empresaId, desde, hasta] as const,
+    repartoRaiz: (empresaId: string) => ["precios", "reparto", empresaId] as const,
+    absorcion: (empresaId: string, planId: string, desde: string, hasta: string) =>
+      ["precios", "absorcion", empresaId, planId, desde, hasta] as const,
+    absorcionRaiz: (empresaId: string) => ["precios", "absorcion", empresaId] as const,
+    comisiones: (empresaId: string) => ["precios", "comisiones", empresaId] as const,
+    comisionesRaiz: (empresaId: string) => ["precios", "comisiones", empresaId] as const,
+    vendedores: (empresaId: string) => ["precios", "vendedores", empresaId] as const,
+    comisionDelPlan: (empresaId: string, planId: string, vendedor: string, fecha: string) =>
+      ["precios", "comisionPlan", empresaId, planId, vendedor, fecha] as const,
+  },
   inventario: {
     categorias: (empresaId: string, incluirInactivas: boolean) =>
       ["inventario", "categorias", empresaId, incluirInactivas] as const,

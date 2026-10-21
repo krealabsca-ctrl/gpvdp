@@ -18,13 +18,14 @@ import (
 	"github.com/gpvdp/erp/internal/inventario"
 	"github.com/gpvdp/erp/internal/nomina"
 	"github.com/gpvdp/erp/internal/plantillas"
+	"github.com/gpvdp/erp/internal/precios"
 	"github.com/gpvdp/erp/internal/rbac"
 	"github.com/gpvdp/erp/internal/tenant"
 )
 
 // NewRouter construye el motor Gin. `perms` es el checker RBAC (permiso × rol × empresa).
 func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH *bancos.Handler, cxpH *cxp.Handler, cxcH *cxc.Handler, nominaH *nomina.Handler, rbacH *rbac.Handler, plantillasH *plantillas.Handler,
-	correoH *correo.Handler, inventarioH *inventario.Handler, grupoH *grupo.Handler, perms tenant.PermisoChecker) *gin.Engine {
+	correoH *correo.Handler, inventarioH *inventario.Handler, grupoH *grupo.Handler, preciosH *precios.Handler, perms tenant.PermisoChecker) *gin.Engine {
 	if cfg.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -324,6 +325,10 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.POST("/cxp/documentos/prioridad-masiva", P("cxp.clasificar"), cxpH.PrioridadMasiva)
 			// Revisar (incluye transiciones de gestión: denegar/anular/liquidar/rebotar)
 			scoped.POST("/cxp/documentos/:id/revisar", P("cxp.revisar"), cxpH.RevisarDocumento)
+			// «Ya se pagó por otro medio» (mig 0102). Va con `cxp.revisar`, el mismo permiso que
+			// gobierna anular: es la acción que hoy se usa para estas facturas, y el cierre
+			// honesto no puede pedir más permiso que el deshonesto o nadie lo usaría.
+			scoped.POST("/cxp/documentos/:id/cerrar-otro-medio", P("cxp.revisar"), cxpH.CerrarPorOtroMedio)
 			scoped.POST("/cxp/documentos/transicion-masiva", P("cxp.revisar"), cxpH.TransicionMasiva)
 			scoped.PATCH("/cxp/documentos/:id/departamento", P("cxp.clasificar"), cxpH.AsignarDepartamentoDocumento)
 			// Validación por departamento (control operativo de área, previo a la aprobación financiera)
@@ -374,6 +379,9 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			// Comprobantes
 			scoped.POST("/cxp/documentos/:id/comprobante", P("cxp.comprobante"), cxpH.AdjuntarComprobante)
 			scoped.POST("/cxp/documentos/:id/comprobante/enviar", P("cxp.comprobante"), cxpH.EnviarComprobante)
+			// El texto del comprobante para WhatsApp. Mismo permiso que enviarlo por correo: es el
+			// mismo acto —mandarle a un tercero el detalle de un pago— por otro canal.
+			scoped.GET("/cxp/documentos/:id/comprobante/whatsapp", P("cxp.comprobante"), cxpH.MensajeWhatsAppComprobante)
 			// La carpeta entera de una corrida. Mismo permiso que adjuntar de a uno: es la misma
 			// escritura, cien veces. La previsualización también lo pide aunque solo lea, porque
 			// la respuesta dice qué facturas existen con qué código, y eso es tanto como leer la
@@ -584,6 +592,54 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			// resuelve, desde las MEMBRESÍAS del usuario, cuáles otras puede sumar — y
 			// solo aquellas donde ya tiene bancos.ver. No hay parámetro que amplíe eso.
 			scoped.GET("/grupo/resumen", P("grupo.ver"), grupoH.Resumen)
+
+			// ── Calculadora de precios ───────────────────────────────────────────
+			//
+			// Ver y editar son permisos distintos a propósito: el costeo lo consulta
+			// cualquiera que cotice, pero cambiarlo mueve el precio de todo lo que se
+			// vende.
+			scoped.GET("/precios/insumos", P("precios.ver"), preciosH.Insumos)
+			scoped.POST("/precios/insumos", P("precios.editar"), preciosH.CrearInsumo)
+			scoped.PATCH("/precios/insumos/:id", P("precios.editar"), preciosH.ActualizarInsumo)
+			scoped.DELETE("/precios/insumos/:id", P("precios.editar"), preciosH.EliminarInsumo)
+			scoped.GET("/precios/insumos/:id/costos", P("precios.ver"), preciosH.HistorialDeCosto)
+			scoped.POST("/precios/insumos/:id/costos", P("precios.editar"), preciosH.CapturarCosto)
+			// El importador: analizar y planear NO escriben, pero igual exigen `precios.editar`
+			// porque suben un archivo con la estructura de costos de la empresa.
+			scoped.POST("/precios/importar/analizar", P("precios.editar"), preciosH.AnalizarImportacion)
+			scoped.POST("/precios/importar/plan", P("precios.editar"), preciosH.PlanearImportacion)
+			scoped.POST("/precios/importar", P("precios.editar"), preciosH.Importar)
+			scoped.POST("/precios/importar/recetas/analizar", P("precios.editar"), preciosH.AnalizarRecetas)
+			scoped.POST("/precios/importar/recetas", P("precios.editar"), preciosH.ImportarRecetas)
+			// Costeo por actividad: el reparto de indirectos por driver.
+			scoped.GET("/precios/drivers", P("precios.ver"), preciosH.Drivers)
+			scoped.POST("/precios/drivers", P("precios.editar"), preciosH.CrearDriver)
+			scoped.DELETE("/precios/drivers/:id", P("precios.editar"), preciosH.EliminarDriver)
+			scoped.POST("/precios/drivers/:id/base", P("precios.editar"), preciosH.FijarBase)
+			scoped.GET("/precios/repartos", P("precios.ver"), preciosH.Repartos)
+			scoped.POST("/precios/repartos", P("precios.editar"), preciosH.FijarReparto)
+			scoped.DELETE("/precios/repartos/:id", P("precios.editar"), preciosH.QuitarReparto)
+			scoped.GET("/precios/repartir", P("precios.ver"), preciosH.Repartir)
+			// Políticas de comisión: cuánto se le paga a quién por vender qué.
+			scoped.GET("/precios/comisiones", P("precios.ver"), preciosH.Politicas)
+			scoped.POST("/precios/comisiones", P("precios.editar"), preciosH.CrearPolitica)
+			scoped.PATCH("/precios/comisiones/:id", P("precios.editar"), preciosH.ActualizarPolitica)
+			scoped.DELETE("/precios/comisiones/:id", P("precios.editar"), preciosH.EliminarPolitica)
+			scoped.GET("/precios/vendedores", P("precios.ver"), preciosH.Vendedores)
+			scoped.GET("/precios/planes", P("precios.ver"), preciosH.Planes)
+			scoped.POST("/precios/planes", P("precios.editar"), preciosH.CrearPlan)
+			scoped.PATCH("/precios/planes/:id", P("precios.editar"), preciosH.ActualizarPlan)
+			scoped.GET("/precios/planes/:id/costeo", P("precios.ver"), preciosH.Costear)
+			scoped.GET("/precios/planes/:id/drivers", P("precios.ver"), preciosH.ConsumosDelPlan)
+			scoped.POST("/precios/planes/:id/drivers", P("precios.editar"), preciosH.FijarConsumo)
+			scoped.DELETE("/precios/planes/:id/drivers/:driverID", P("precios.editar"), preciosH.QuitarConsumo)
+			scoped.GET("/precios/planes/:id/absorcion", P("precios.ver"), preciosH.Absorcion)
+			scoped.GET("/precios/planes/:id/comision", P("precios.ver"), preciosH.ComisionDelPlan)
+			// El simulador no escribe nada, pero pide precios.ver igual que el resto del costeo.
+			scoped.POST("/precios/planes/:id/simular", P("precios.ver"), preciosH.Simular)
+			scoped.POST("/precios/planes/:id/receta", P("precios.editar"), preciosH.AgregarALaReceta)
+			scoped.PATCH("/precios/receta/:lineaID", P("precios.editar"), preciosH.CambiarCantidad)
+			scoped.DELETE("/precios/receta/:lineaID", P("precios.editar"), preciosH.QuitarDeLaReceta)
 
 			scoped.GET("/inventario/consignacion", P("inventario.ver"), inventarioH.Consignadas)
 			scoped.GET("/inventario/consignacion/:unidadId/candidatas", P("inventario.ver"), inventarioH.CandidatasConciliacion)

@@ -57,10 +57,19 @@ export function ResumenSeleccion({
   return (
     <div className="rounded-xl border border-border bg-surface-raised shadow-card">
       <div className="flex flex-wrap items-stretch gap-x-8 gap-y-3 px-4 py-3">
+        {/* El conteo cuenta TODO lo que muestra la lista; los totales de plata NO suman lo que
+            está fuera de los libros. Esa diferencia hay que decirla acá o las dos cifras se
+            contradicen en silencio: tres filas de ₡75 000 bajo un encabezado que dice ₡0 se lee
+            como que el sistema perdió la plata, no como que esos movimientos se revirtieron. */}
         <Cifra
           etiqueta="Movimientos"
           valor={cargando ? "—" : (r?.movs ?? 0).toLocaleString("es-CR")}
           nota={descripcion}
+          aviso={
+            !cargando && (r?.excluidos ?? 0) > 0
+              ? `${r!.excluidos} fuera de los libros — se ven, no suman`
+              : undefined
+          }
         />
         <Cifra
           etiqueta="Débitos"
@@ -134,11 +143,14 @@ function Cifra({
   valor,
   nota,
   tono,
+  /** Lo que explica una diferencia entre esta cifra y las de al lado. Va destacado. */
+  aviso,
 }: {
   etiqueta: string;
   valor: string;
   nota?: string;
   tono?: "positivo" | "negativo";
+  aviso?: string;
 }) {
   return (
     <div className="min-w-[8.5rem]">
@@ -151,7 +163,11 @@ function Cifra({
       >
         {valor}
       </p>
-      {nota && <p className="text-[10.5px] text-content-muted">{nota}</p>}
+      {aviso ? (
+        <p className="text-[10.5px] font-medium text-pendiente">{aviso}</p>
+      ) : (
+        nota && <p className="text-[10.5px] text-content-muted">{nota}</p>
+      )}
     </div>
   );
 }

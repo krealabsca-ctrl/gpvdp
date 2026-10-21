@@ -276,6 +276,12 @@ type Repository interface {
 	// TotalesPeriodo: ingreso y gasto SEGÚN LA NATURALEZA declarada del concepto, más lo que quedó
 	// fuera del EBITDA por no estar declarado (ver naturaleza.go).
 	TotalesPeriodo(ctx context.Context, empresaID, periodo string) (TotalesEbitda, error)
+	// TotalesPeriodoHastaDia corta el período al día indicado (0 = mes entero). Es lo que permite
+	// comparar un mes en curso contra el MISMO tramo del anterior en vez de contra un mes completo.
+	TotalesPeriodoHastaDia(ctx context.Context, empresaID, periodo string, dia int) (TotalesEbitda, error)
+	// UltimoDiaCargado dice hasta qué día del período hay movimientos: es lo que distingue «no
+	// entró plata» de «todavía no se cargó el estado de cuenta».
+	UltimoDiaCargado(ctx context.Context, empresaID, periodo string) (int, error)
 	// ConceptosSinNaturaleza: cuántos conceptos EN USO siguen en NEUTRO (la acción pendiente).
 	ConceptosSinNaturaleza(ctx context.Context, empresaID string) (int, error)
 

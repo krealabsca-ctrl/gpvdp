@@ -549,10 +549,15 @@ export function MiSegmentoPage() {
                             <span className={m.incluido ? undefined : "line-through"}>
                               {formatMonto(m.credito)}
                             </span>
+                            {/* La etiqueta va DEBAJO del monto, no al lado. Con el badge en la
+                                misma línea el número se corre a la izquierda y deja de alinearse
+                                con los de las demás filas: la columna queda con huecos y comparar
+                                montos en diagonal —que es como se revisa una lista— se vuelve
+                                imposible. Debajo, los números siguen cuadrados a la derecha. */}
                             {!m.incluido && (
-                              <Badge tone="pendiente" className="ml-2">
+                              <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-wide text-pendiente">
                                 no suma
-                              </Badge>
+                              </span>
                             )}
                           </TD>
                           {/* La celda MUESTRA la partida contra la que quedó marcado el movimiento, y

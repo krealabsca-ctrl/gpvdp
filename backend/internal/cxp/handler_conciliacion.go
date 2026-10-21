@@ -48,14 +48,23 @@ func escribirCSVPago(c *gin.Context, rows []PagoRow) {
 // El nombre del archivo lleva la MONEDA (y el lote, cuando se conoce): los dos archivos de un lote
 // mixto caen en la misma carpeta de descargas, y «macro-pagos.txt» dos veces es una trampa — se
 // sube el de colones creyendo que es el de dólares y nadie lo nota hasta que el banco rebota.
-func escribirMacroTxt(c *gin.Context, rows []PagoRow) {
+// loteNumero 0 = el archivo no sale de un corte (pago suelto): conserva el nombre de siempre.
+func escribirMacroTxt(c *gin.Context, rows []PagoRow, loteNumero int64) {
 	nombre := "macro-pagos.txt"
 	if len(rows) > 0 {
 		m := strings.ToUpper(strings.TrimSpace(rows[0].Moneda))
 		if m == "" {
 			m = "CRC"
 		}
-		nombre = "macro-pagos-" + m + ".txt"
+		// Con número de lote el nombre lo arma `NombreMacro` («macro-lote-0043-CRC.txt»). Es la
+		// misma razón que la moneda, un escalón más arriba: dos cortes del mismo día bajaban con
+		// el mismo nombre, el navegador los dejaba como «(1)» y «(2)», y cuál era cuál se volvía
+		// una adivinanza frente a una carga que mueve plata.
+		if loteNumero > 0 {
+			nombre = NombreMacro(loteNumero, m)
+		} else {
+			nombre = "macro-pagos-" + m + ".txt"
+		}
 	}
 	c.Header("Content-Type", "text/plain; charset=utf-8")
 	c.Header("Content-Disposition", `attachment; filename="`+nombre+`"`)
@@ -94,7 +103,9 @@ func macroDescripcion(consecutivo, huella string) string {
 		}
 		desc += " " + n
 	}
-	if h := strings.TrimSpace(huella); h != "" {
+	// La huella sale LIMPIA: el banco borra el guion igual, y emitirlo solo hace que la macro
+	// muestre «CXP-54A4281AE49A» mientras el estado de cuenta trae «CXP54A4281AE49A».
+	if h := ParaElBanco(huella); h != "" {
 		desc += " " + h
 	}
 	return desc
@@ -152,9 +163,11 @@ func descripcionDePago(r PagoRow) string {
 	if cod := NormalizarCodigoPago(r.CodigoPago); cod != "" {
 		partes = append(partes, cod)
 	}
-	if ref := strings.TrimSpace(r.Referencia); ref != "" {
+	// Todo lo que se concatena pasa por `ParaElBanco`: lo que viaja tiene que ser lo que vuelve,
+	// o la referencia que alguien copia del estado de cuenta no calza con la que guarda el sistema.
+	if ref := ParaElBanco(r.Referencia); ref != "" {
 		partes = append(partes, ref)
-		if h := strings.TrimSpace(r.Descripcion); h != "" {
+		if h := ParaElBanco(r.Descripcion); h != "" {
 			partes = append(partes, h)
 		}
 	} else {

@@ -467,6 +467,56 @@ describe("MiSegmentoPage", () => {
     );
   });
 
+  // Un movimiento que salió de los libros —la reversa de una carga duplicada— SE SIGUE VIENDO,
+  // porque lo que desaparece de la pantalla no se revisa más. Pero tiene que decir que no suma:
+  // sin la marca, su monto se lee como plata que entró y el total de arriba parece estar mal.
+  //
+  // La etiqueta va DEBAJO del monto, no al lado: con el badge en la misma línea el número se
+  // corre a la izquierda y deja de alinearse con las demás filas (16-oct-2026).
+  it("un movimiento fuera de los libros se muestra tachado y dice que no suma", () => {
+    montar({
+      partida: {
+        ...PARTIDA,
+        movimientos: {
+          // El total NO lo cuenta: son ₡1.400 de la fila viva, no ₡76.400.
+          totales: { ...totales("1400.00"), excluidos: 1 },
+          items: [
+            fila({
+              id: "m-vivo",
+              documento: "55501",
+              descripcion: "DEPOSITO VENTANILLA",
+              credito: "1400.00",
+              clasificacion_id: "cl1",
+              clasificacion: "Deposito de Clientes",
+              estado_clasificacion: "REVISADO",
+            }),
+            fila({
+              id: "m-revertido",
+              documento: "55502",
+              descripcion: "TEF DE:ELSA MARTINEZ DELGADO",
+              credito: "75000.00",
+              clasificacion_id: "cl1",
+              clasificacion: "Deposito de Clientes",
+              estado_clasificacion: "REVISADO",
+              incluido: false,
+            }),
+          ],
+          total: 2,
+          page: 1,
+          page_size: 200,
+        },
+      },
+    });
+
+    const revertido = screen.getByText("TEF DE:ELSA MARTINEZ DELGADO").closest("tr") as HTMLElement;
+    // Lo dice con palabras, no solo con un estilo: un tachado sin texto no se lee en diagonal.
+    expect(within(revertido).getByText("no suma")).toBeInTheDocument();
+
+    // Y la fila viva NO lleva la marca: si la llevaran todas, no distinguiría nada.
+    const vivo = screen.getByText("DEPOSITO VENTANILLA").closest("tr") as HTMLElement;
+    expect(within(vivo).queryByText("no suma")).toBeNull();
+  });
+
   it("la partida vacía lo explica, no queda en blanco", () => {
     montar({
       partida: {

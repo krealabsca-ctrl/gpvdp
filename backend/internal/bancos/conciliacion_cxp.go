@@ -19,6 +19,10 @@ const (
 	HuellaMontoDiferente = "MONTO_DIFERENTE"
 	HuellaSinDocumento   = "SIN_DOCUMENTO"
 	HuellaSinHuella      = "SIN_HUELLA"
+	// HuellaMonedaDiferente: el débito y la factura están en monedas distintas. Es un veredicto
+	// aparte de MONTO_DIFERENTE porque no es lo mismo: comparar 1.500 contra 1.500 sin mirar que
+	// uno es en colones y el otro en dólares los daría por iguales.
+	HuellaMonedaDiferente = "MONEDA_DIFERENTE"
 )
 
 // ResultadoHuella es la respuesta de CxP para un movimiento.
@@ -32,6 +36,9 @@ type ResultadoHuella struct {
 	ClasificacionID string
 	MontoEsperado   string
 	MontoBanco      string
+	// MonedaEsperada es la de la factura o la remesa. Viaja para que el reporte pueda decir «el
+	// banco debitó en CRC y la factura está en USD», que es lo que alguien necesita leer.
+	MonedaEsperada string
 	// RemesaID: el pago cubre VARIAS facturas de un proveedor. En ese caso DocumentoID viene vacío
 	// —no hay UNA factura a la que enlazar el movimiento— y el enlace se escribe contra la remesa.
 	RemesaID string
@@ -44,8 +51,12 @@ type ResultadoHuella struct {
 type ConciliadorCxP interface {
 	// PrefijoHuella permite filtrar en SQL sin conocer el formato completo de la huella.
 	PrefijoHuella() string
-	// ConciliarHuella empareja el movimiento con su pago. montoBanco en la moneda del movimiento.
-	ConciliarHuella(ctx context.Context, empresaID, descripcion, montoBanco, usuarioID string) (ResultadoHuella, error)
+	// ConciliarHuella empareja el movimiento con su pago.
+	//
+	// montoBanco va en la moneda del movimiento y monedaBanco dice cuál es. Las dos juntas o
+	// ninguna: un importe sin su moneda no se puede comparar con nada, y suponer colones es la
+	// forma silenciosa de equivocarse (hay cinco cuentas en dólares).
+	ConciliarHuella(ctx context.Context, empresaID, descripcion, montoBanco, monedaBanco, usuarioID string) (ResultadoHuella, error)
 }
 
 // MovimientoConHuella es un movimiento bancario candidato a ser el pago de una factura.
@@ -55,6 +66,8 @@ type MovimientoConHuella struct {
 	Descripcion string `json:"descripcion"`
 	Debito      string `json:"debito"`
 	Cuenta      string `json:"cuenta"`
+	// Moneda es la de la CUENTA, que es en la que está expresado el débito.
+	Moneda string `json:"moneda"`
 }
 
 // PagoConciliado es una línea del reporte del barrido.
@@ -68,6 +81,9 @@ type PagoConciliado struct {
 	Proveedor     string `json:"proveedor"`
 	MontoBanco    string `json:"monto_banco"`
 	MontoEsperado string `json:"monto_esperado"`
+	// Las dos monedas, para que un MONEDA_DIFERENTE se pueda leer sin ir a buscar nada.
+	MonedaBanco    string `json:"moneda_banco"`
+	MonedaEsperada string `json:"moneda_esperada"`
 	// Clasificado: además de conciliar la factura, el movimiento quedó clasificado con el
 	// concepto del documento (deja de contar como No identificado).
 	Clasificado bool `json:"clasificado"`
@@ -81,6 +97,10 @@ type ReporteConciliacionCxP struct {
 	Conciliados int `json:"conciliados"`
 	// MontoDiferente: el código calzó pero el banco debitó otra cifra. NO se concilia a propósito.
 	MontoDiferente int `json:"monto_diferente"`
+	// MonedaDiferente: el código calzó pero el débito y la factura están en monedas distintas.
+	// Tampoco se concilia: convertir exigiría decidir con qué tipo de cambio, y esa regla no está
+	// definida. Se reporta para que una persona la resuelva.
+	MonedaDiferente int `json:"moneda_diferente"`
 	// SinDocumento: hay código de CxP pero ninguna factura pagable lo reclama.
 	SinDocumento int `json:"sin_documento"`
 	// SinHuella: candidatos que NO son pagos de CxP (el pre-filtro trae de más a propósito, porque

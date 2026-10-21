@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"mime"
 	"net"
+	"net/mail"
 	"net/smtp"
 	"net/textproto"
 	"strconv"
@@ -409,4 +410,21 @@ func base64EnLineas(datos []byte) string {
 		b.WriteString("\r\n")
 	}
 	return b.String()
+}
+
+// EmailValido dice si una dirección escrita a mano se puede usar como destinatario.
+//
+// Usa `net/mail` de la biblioteca estándar y no un patrón propio: las direcciones reales tienen
+// más formas de las que cabe en un regex razonable, y un validador casero rechaza correos legítimos
+// —el caso clásico es el «+» de las etiquetas— lo que obliga a la gente a buscar otra vía.
+//
+// Rechaza la forma con nombre («Juan <juan@x.com>»): acá se escribe una dirección, y aceptar el
+// formato largo dejaría pasar un texto que después se ve raro en la bitácora.
+func EmailValido(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.ContainsAny(s, " <>,;") {
+		return false
+	}
+	addr, err := mail.ParseAddress(s)
+	return err == nil && addr.Address == s
 }

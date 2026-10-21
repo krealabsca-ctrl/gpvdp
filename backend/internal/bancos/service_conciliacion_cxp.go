@@ -29,7 +29,7 @@ func (s *Service) ConciliarCxP(ctx context.Context, empresaID, importacionID, us
 	rep.Examinados = len(movs)
 
 	for _, m := range movs {
-		res, err := s.conciliadorCxP.ConciliarHuella(ctx, empresaID, m.Descripcion, m.Debito, usuarioID)
+		res, err := s.conciliadorCxP.ConciliarHuella(ctx, empresaID, m.Descripcion, m.Debito, m.Moneda, usuarioID)
 		if err != nil {
 			return ReporteConciliacionCxP{}, err
 		}
@@ -38,6 +38,7 @@ func (s *Service) ConciliarCxP(ctx context.Context, empresaID, importacionID, us
 			Huella: res.Huella, Veredicto: res.Veredicto,
 			Consecutivo: res.Consecutivo, Proveedor: res.Proveedor,
 			MontoBanco: m.Debito, MontoEsperado: res.MontoEsperado,
+			MonedaBanco: m.Moneda, MonedaEsperada: res.MonedaEsperada,
 		}
 
 		switch res.Veredicto {
@@ -74,6 +75,8 @@ func (s *Service) ConciliarCxP(ctx context.Context, empresaID, importacionID, us
 			})
 		case HuellaMontoDiferente:
 			rep.MontoDiferente++
+		case HuellaMonedaDiferente:
+			rep.MonedaDiferente++
 		case HuellaSinDocumento:
 			rep.SinDocumento++
 		case HuellaSinHuella:
