@@ -58,6 +58,52 @@ func EsRemesa(huella string) bool {
 	return strings.HasPrefix(huella, "CXPR-")
 }
 
+// ParaElBanco deja un texto como el banco lo va a devolver: solo letras, dígitos y espacios.
+//
+// MEDIDO DOS VECES SOBRE DÉBITOS REALES. El 30 de setiembre de 2026, lo que se emitió como
+// «CXP-54A4281AE49A» volvió en el estado de cuenta como «CXP54A4281AE49A». El 19 de octubre, lo que
+// se emitió como «REM 0061-01 CXPR-1760CCFC2435» volvió como «REM 006101 CXPR1760CCFC2435»: los
+// DOS guiones desaparecidos y los espacios intactos.
+//
+// Conclusión: el canal del banco se come los guiones y conserva los espacios. Mandar un carácter
+// que no va a sobrevivir no es inofensivo —hace que lo que el sistema muestra y lo que el estado de
+// cuenta trae sean dos cadenas distintas— y entonces quien copia una referencia del banco y la pega
+// en el buscador no encuentra nada, que se ve igual que «ese pago no existe».
+//
+// Se aplica AL EMITIR, no al guardar: la forma canónica interna sigue siendo la de siempre
+// («CXPR-…»), que es la que está en la base y la que devuelve extraerHuella.
+func ParaElBanco(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == ' ':
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// ClaveDeBusqueda normaliza para COMPARAR: sin separadores de ningún tipo y en mayúsculas.
+//
+// Es más agresiva que ParaElBanco —también saca los espacios— porque acá no se emite nada: se
+// compara. Con esto «REM 0043-07», «REM 004307» y «rem004307» son la misma llave, y da igual si lo
+// que se pega vino de una macro vieja (con guion), del estado de cuenta (sin guion) o lo escribió
+// alguien a mano.
+//
+// Hace falta aunque se deje de emitir el guion: los pagos YA enviados salieron con él y no se
+// pueden reescribir.
+func ClaveDeBusqueda(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range strings.ToUpper(s) {
+		if r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // PagoRow es una línea del archivo de pago (formato SINPE: cédula, nombre, IBAN, monto neto).
 type PagoRow struct {
 	Cedula      string `json:"cedula"`

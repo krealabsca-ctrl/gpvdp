@@ -38,6 +38,13 @@ var tablasDelLote = []string{
 	"remesa_pago",
 	// El detalle de línea de cada factura (mig 0096): lo que sostiene el análisis de gasto.
 	"cxp_linea",
+	// El vale del fondo fijo ligado al medio de pago alterno (mig 0102): `documentoCols` lo
+	// consulta para poder mostrar con qué se pagó una factura cerrada por fuera del banco.
+	"caja_chica_fondo", "caja_chica_vale",
+	// La bitácora: `documentoCols` lee de ahí CUÁNDO se pagó la factura (19-oct-2026). No hay una
+	// columna con esa fecha —`actualizado_en` se reescribe con cualquier edición— así que el dato
+	// sale del evento, y sin esta tabla el esquema temporal falla al listar.
+	"auditoria_evento",
 }
 
 const (

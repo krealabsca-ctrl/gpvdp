@@ -3,6 +3,7 @@ package cxp
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -13,17 +14,32 @@ import (
 //
 // Reemplazar el archivo borra la marca de «enviado» (lo hace el repositorio, en la misma
 // transacción): el proveedor no tiene el PDF nuevo.
-func (s *Service) AdjuntarComprobante(ctx context.Context, empresaID, docID, filename, mime string, contenido []byte, usuarioID string) error {
-	if err := s.repo.GuardarComprobante(ctx, empresaID, docID, filename, mime, contenido, usuarioID); err != nil {
+// `tipo` vacío = COMPROBANTE, que es lo que esta función significó siempre.
+func (s *Service) AdjuntarComprobante(ctx context.Context, empresaID, docID, tipo, filename, mime string, contenido []byte, usuarioID string) error {
+	t, ok := TipoAdjuntoValido(tipo)
+	if !ok {
+		return ErrTipoAdjuntoInvalido
+	}
+	if err := s.repo.GuardarComprobante(ctx, empresaID, docID, t, filename, mime, contenido, usuarioID); err != nil {
 		return err
 	}
-	s.auditarDoc(ctx, empresaID, docID, "ADJUNTAR_COMPROBANTE", usuarioID)
+	// La bitácora distingue los dos: «adjuntó un documento» no dice cuál, y el expediente de un
+	// pago se audita por lo que tiene y lo que le falta.
+	accion := "ADJUNTAR_COMPROBANTE"
+	if t == AdjuntoFactura {
+		accion = "ADJUNTAR_FACTURA"
+	}
+	s.auditarDoc(ctx, empresaID, docID, accion, usuarioID)
 	return nil
 }
 
-// DescargarComprobante devuelve el comprobante adjunto de una factura.
-func (s *Service) DescargarComprobante(ctx context.Context, empresaID, docID string) (Comprobante, error) {
-	return s.repo.ObtenerComprobante(ctx, empresaID, docID)
+// DescargarComprobante devuelve uno de los dos documentos adjuntos de una factura.
+func (s *Service) DescargarComprobante(ctx context.Context, empresaID, docID, tipo string) (Comprobante, error) {
+	t, ok := TipoAdjuntoValido(tipo)
+	if !ok {
+		return Comprobante{}, ErrTipoAdjuntoInvalido
+	}
+	return s.repo.ObtenerComprobante(ctx, empresaID, docID, t)
 }
 
 // EnviosComprobante devuelve la bitácora de envíos de una factura.
@@ -47,9 +63,39 @@ func (s *Service) EnviosComprobante(ctx context.Context, empresaID, docID string
 // Reenviar es esta misma llamada: cada una deja su propia fila, y la bitácora dice cuál fue el
 // primer envío y cuáles fueron reenvíos.
 func (s *Service) EnviarComprobante(ctx context.Context, empresaID, docID, usuarioID string) (ResultadoEnvioComprobante, error) {
+	return s.EnviarComprobanteA(ctx, empresaID, docID, "", usuarioID)
+}
+
+// EnviarComprobanteA manda el comprobante a UNA DIRECCIÓN ESCRITA A MANO.
+//
+// EL PEDIDO (Director Financiero, 19-oct-2026): poder cambiar el «Para» al reenviar. El contacto
+// de Contabilidad del proveedor no siempre es el de la ficha, y hasta ahora la única forma de
+// mandárselo a otra persona era editar la ficha, enviar y volver a dejarla como estaba.
+//
+// `destino` vacío usa el correo de la ficha, que es el camino normal. El que se escriba queda
+// GUARDADO en la ficha si estaba vacía —misma decisión que el teléfono de WhatsApp— así que la
+// próxima vez ya está. Si la ficha ya tenía correo NO se pisa: un envío puntual a otra persona no
+// debería reemplazar el contacto oficial sin que nadie lo decida.
+//
+// A dónde se mandó queda en la bitácora igual que siempre: es lo que permite contestar, meses
+// después, a qué dirección salió el comprobante de este pago y quién lo mandó.
+func (s *Service) EnviarComprobanteA(ctx context.Context, empresaID, docID, destino, usuarioID string) (ResultadoEnvioComprobante, error) {
 	envio, err := s.repo.ObtenerComprobanteEnvio(ctx, empresaID, docID)
 	if err != nil {
 		return ResultadoEnvioComprobante{}, err
+	}
+	if d := strings.TrimSpace(destino); d != "" {
+		if !shared.EmailValido(d) {
+			return ResultadoEnvioComprobante{}, ErrEmailDestinoInvalido
+		}
+		// El correo de la ficha se guarda ANTES de enviar: si el envío falla, el dato que la
+		// persona ya escribió no se pierde y el reintento sale sin volver a escribirlo.
+		if envio.ProveedorEmail == "" {
+			if e := s.repo.GuardarEmailProveedorDeDocumento(ctx, empresaID, docID, d); e != nil {
+				s.log.Warn("cxp: no se pudo guardar el correo del proveedor")
+			}
+		}
+		envio.ProveedorEmail = d
 	}
 	if envio.ProveedorEmail == "" {
 		// No se registra en la bitácora: no hubo intento de envío. La fila exigiría un destinatario

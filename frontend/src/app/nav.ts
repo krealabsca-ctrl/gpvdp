@@ -63,6 +63,13 @@ export interface NavPage {
   end?: boolean;
   /** Si se define, la página solo se muestra a quien tenga este permiso (RBAC). */
   permiso?: string;
+  /**
+   * Pantalla de trabajo ancho: tablas de muchas columnas donde los 240 px de la sidebar estorban.
+   * La primera vez que el usuario entra se le PROPONE colapsarla. Si él la abre, su decisión manda
+   * de ahí en adelante y esta marca deja de tener efecto: propone un valor por defecto sensato,
+   * no impone.
+   */
+  anchoCompleto?: boolean;
 }
 
 export interface NavModule {
@@ -98,10 +105,10 @@ export const MODULES: NavModule[] = [
       // estuviera al final, el equipo de Asociaciones entraría a «Sin acceso» y de ahí se iría.
       { label: "Mi partida", descripcion: "Lo que entró en tu segmento", to: "/mi-segmento", icon: Landmark, permiso: "bancos.ver_mi_segmento" },
       { label: "Dashboard", descripcion: "KPIs del período", to: "/", end: true, icon: LayoutDashboard, permiso: "bancos.ver_dashboard" },
-      { label: "Clasificar", descripcion: "Bandeja: motor, traslados y reglas", to: "/clasificar", icon: ClipboardCheck, permiso: "bancos.ver_clasificar" },
+      { label: "Clasificar", descripcion: "Bandeja: motor, traslados y reglas", to: "/clasificar", icon: ClipboardCheck, permiso: "bancos.ver_clasificar", anchoCompleto: true },
       // Nombres de PÁGINA, distintos de los módulos futuros «Tesorería» y «Conciliación
       // bancaria» del riel: acá se captura el saldo del día y se firma el acta del mes.
-      { label: "Saldos diarios", descripcion: "Saldo del día y disponible", to: "/saldos-diarios", icon: Banknote, permiso: "bancos.ver_saldos" },
+      { label: "Saldos diarios", descripcion: "Saldo del día y disponible", to: "/saldos-diarios", icon: Banknote, permiso: "bancos.ver_saldos", anchoCompleto: true },
       { label: "Actas de conciliación", descripcion: "Una por cuenta y mes", to: "/conciliacion", icon: GitCompare, permiso: "bancos.ver_conciliacion" },
       // El Importador no tiene nada que LEER: es el formulario de carga. Su permiso de lectura es
       // el mismo de la acción, porque verlo sin poder subir nada no sirve de nada.
@@ -120,7 +127,7 @@ export const MODULES: NavModule[] = [
       // en Saldos diarios pero también le aparecía el Catálogo, que no es su trabajo.
       { label: "Catálogo", descripcion: "Conceptos y clasificaciones", to: "/catalogo", icon: BookOpen, permiso: "bancos.catalogo" },
       { label: "Tipo de cambio", descripcion: "Cotizaciones", to: "/tipo-cambio", icon: Coins, permiso: "bancos.ver_tc" },
-      { label: "Exportar", descripcion: "Salidas y reportes", to: "/exportar", icon: Download, permiso: "bancos.exportar" },
+      { label: "Exportar", descripcion: "Salidas y reportes", to: "/exportar", icon: Download, permiso: "bancos.exportar", anchoCompleto: true },
       {
         label: "Análisis y tendencias",
         descripcion: "Cada partida contra su historia",
@@ -147,13 +154,13 @@ export const MODULES: NavModule[] = [
     disponible: true,
     permiso: "cxp.ver",
     pages: [
-      { label: "Bandeja", descripcion: "El trabajo, por fases", to: "/cxp/bandeja", icon: Inbox },
+      { label: "Bandeja", descripcion: "El trabajo, por fases", to: "/cxp/bandeja", icon: Inbox, anchoCompleto: true },
       { label: "Dashboard", descripcion: "Cartera, vencimientos y cola", to: "/cxp/dashboard", icon: LayoutDashboard, permiso: "cxp.dashboard" },
       // Va PEGADO al Dashboard porque son las dos preguntas grandes y se confunden: el Dashboard
       // mira cómo va el PROCESO (qué debemos, qué vence, qué está trabado) y esto mira EN QUÉ SE
       // VA LA PLATA. El subtítulo nombra el ítem y el precio, que es lo que no está en ningún otro
       // lado del sistema: el resto de CxP trabaja con el total de la factura.
-      { label: "Gasto por ítem", descripcion: "Qué compramos y a qué precio", to: "/cxp/gasto", icon: Tags, permiso: "cxp.gasto" },
+      { label: "Gasto por ítem", descripcion: "Qué compramos y a qué precio", to: "/cxp/gasto", icon: Tags, permiso: "cxp.gasto", anchoCompleto: true },
       { label: "Importar", descripcion: "Excel o XML de facturación", to: "/cxp/importar", icon: Upload, permiso: "cxp.importar" },
       // La recepción por correo va JUNTO a Importar: son las dos puertas de lo mismo —una a mano y
       // otra sola—, y ponerlas separadas haría que nadie encuentre la automática.
@@ -213,12 +220,29 @@ export const MODULES: NavModule[] = [
         icon: BellRing,
         permiso: "cxc.preventivo",
       },
-      { label: "Cartera", descripcion: "Contratos, cargos y saldo", to: "/cxc/cartera", icon: HandCoins },
+      { label: "Cartera", descripcion: "Contratos, cargos y saldo", to: "/cxc/cartera", icon: HandCoins, anchoCompleto: true },
       { label: "Cobros", descripcion: "Lo que entró y a qué se aplicó", to: "/cxc/cobros", icon: Coins },
       { label: "Arreglos de pago", descripcion: "Planes pactados y cartera morosa", to: "/cxc/arreglos", icon: Handshake, permiso: "cxc.arreglos" },
       { label: "Asociaciones", descripcion: "Planillas solidaristas: esperado vs cobrado", to: "/cxc/asociaciones", icon: Building2 },
       { label: "Importar", descripcion: "Cartera y pagos del origen", to: "/cxc/importar", icon: Upload, permiso: "cxc.importar" },
       { label: "Parámetros", descripcion: "Tramos, factores, sedes y accesos", to: "/cxc/parametros", icon: SlidersHorizontal },
+    ],
+  },
+  {
+    // Calculadora de precios: el costeo primero porque es lo que se consulta a diario; el
+    // catálogo después porque se alimenta una vez y se corrige de a poco.
+    id: "precios",
+    label: "Calculadora de precios",
+    icon: Calculator,
+    to: "/precios",
+    disponible: true,
+    permiso: "precios.ver",
+    pages: [
+      { label: "Costeo del plan", descripcion: "Qué lleva, cuánto cuesta y el piso de precio", to: "/precios", icon: Calculator, end: true, anchoCompleto: true },
+      { label: "Catálogo de insumos", descripcion: "El costo de cada cosa, contra lo que se pagó", to: "/precios/insumos", icon: BookOpen },
+      { label: "Reparto de indirectos", descripcion: "Cada gasto por lo que lo causa", to: "/precios/reparto", icon: GitCompare },
+      { label: "Comisiones", descripcion: "Por plan y vendedor, con su carga social", to: "/precios/comisiones", icon: Coins },
+      { label: "Importar", descripcion: "Cargar el catálogo desde el archivo de costeo", to: "/precios/importar", icon: Upload, permiso: "precios.editar" },
     ],
   },
   {
@@ -231,7 +255,7 @@ export const MODULES: NavModule[] = [
     disponible: true,
     permiso: "inventario.ver",
     pages: [
-      { label: "Existencias", descripcion: "Qué hay y en qué sede", to: "/inventario", icon: Boxes, end: true },
+      { label: "Existencias", descripcion: "Qué hay y en qué sede", to: "/inventario", icon: Boxes, end: true, anchoCompleto: true },
       { label: "Entradas", descripcion: "Lo que llegó del proveedor", to: "/inventario/entradas", icon: Upload, permiso: "inventario.entrada" },
       // El servicio prestado es lo que descarga el stock: sin esta pantalla el módulo no se sostiene.
       { label: "Servicios prestados", descripcion: "El funeral y qué consumió", to: "/inventario/servicios", icon: ClipboardCheck, permiso: "inventario.servicio" },
@@ -373,13 +397,39 @@ export function moduloActivo(pathname: string): NavModule {
  * problema aparecía sin que nadie lo relacionara con el orden de una lista—.
  */
 export function permisoDeRuta(pathname: string): string | undefined {
-  const m = moduloActivo(pathname);
+  const { modulo, page } = paginaActiva(pathname);
+  return page ? permisoDePagina(modulo, page) : modulo.permiso;
+}
+
+/**
+ * Módulo y página a los que pertenece una ruta.
+ *
+ * Gana la coincidencia MÁS LARGA, por la misma razón que en `permisoDeRuta`: con la primera del
+ * registro, una ruta que es prefijo de otra se queda con la página equivocada.
+ *
+ * Es la fuente de las migas de pan y del auto-colapso, para que ninguna de las dos necesite una
+ * lista a mano que haya que recordar actualizar al agregar una pantalla.
+ */
+export function paginaActiva(pathname: string): { modulo: NavModule; page?: NavPage } {
+  const modulo = moduloActivo(pathname);
   let page: NavPage | undefined;
-  for (const p of m.pages) {
+  for (const p of modulo.pages) {
     if (p.end ? pathname !== p.to : !pathname.startsWith(p.to)) continue;
     if (!page || p.to.length > page.to.length) page = p;
   }
-  return page ? permisoDePagina(m, page) : m.permiso;
+  return { modulo, page };
+}
+
+/**
+ * Migas de pan de una ruta: «Módulo › Pantalla».
+ *
+ * Derivadas del registro y no de una lista a mano. La versión anterior enumeraba 14 rutas y solo
+ * cubría Bancos y parte de CxP: en Inventario, RRHH, CxC, Grupo y Configuración las migas salían
+ * VACÍAS. Con la sidebar colapsable eso importa más, porque pasan a ser la única orientación.
+ */
+export function migasDeRuta(pathname: string): { modulo: string; pagina: string } {
+  const { modulo, page } = paginaActiva(pathname);
+  return { modulo: modulo.label, pagina: page?.label ?? "" };
 }
 
 /** Primera ruta que el usuario SÍ puede ver (para aterrizar a quien no tiene acceso al índice). */

@@ -4,6 +4,7 @@ import { PeriodoProvider } from "@/app/PeriodoProvider";
 import { TopBar } from "@/components/shell/TopBar";
 import { ModuleRail } from "@/components/shell/ModuleRail";
 import { Sidebar } from "@/components/shell/Sidebar";
+import { useSidebarColapsada } from "@/components/shell/useSidebarColapsada";
 import { CommandPalette } from "@/components/shell/CommandPalette";
 import { PermisoGate } from "@/routes/PermisoRoute";
 
@@ -14,13 +15,16 @@ import { PermisoGate } from "@/routes/PermisoRoute";
  */
 export function AppShell() {
   const location = useLocation();
+  // El estado vive acá y no dentro de la sidebar: el atajo Ctrl+B tiene que funcionar también
+  // cuando está colapsada, y entonces el componente que lo escucha no puede ser el que desaparece.
+  const sidebar = useSidebarColapsada();
   return (
     <PeriodoProvider>
       <div className="flex min-h-screen flex-col bg-surface">
         <TopBar />
         <div className="flex flex-1 overflow-hidden">
           <ModuleRail />
-          <Sidebar />
+          <Sidebar estado={sidebar} />
           <main className="flex-1 overflow-auto p-6 lg:p-8">
             <motion.div
               key={location.pathname}

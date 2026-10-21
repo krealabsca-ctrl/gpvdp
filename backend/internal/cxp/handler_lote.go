@@ -73,7 +73,7 @@ func (h *Handler) MacroLote(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rows, err := h.svc.MacroLote(c.Request.Context(), empresaID, c.Param("id"))
+	rows, loteNumero, err := h.svc.MacroLote(c.Request.Context(), empresaID, c.Param("id"))
 	if err != nil {
 		h.responderError(c, err, "macro-lote")
 		return
@@ -86,10 +86,15 @@ func (h *Handler) MacroLote(c *gin.Context) {
 	// Sin `?moneda=`, un lote de una sola moneda baja esa y uno mixto contesta qué hay, para que
 	// nadie se lleve media macro creyendo que son todas las líneas.
 	moneda := strings.ToUpper(strings.TrimSpace(c.Query("moneda")))
-	if grupos := SepararPorMoneda(rows, 0); len(grupos) > 1 && moneda == "" {
+	// Se le pasa el número del lote para que `Archivo` traiga el nombre REAL de cada macro
+	// («macro-lote-0043-USD.txt»): con 0 decía «macro-lote-0000-…» y la pantalla anunciaba un
+	// archivo que no es el que después se baja.
+	if grupos := SepararPorMoneda(rows, loteNumero); len(grupos) > 1 && moneda == "" {
 		detalle := make([]gin.H, 0, len(grupos))
 		for _, g := range grupos {
-			detalle = append(detalle, gin.H{"moneda": g.Moneda, "lineas": len(g.Lineas), "total": g.Total})
+			detalle = append(detalle, gin.H{
+				"moneda": g.Moneda, "lineas": len(g.Lineas), "total": g.Total, "archivo": g.Archivo,
+			})
 		}
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"code": "MACRO_MIXTA",
@@ -142,5 +147,5 @@ func (h *Handler) MacroLote(c *gin.Context) {
 		})
 		return
 	}
-	escribirMacroTxt(c, rows)
+	escribirMacroTxt(c, rows, loteNumero)
 }

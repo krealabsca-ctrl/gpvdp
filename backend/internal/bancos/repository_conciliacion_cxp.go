@@ -15,7 +15,8 @@ import (
 // importacionID vacío = toda la empresa; con id, solo lo recién importado.
 func (r *pgRepository) MovimientosConHuella(ctx context.Context, empresaID, prefijo, importacionID string) ([]MovimientoConHuella, error) {
 	q := `
-		SELECT m.id::text, to_char(m.fecha, 'YYYY-MM-DD'), m.descripcion, m.debito::text, cb.alias
+		SELECT m.id::text, to_char(m.fecha, 'YYYY-MM-DD'), m.descripcion, m.debito::text,
+		       cb.alias, cb.moneda
 		FROM movimiento_bancario m
 		JOIN cuenta_bancaria cb ON cb.id = m.cuenta_bancaria_id
 		WHERE m.empresa_id = $1::uuid AND m.incluido AND m.debito > 0
@@ -35,7 +36,7 @@ func (r *pgRepository) MovimientosConHuella(ctx context.Context, empresaID, pref
 	out := make([]MovimientoConHuella, 0, 32)
 	for rows.Next() {
 		var m MovimientoConHuella
-		if err := rows.Scan(&m.ID, &m.Fecha, &m.Descripcion, &m.Debito, &m.Cuenta); err != nil {
+		if err := rows.Scan(&m.ID, &m.Fecha, &m.Descripcion, &m.Debito, &m.Cuenta, &m.Moneda); err != nil {
 			return nil, fmt.Errorf("bancos: scan movimiento con huella: %w", err)
 		}
 		out = append(out, m)

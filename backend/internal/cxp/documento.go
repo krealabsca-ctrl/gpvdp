@@ -107,8 +107,17 @@ func esViaExpresa(tipo string) bool {
 
 // Documento es la vista de un documento CxP hacia HTTP.
 type Documento struct {
-	ID                  string  `json:"id"`
-	ProveedorID         string  `json:"proveedor_id"`
+	ID          string `json:"id"`
+	ProveedorID string `json:"proveedor_id"`
+	// ProveedorEmail precarga el «Para» del reenvío del comprobante, que desde el 19-oct-2026 se
+	// puede cambiar. Vacío en 643 de 649 proveedores: ahí el campo arranca en blanco y lo que se
+	// escriba queda guardado en la ficha.
+	ProveedorEmail string `json:"proveedor_email"`
+	// ProveedorTelefono precarga el número del envío por WhatsApp. Vacío en los 649 de hoy.
+	ProveedorTelefono string `json:"proveedor_telefono"`
+	// PagadoEn es CUÁNDO salió el dinero (aaaa-mm-dd), del evento de pago. Vacío = todavía no se
+	// pagó, o se pagó antes de que hubiera bitácora (carga histórica).
+	PagadoEn            string  `json:"pagado_en"`
 	Proveedor           string  `json:"proveedor"`
 	Clave               string  `json:"clave"`
 	Consecutivo         string  `json:"consecutivo"`
@@ -126,15 +135,18 @@ type Documento struct {
 	Huella              string  `json:"huella"`
 	Descripcion         string  `json:"descripcion"`
 	// Clasificación de gasto (reusa el catálogo Concepto/Clasificación).
-	ConceptoID         string  `json:"concepto_id"`
-	Concepto           string  `json:"concepto"`
-	ClasificacionID    string  `json:"clasificacion_id"`
-	Clasificacion      string  `json:"clasificacion"`
-	SubclasificacionID string  `json:"subclasificacion_id"`
-	Subclasificacion   string  `json:"subclasificacion"`
-	LoteID             string  `json:"lote_id"`
-	LoteNumero         string  `json:"lote_numero"`
-	TieneComprobante   bool    `json:"tiene_comprobante"`
+	ConceptoID         string `json:"concepto_id"`
+	Concepto           string `json:"concepto"`
+	ClasificacionID    string `json:"clasificacion_id"`
+	Clasificacion      string `json:"clasificacion"`
+	SubclasificacionID string `json:"subclasificacion_id"`
+	Subclasificacion   string `json:"subclasificacion"`
+	LoteID             string `json:"lote_id"`
+	LoteNumero         string `json:"lote_numero"`
+	TieneComprobante   bool   `json:"tiene_comprobante"`
+	// TieneFactura: la factura del PROVEEDOR está adjunta (mig 0103). Es la otra mitad del
+	// expediente: sin ella un pago se puede ver pero no verificar.
+	TieneFactura       bool    `json:"tiene_factura"`
 	ComprobanteEnviado *string `json:"comprobante_enviado_en"`
 	// ClasifAuto: la clasificación vino de la memoria del proveedor (pendiente de confirmar).
 	ClasifAuto bool `json:"clasif_auto"`
@@ -189,6 +201,10 @@ type Documento struct {
 	// desde la migración 0043 y ninguna de las dos pantallas lo mostraba, así que «¿con cuál pago
 	// se cerró esta factura?» solo se podía contestar leyendo SQL. Ausente = sin enlace todavía.
 	PagoBanco *PagoBancoDelDocumento `json:"pago_banco,omitempty"`
+	// MedioPago dice con qué se pagó una factura que se cerró por FUERA del banco: caja chica,
+	// viáticos, tarjeta o efectivo (mig 0102). Ausente = no se cerró por esa vía. Es lo único que
+	// explica por qué una LIQUIDADA no tiene movimiento bancario que la respalde.
+	MedioPago *MedioPagoDelDocumento `json:"medio_pago,omitempty"`
 	// Remesa es el pago agrupado dentro del que se fue esta factura, cuando el lote se cortó por
 	// proveedor. Ausente = se paga sola y su propia huella es lo que viaja al banco.
 	//
@@ -338,6 +354,16 @@ const (
 	FechaVencimiento = "vencimiento"
 	// FechaPago es la fecha de pago PROGRAMADA: «qué quedó cortado para agosto».
 	FechaPago = "pago"
+	// FechaPagado es cuándo se pagó DE VERDAD: «qué salió del banco en agosto».
+	//
+	// Distinta de FechaPago, y la diferencia es justamente lo que se audita: una factura se
+	// programa para el 15 y se paga el 22. Filtrar por la programada para responder «qué pagamos
+	// en agosto» devuelve lo que se PENSABA pagar, no lo que se pagó.
+	//
+	// Sale del EVENTO de auditoría y no de `actualizado_en`, que se reescribe con cualquier
+	// edición posterior (adjuntar el comprobante, reclasificar) y arrastraría la factura a otro
+	// mes. Mismo criterio que el ciclo de pago del tablero.
+	FechaPagado = "pagado"
 )
 
 // FechaISOValida dice si el texto es una fecha aaaa-mm-dd que existe en el calendario.
@@ -363,10 +389,24 @@ func columnaFecha(campo string) string {
 		return "d.fecha_vencimiento"
 	case FechaPago:
 		return "d.fecha_pago_programada"
+	case FechaPagado:
+		// La del EVENTO, en día de Costa Rica. Un pago hecho a las 18:30 de acá es de ese día,
+		// no del siguiente: el evento se guarda en UTC y sin convertir, los pagos de la tarde se
+		// irían al día después y no calzarían con el estado de cuenta.
+		return "(" + sqlFechaPagada + " AT TIME ZONE 'America/Costa_Rica')::date"
 	default:
 		return "d.fecha_emision"
 	}
 }
+
+// sqlFechaPagada es CUÁNDO se pagó, leído del primer evento de pago del documento.
+//
+// No existe una columna con esto. `actualizado_en` se reescribe con cualquier edición posterior
+// —adjuntar el comprobante, reclasificar— así que usarla pondría la factura en el mes equivocado.
+// Es la misma fuente que el ciclo de pago del tablero, y por eso no pueden discrepar.
+const sqlFechaPagada = `(SELECT MIN(a.ts) FROM auditoria_evento a
+	WHERE a.empresa_id = d.empresa_id AND a.entidad = 'documento_cxp' AND a.entidad_id = d.id
+	  AND a.accion IN ('PAGAR_DOCUMENTO', 'CONCILIAR_AUTO', 'CONCILIAR_DOCUMENTO'))`
 
 // prioridadesFiltro son los valores aceptados por FiltrosDocumentos.Prioridad.
 //

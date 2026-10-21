@@ -73,3 +73,51 @@ func indexDe(s, sub string) int {
 	}
 	return -1
 }
+
+// Los dos errores del enlace a CxP tienen que llegar a la pantalla con su frase entera.
+//
+// Cada uno nombra un arreglo distinto —desenlazar antes de dividir, desenlazar antes de sacar de
+// los libros— y ese es todo su valor. Si caen al `default` de responderError salen como 500 «error
+// interno» y quien los recibe no puede distinguir una acción no permitida de un servidor caído.
+//
+// Este paquete NO tiene el centinela que lee el fuente (cxp/handler_centinelas_test.go sí), así
+// que acá la vigilancia es explícita.
+func TestResponderErrorTraduceLosEnlacesConCxP(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewHandler(nil, zap.NewNop())
+
+	casos := []struct {
+		nombre  string
+		err     error
+		enTexto string
+	}{
+		{"excluir un pago enlazado", ErrExclusionConCxP, "desenlazalo"},
+		{"dividir un pago enlazado", ErrDivisionConCxP, "desenlazalo"},
+	}
+	for _, c := range casos {
+		t.Run(c.nombre, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(rec)
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/bancos/movimientos/x/excluir", nil)
+
+			h.responderError(ctx, c.err, "test")
+
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, se esperaba 422 (la acción no corresponde, el servidor está bien)", rec.Code)
+			}
+			var cuerpo struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &cuerpo); err != nil {
+				t.Fatalf("cuerpo ilegible: %v — %s", err, rec.Body.String())
+			}
+			if cuerpo.Code == "ERROR_INTERNO" {
+				t.Fatalf("el error salió como interno: %s", rec.Body.String())
+			}
+			if !contieneTexto(cuerpo.Message, c.enTexto) {
+				t.Errorf("el mensaje tiene que decir qué hacer (%q); dice %q", c.enTexto, cuerpo.Message)
+			}
+		})
+	}
+}

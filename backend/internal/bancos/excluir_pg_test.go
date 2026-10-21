@@ -335,3 +335,100 @@ func TestNoSeExcluyeUnMovimientoDeOtraEmpresa(t *testing.T) {
 		t.Fatal("el movimiento salió de los libros desde otra empresa")
 	}
 }
+
+// ── La guarda del enlace a CxP (16-oct-2026) ────────────────────────────────────────────────
+
+// `incluido` tiene tres escritores y durante un tiempo solo dos protegieron el enlace a CxP: la
+// reversa de la carga entera (BloqueosReversa.FacturasCxP) y la división (ErrDivisionConCxP).
+// Excluir suelto —el tercero, de la mig 0093— no miraba.
+//
+// El daño lo describe el comentario de la reversa, que por eso bloquea: la factura queda CONCILIADA
+// contra plata que ya no está en los libros, y el barrido de huellas no puede volver a mirarla
+// porque filtra por `incluido` Y por `documento_cxp_id IS NULL`. El enlace queda huérfano para
+// siempre, sin forma de repararlo desde la aplicación.
+//
+// Esto va contra Postgres de verdad porque lo que se prueba ES la condición del UPDATE.
+func TestNoSeExcluyeUnMovimientoQueEsElPagoDeUnaFactura(t *testing.T) {
+	repo := baseDeExclusion(t)
+	ctx := context.Background()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := repo.pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("sembrar: %v\n%s", err, sql)
+		}
+	}
+	exec(`INSERT INTO proveedor (id, empresa_id, nombre) VALUES ($1::uuid,$2::uuid,'VOLCANO 506 S.A')`,
+		provHue, empExc)
+
+	id := sembrarMov(t, repo, "2026-09-18", "220007293", "DEBITO SINPE CXP54A4281AE49A", 0)
+	var docID string
+	if err := repo.pool.QueryRow(ctx, `
+		INSERT INTO documento_cxp
+			(empresa_id, proveedor_id, clave, consecutivo, fecha_emision, estado, moneda,
+			 total, total_crc, huella)
+		VALUES ($1::uuid,$2::uuid,'50601','50601','2026-09-01','CONCILIADO','CRC',
+		        41930.37,41930.37,'CXP-54A4281AE49A')
+		RETURNING id::text`, empExc, provHue).Scan(&docID); err != nil {
+		t.Fatalf("sembrar factura: %v", err)
+	}
+	exec(`UPDATE movimiento_bancario SET documento_cxp_id = $2::uuid WHERE id = $1::uuid`, id, docID)
+
+	err := repo.ExcluirMovimiento(ctx, empExc, id, "me parece duplicado", usrExc)
+	if err != ErrExclusionConCxP {
+		t.Fatalf("excluir un pago enlazado devolvió %v, se esperaba ErrExclusionConCxP", err)
+	}
+	if !estaIncluido(t, repo, id) {
+		t.Fatal("el pago salió de los libros y dejó la factura conciliada contra plata que ya no está")
+	}
+
+	// El mensaje tiene que decir QUÉ hacer. «No había nada que sacar» mandaría a buscar el
+	// problema al lado equivocado: el movimiento existe y está en los libros.
+	if !contieneTexto(err.Error(), "desenlazalo") {
+		t.Errorf("el error no dice qué hacer: %q", err.Error())
+	}
+
+	// Desenlazado, se excluye normalmente: la guarda protege el enlace, no el movimiento.
+	exec(`UPDATE movimiento_bancario SET documento_cxp_id = NULL WHERE id = $1::uuid`, id)
+	if err := repo.ExcluirMovimiento(ctx, empExc, id, "ahora sí, duplicado del BAC", usrExc); err != nil {
+		t.Fatalf("sin enlace tenía que poder excluirse: %v", err)
+	}
+}
+
+// Un pago AGRUPADO enlaza contra la remesa y no contra una factura: es la otra columna, y el CHECK
+// de la 0089 las hace excluyentes. Una guarda que mirara solo `documento_cxp_id` dejaría pasar
+// justo los pagos que cierran cinco facturas de una vez.
+func TestNoSeExcluyeUnMovimientoQueEsElPagoDeUnaRemesa(t *testing.T) {
+	repo := baseDeExclusion(t)
+	ctx := context.Background()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := repo.pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("sembrar: %v\n%s", err, sql)
+		}
+	}
+	exec(`INSERT INTO proveedor (id, empresa_id, nombre) VALUES ($1::uuid,$2::uuid,'VOLCANO 506 S.A')`,
+		provHue, empExc)
+
+	var loteID, remesaID string
+	if err := repo.pool.QueryRow(ctx, `
+		INSERT INTO lote_pago (empresa_id, numero, fecha_corte) VALUES ($1::uuid, 43, '2026-09-18')
+		RETURNING id::text`, empExc).Scan(&loteID); err != nil {
+		t.Fatalf("sembrar lote: %v", err)
+	}
+	if err := repo.pool.QueryRow(ctx, `
+		INSERT INTO remesa_pago (empresa_id, lote_id, proveedor_id, numero, monto_crc, huella)
+		VALUES ($1::uuid,$2::uuid,$3::uuid, 7, 125000.00, 'CXPR-7K2M9P4XQ1BT')
+		RETURNING id::text`, empExc, loteID, provHue).Scan(&remesaID); err != nil {
+		t.Fatalf("sembrar remesa: %v", err)
+	}
+
+	id := sembrarMov(t, repo, "2026-09-18", "220007294", "DEBITO SINPE CXPR7K2M9P4XQ1BT", 0)
+	exec(`UPDATE movimiento_bancario SET remesa_id = $2::uuid WHERE id = $1::uuid`, id, remesaID)
+
+	if err := repo.ExcluirMovimiento(ctx, empExc, id, "me parece duplicado", usrExc); err != ErrExclusionConCxP {
+		t.Fatalf("excluir un pago agrupado devolvió %v, se esperaba ErrExclusionConCxP", err)
+	}
+	if !estaIncluido(t, repo, id) {
+		t.Fatal("el pago agrupado salió de los libros y dejó sus facturas conciliadas contra nada")
+	}
+}

@@ -19,7 +19,12 @@ type fakeRepo struct {
 	tcAplicado       []tcAplicacion
 	// Dashboard: totales por período (ingreso/gasto según la naturaleza del concepto) y cuántos
 	// conceptos en uso siguen sin declararla.
-	totales                map[string]TotalesEbitda
+	totales map[string]TotalesEbitda
+	// Comparación a paridad de día: totales por TRAMO («2026-10:19»), hasta dónde está cargado
+	// cada período, y los días que el servicio pidió (para ver que compara tramos iguales).
+	totalesHastaDia        map[string]TotalesEbitda
+	ultimoDiaCargado       map[string]int
+	diasPedidos            []string
 	conceptosSinNaturaleza int
 	naturalezaActual       string
 	// visibleCxP: si el rubro está dentro del alcance de `cxp.catalogo` (la puerta de Contabilidad).

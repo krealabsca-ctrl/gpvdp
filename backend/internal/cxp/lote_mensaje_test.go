@@ -29,7 +29,7 @@ func TestElMensajeDelLoteVacioDiceLosMotivos(t *testing.T) {
 			// El caso exacto de la captura: tres facturas, un solo motivo.
 			nombre: "tres con el mismo motivo lo dicen una vez, con el conteo",
 			fuera: []DocumentoFueraDelLote{
-				{Proveedor: "Keisy Melissa Ceciliano Mata", Motivo: bloqueo},
+				{Proveedor: "Marcela Fernanda Quiros Vargas", Motivo: bloqueo},
 				{Proveedor: "AR SISTEMAS SOCIEDAD ANONIMA", Motivo: bloqueo},
 				{Proveedor: "Electritel Sociedad Anonima", Motivo: bloqueo},
 			},

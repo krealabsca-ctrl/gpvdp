@@ -23,23 +23,46 @@ import (
 // una carga revertida, y lo que hace que deshacer una reversa NO devuelva este movimiento a los
 // libros. Sin esa distinción, corregir un duplicado a mano y después deshacer una reversa
 // cualquiera volvería a meter la plata duplicada.
+// El enlace a CxP se verifica en el WHERE y no leyendo antes: entre una lectura y el UPDATE, el
+// barrido de huellas puede enlazar el movimiento, y la comprobación habría mirado un estado que ya
+// no es. Acá la condición y la escritura son la misma operación.
 func (r *pgRepository) ExcluirMovimiento(ctx context.Context, empresaID, movID, motivo, usuarioID string) error {
 	const q = `
 		UPDATE movimiento_bancario
 		   SET incluido = false, excluido_por_reversa = false,
 		       excluido_motivo = $3, excluido_por = $4::uuid, excluido_en = now(),
 		       actualizado_en = now()
-		 WHERE empresa_id = $1::uuid AND id = $2::uuid AND incluido`
+		 WHERE empresa_id = $1::uuid AND id = $2::uuid AND incluido
+		   AND documento_cxp_id IS NULL AND remesa_id IS NULL`
 	tag, err := r.pool.Exec(ctx, q, empresaID, movID, motivo, usuarioID)
 	if err != nil {
 		return fmt.Errorf("bancos: excluir movimiento: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		// O no existe en esta empresa, o ya estaba fuera de los libros. Las dos cosas significan
-		// lo mismo para quien lo pidió: no había nada que sacar.
-		return ErrMovimientoNoExcluible
+		return r.porQueNoSeExcluyo(ctx, empresaID, movID)
 	}
 	return nil
+}
+
+// porQueNoSeExcluyo distingue las dos razones por las que el UPDATE no afectó filas.
+//
+// Importa porque el arreglo es distinto: un movimiento enlazado se desenlaza de CxP, y uno que ya
+// está fuera de los libros no necesita nada. Devolver «no había nada que sacar» sobre un pago
+// enlazado mandaría a buscar el problema al lado equivocado.
+func (r *pgRepository) porQueNoSeExcluyo(ctx context.Context, empresaID, movID string) error {
+	const q = `
+		SELECT (documento_cxp_id IS NOT NULL OR remesa_id IS NOT NULL)
+		FROM movimiento_bancario
+		WHERE empresa_id = $1::uuid AND id = $2::uuid AND incluido`
+	var enlazado bool
+	// Si la consulta no encuentra la fila, es que no existe o ya estaba excluido: ese es el caso
+	// original y se responde como siempre.
+	if err := r.pool.QueryRow(ctx, q, empresaID, movID).Scan(&enlazado); err == nil && enlazado {
+		return ErrExclusionConCxP
+	}
+	// O no existe en esta empresa, o ya estaba fuera de los libros. Las dos cosas significan lo
+	// mismo para quien lo pidió: no había nada que sacar.
+	return ErrMovimientoNoExcluible
 }
 
 // IncluirMovimiento lo devuelve a los libros.

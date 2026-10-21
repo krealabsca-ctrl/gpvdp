@@ -31,6 +31,7 @@ import (
 	"github.com/gpvdp/erp/internal/logging"
 	"github.com/gpvdp/erp/internal/nomina"
 	"github.com/gpvdp/erp/internal/plantillas"
+	"github.com/gpvdp/erp/internal/precios"
 	"github.com/gpvdp/erp/internal/rbac"
 	"github.com/gpvdp/erp/internal/seed"
 	"github.com/gpvdp/erp/internal/server"
@@ -187,12 +188,19 @@ func run(migrateOnly bool) error {
 
 	nominaH := nomina.NewHandler(nominaSvc, logger)
 
+	// Calculadora de precios: ancla el precio de venta al costo real de CxP.
+	preciosSvc := precios.NewService(precios.NewRepository(pool))
+	// Las comisiones habituales SON salario en CR, así que su costo real lleva las cargas
+	// patronales. El factor se pide a nómina, que ya las tiene versionadas por año.
+	preciosSvc.SetCargasSociales(cargasDeNomina{svc: nominaSvc})
+	preciosH := precios.NewHandler(preciosSvc, logger)
+
 	// ── Vista consolidada del grupo ──
 	// Solo lee, y es la única que cruza empresas. No recibe ningún otro servicio: resuelve el alcance
 	// desde las membresías del usuario, así que no otorga acceso nuevo ni depende de ningún módulo.
 	grupoH := grupo.NewHandler(grupo.NewService(grupo.NewRepository(pool), logger), logger)
 
-	router := server.NewRouter(cfg, logger, authH, bancosH, cxpH, cxcH, nominaH, rbacH, plantillasH, correoH, inventarioH, grupoH, rbacSvc)
+	router := server.NewRouter(cfg, logger, authH, bancosH, cxpH, cxcH, nominaH, rbacH, plantillasH, correoH, inventarioH, grupoH, preciosH, rbacSvc)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -414,8 +422,8 @@ type conciliadorCxP struct{ svc *cxp.Service }
 
 func (c conciliadorCxP) PrefijoHuella() string { return c.svc.PrefijoHuella() }
 
-func (c conciliadorCxP) ConciliarHuella(ctx context.Context, empresaID, descripcion, montoBanco, usuarioID string) (bancos.ResultadoHuella, error) {
-	r, err := c.svc.ConciliarHuella(ctx, empresaID, descripcion, montoBanco, usuarioID)
+func (c conciliadorCxP) ConciliarHuella(ctx context.Context, empresaID, descripcion, montoBanco, monedaBanco, usuarioID string) (bancos.ResultadoHuella, error) {
+	r, err := c.svc.ConciliarHuella(ctx, empresaID, descripcion, montoBanco, monedaBanco, usuarioID)
 	if err != nil {
 		return bancos.ResultadoHuella{}, err
 	}
@@ -424,8 +432,51 @@ func (c conciliadorCxP) ConciliarHuella(ctx context.Context, empresaID, descripc
 		DocumentoID: r.DocumentoID, Consecutivo: r.Consecutivo, Proveedor: r.Proveedor,
 		ConceptoID: r.ConceptoID, ClasificacionID: r.ClasificacionID,
 		MontoEsperado: r.MontoEsperado, MontoBanco: r.MontoBanco,
+		// La moneda de la factura: sin ella un MONEDA_DIFERENTE diría que algo no calza sin decir
+		// contra qué.
+		MonedaEsperada: r.MonedaEsperada,
 		// Un pago agrupado trae la remesa en vez del documento: Bancos enlaza contra una u otra.
 		// Si esta línea se olvidara, el pago se conciliaría en CxP y el movimiento quedaría suelto.
 		RemesaID: r.RemesaID, Facturas: r.Facturas,
 	}, nil
+}
+
+// cargasDeNomina satisface el puerto que declara `precios` para saber cuánto cuesta de verdad
+// una comisión.
+//
+// Vive acá y no dentro de `precios` por la misma razón que el facturador de consignación vive
+// acá y no dentro de Inventario: el módulo declara QUÉ necesita y el armado decide con qué se
+// satisface. Si esta línea no estuviera, la calculadora seguiría funcionando y solo mostraría la
+// comisión bruta diciendo que no pudo completar el costo patronal.
+type cargasDeNomina struct{ svc *nomina.Service }
+
+// PorcentajePatronal suma las cargas PATRONALES del año más el INS de riesgos del trabajo.
+//
+// El INA se excluye cuando la empresa no lo aplica, igual que en el cálculo de la planilla: si
+// acá se sumara siempre, el costo de la comisión saldría 1,5 puntos más alto que el de la
+// planilla por el mismo salario, y los dos números tienen que cuadrar.
+func (c cargasDeNomina) PorcentajePatronal(ctx context.Context, empresaID string, anio int) (decimal.Decimal, error) {
+	p, err := c.svc.Parametros(ctx, empresaID, anio)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	total := decimal.Zero
+	for _, carga := range p.Cargas {
+		if carga.Tipo != nomina.CargaPatronal {
+			continue
+		}
+		if carga.Codigo == "INA" && !p.AplicaINA {
+			continue
+		}
+		pct, err := decimal.NewFromString(carga.Pct)
+		if err != nil {
+			return decimal.Zero, err
+		}
+		total = total.Add(pct)
+	}
+	ins, err := decimal.NewFromString(p.INSRiesgosPct)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	return total.Add(ins), nil
 }

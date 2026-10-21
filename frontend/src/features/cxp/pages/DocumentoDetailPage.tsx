@@ -47,6 +47,9 @@ import {
   textoRequisitoAprobacion,
 } from "@/features/cxp/dominio";
 import { fraseEnvioOK } from "@/features/cxp/comprobanteDominio";
+import { WhatsAppComprobante } from "@/features/cxp/components/WhatsAppComprobante";
+import { ExpedienteDelPago } from "@/features/cxp/components/ExpedienteDelPago";
+import { EnviarComprobante } from "@/features/cxp/components/EnviarComprobante";
 import { HistorialEnvios } from "@/features/cxp/components/HistorialEnvios";
 import { DetalleLineasCard } from "@/features/cxp/components/DetalleLineasCard";
 import {
@@ -704,6 +707,9 @@ function ComprobanteCard({ doc }: { doc: Documento }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [descargando, setDescargando] = useState(false);
   const [confirmando, setConfirmando] = useState(false);
+  // El envío por WhatsApp: el texto sale del servidor (misma plantilla del correo) y el PDF se
+  // adjunta a mano, porque el enlace wa.me no admite archivos.
+  const [porWhatsApp, setPorWhatsApp] = useState(false);
   // El permiso del BACKEND para adjuntar/enviar/reenviar es `cxp.comprobante`, no el de pagar.
   // Con `pagar` (cxp.tesoreria), al Auxiliar Financiero —que sí tiene cxp.comprobante— no le
   // aparecían los botones, y a quien solo tiene tesorería le aparecían y le devolvían 403.
@@ -748,7 +754,7 @@ function ComprobanteCard({ doc }: { doc: Documento }) {
 
   function enviarAlProveedor() {
     setConfirmando(false);
-    enviar.mutate(doc.id, {
+    enviar.mutate({ id: doc.id }, {
       onSuccess: (r) => toast.success(fraseEnvioOK(r)),
       onError: (err) => toast.error(mensajeError(err)),
     });
@@ -806,18 +812,24 @@ function ComprobanteCard({ doc }: { doc: Documento }) {
               Descargar
             </Button>
           )}
+          {/* Los dos papeles del expediente, en la misma línea que el resto. Van como chips y no
+              como botones porque dicen DOS cosas a la vez —si está y cómo abrirlo— y el que falta
+              se ve apagado: un expediente incompleto tiene que notarse sin leer nada. */}
+          <ExpedienteDelPago doc={doc} puedeAdjuntar={puede} />
           {/* Reenviar es la MISMA llamada que enviar. El botón ya no desaparece al enviar: cuando
               el correo rebota o el proveedor dice que no le llegó, hay que poder reintentar desde
               acá en vez de reemplazar el PDF para que reaparezca el botón. */}
+          {/* UN control para las dos vías. Correo y WhatsApp son la misma decisión por canales
+              distintos, y como botones sueltos competían por el ancho con los otros tres. El
+              primario es el correo porque deja rastro solo en la bitácora; por WhatsApp el envío
+              lo termina una persona a mano y eso no se puede registrar como enviado. */}
           {doc.tiene_comprobante && puede && (
-            <Button
-              size="sm"
-              variant={yaEnviado ? "secondary" : "primary"}
-              onClick={() => (yaEnviado ? setConfirmando(true) : enviarAlProveedor())}
-              loading={enviar.isPending}
-            >
-              {yaEnviado ? "Reenviar al proveedor" : "Enviar al proveedor"}
-            </Button>
+            <EnviarComprobante
+              doc={doc}
+              pendiente={enviar.isPending}
+              onCorreo={() => (yaEnviado ? setConfirmando(true) : enviarAlProveedor())}
+              onWhatsApp={() => setPorWhatsApp(true)}
+            />
           )}
         </div>
         {!puede && (
@@ -833,6 +845,15 @@ function ComprobanteCard({ doc }: { doc: Documento }) {
           <HistorialEnvios documentoId={doc.id} />
         </div>
       </CardContent>
+
+      {porWhatsApp && (
+        <WhatsAppComprobante
+          documentoId={doc.id}
+          proveedor={doc.proveedor}
+          telefonoFicha={doc.proveedor_telefono}
+          onCerrar={() => setPorWhatsApp(false)}
+        />
+      )}
 
       {confirmando && (
         <ConfirmDialog

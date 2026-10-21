@@ -87,5 +87,5 @@ func (h *Handler) ArchivoPagoLote(c *gin.Context) {
 		})
 		return
 	}
-	escribirMacroTxt(c, rows)
+	escribirMacroTxt(c, rows, 0)
 }

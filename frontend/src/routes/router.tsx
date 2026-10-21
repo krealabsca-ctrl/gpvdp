@@ -71,6 +71,12 @@ import { TrasladosPage } from "@/features/inventario/pages/TrasladosPage";
 import { ReposicionPage } from "@/features/inventario/pages/ReposicionPage";
 import { RotacionPage } from "@/features/inventario/pages/RotacionPage";
 import { CatalogoInvPage } from "@/features/inventario/pages/CatalogoInvPage";
+import { CosteoPage } from "@/features/precios/pages/CosteoPage";
+import { InsumosPage } from "@/features/precios/pages/InsumosPage";
+import { ImportarPreciosPage } from "@/features/precios/pages/ImportarPage";
+import { RepartoPage } from "@/features/precios/pages/RepartoPage";
+import { ComisionesPage } from "@/features/precios/pages/ComisionesPage";
+import { SimuladorPage } from "@/features/precios/pages/SimuladorPage";
 import { ConteoPage } from "@/features/inventario/pages/ConteoPage";
 import { ConsignacionPage } from "@/features/inventario/pages/ConsignacionPage";
 // Vista consolidada del grupo: la única que cruza empresas, y solo lee.
@@ -190,6 +196,13 @@ export const router = createBrowserRouter([
           { path: "inventario/reposicion", element: <ReposicionPage /> },
           { path: "inventario/rotacion", element: <RotacionPage /> },
           { path: "inventario/catalogo", element: <CatalogoInvPage /> },
+          // Calculadora de precios: costeo anclado al costo real de CxP.
+          { path: "precios", element: <CosteoPage /> },
+          { path: "precios/insumos", element: <InsumosPage /> },
+          { path: "precios/importar", element: <ImportarPreciosPage /> },
+          { path: "precios/reparto", element: <RepartoPage /> },
+          { path: "precios/comisiones", element: <ComisionesPage /> },
+          { path: "precios/simulador", element: <SimuladorPage /> },
           // Grupo: vista consolidada (gated por grupo.ver desde el registro de navegación).
           { path: "grupo", element: <ConsolidadoPage /> },
         ],

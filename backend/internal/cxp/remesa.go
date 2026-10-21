@@ -57,14 +57,21 @@ type Remesa struct {
 	Facturas int `json:"facturas"`
 }
 
-// ReferenciaRemesa arma la mitad legible de la descripción que viaja al banco: «REM 0043-07».
+// ReferenciaRemesa arma la mitad legible de la descripción que viaja al banco: «REM 004307».
 //
 // Lleva el número del LOTE y el de la remesa dentro de él, no el id: es lo que una persona puede
 // leer en el estado de cuenta y buscar en el sistema sin tenerlo delante. El código interno
 // («CXPR-…») viaja aparte, al final, por la misma razón que en el pago por factura: si el banco
 // truncara, se pierde el automatismo pero no el sentido del pago.
+//
+// SIN GUION ENTRE LOTE Y REMESA (19-oct-2026). Se emitía «REM 0043-07» y el banco lo devolvía como
+// «REM 004307»: el guion no sobrevive al canal (ver ParaElBanco, con las dos mediciones). Mientras
+// se emitió igual, el sistema mostraba una cadena y el estado de cuenta otra, así que copiar la
+// referencia del banco y pegarla en el buscador no encontraba nada.
+//
+// Los anchos fijos —4 y 2— son los que dejan leer «004307» como lote 43, remesa 7 sin separador.
 func ReferenciaRemesa(numeroLote int64, numeroRemesa int) string {
-	return fmt.Sprintf("REM %04d-%02d", numeroLote, numeroRemesa)
+	return fmt.Sprintf("REM %04d%02d", numeroLote, numeroRemesa)
 }
 
 // referenciaRemesaSQL es la MISMA referencia, armada en SQL para los listados que la muestran sin
@@ -82,7 +89,7 @@ func ReferenciaRemesa(numeroLote int64, numeroRemesa int) string {
 // calzado— sin que nada fallara. El greatest es lo que evita la otra cara de lpad, que TRUNCA por
 // la izquierda cuando el texto ya es más largo que el ancho pedido.
 const referenciaRemesaSQL = `('REM ' ||
-	lpad(lrem.numero::text, greatest(4, length(lrem.numero::text)), '0') || '-' ||
+	lpad(lrem.numero::text, greatest(4, length(lrem.numero::text)), '0') ||
 	lpad(rcxp.numero::text, greatest(2, length(rcxp.numero::text)), '0'))`
 
 // LineaDeAviso es una factura dentro del aviso de pago que se le manda al proveedor.

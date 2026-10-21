@@ -20,23 +20,33 @@ import (
 // Las dos escrituras van en UNA transacción. Si el adjunto se reemplazara y la marca quedara, el
 // defecto vuelve; y si se borrara la marca sin llegar a guardar el archivo, la factura perdería su
 // envío por nada.
-func (r *pgRepository) GuardarComprobante(ctx context.Context, empresaID, docID, filename, mime string, contenido []byte, usuarioID string) error {
+// `tipo` distingue los dos documentos del expediente (mig 0103): COMPROBANTE es el recibo del
+// banco y FACTURA el documento del proveedor. La unicidad es por (documento, tipo), así que
+// adjuntar uno NO pisa al otro.
+func (r *pgRepository) GuardarComprobante(ctx context.Context, empresaID, docID, tipo, filename, mime string, contenido []byte, usuarioID string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("cxp: guardar comprobante: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// LA FACTURA SE PUEDE ADJUNTAR EN CUALQUIER ESTADO; el comprobante solo si ya se pagó.
+	//
+	// No es una excepción: son documentos de momentos distintos. La factura llega al principio y
+	// es lo que se revisa para decidir el pago —exigir que ya esté pagada para poder verla deja
+	// sin respaldo justo el tramo donde se aprueba—. El recibo del banco, en cambio, no existe
+	// antes de que el dinero salga, y aceptarlo antes sería aceptar un papel que no puede existir.
 	const qArchivo = `
-		INSERT INTO comprobante_pago (empresa_id, documento_id, filename, mime, contenido, subido_por)
-		SELECT $1::uuid, $2::uuid, $3, $4, $5, $6::uuid
+		INSERT INTO comprobante_pago (empresa_id, documento_id, tipo, filename, mime, contenido, subido_por)
+		SELECT $1::uuid, $2::uuid, $7, $3, $4, $5, $6::uuid
 		WHERE EXISTS (
 			SELECT 1 FROM documento_cxp
-			WHERE id = $2::uuid AND empresa_id = $1::uuid AND estado IN ('PAGADO', 'CONCILIADO'))
-		ON CONFLICT (documento_id) DO UPDATE
+			WHERE id = $2::uuid AND empresa_id = $1::uuid
+			  AND ($7 = 'FACTURA' OR estado IN ('PAGADO', 'CONCILIADO')))
+		ON CONFLICT (documento_id, tipo) DO UPDATE
 			SET filename = EXCLUDED.filename, mime = EXCLUDED.mime, contenido = EXCLUDED.contenido,
 			    subido_por = EXCLUDED.subido_por, subido_en = now()`
-	tag, err := tx.Exec(ctx, qArchivo, empresaID, docID, filename, mime, contenido, usuarioID)
+	tag, err := tx.Exec(ctx, qArchivo, empresaID, docID, filename, mime, contenido, usuarioID, tipo)
 	if err != nil {
 		return fmt.Errorf("cxp: guardar comprobante: %w", err)
 	}
@@ -44,10 +54,15 @@ func (r *pgRepository) GuardarComprobante(ctx context.Context, empresaID, docID,
 		return ErrDocNoPagado
 	}
 
-	const qMarca = `UPDATE documento_cxp SET comprobante_enviado_en = NULL, actualizado_en = now()
-	                WHERE empresa_id = $1::uuid AND id = $2::uuid AND comprobante_enviado_en IS NOT NULL`
-	if _, err := tx.Exec(ctx, qMarca, empresaID, docID); err != nil {
-		return fmt.Errorf("cxp: limpiar la marca de enviado: %w", err)
+	// La marca de enviado solo la borra el COMPROBANTE. Significa «el proveedor ya tiene el recibo
+	// que está adjunto ahora»; adjuntar la factura no la vuelve mentira, y borrarla ahí marcaría
+	// como no enviado un comprobante que sí salió.
+	if tipo != AdjuntoFactura {
+		const qMarca = `UPDATE documento_cxp SET comprobante_enviado_en = NULL, actualizado_en = now()
+		                WHERE empresa_id = $1::uuid AND id = $2::uuid AND comprobante_enviado_en IS NOT NULL`
+		if _, err := tx.Exec(ctx, qMarca, empresaID, docID); err != nil {
+			return fmt.Errorf("cxp: limpiar la marca de enviado: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("cxp: guardar comprobante: %w", err)
@@ -55,12 +70,12 @@ func (r *pgRepository) GuardarComprobante(ctx context.Context, empresaID, docID,
 	return nil
 }
 
-// ObtenerComprobante devuelve el archivo adjunto de una factura (para descargar).
-func (r *pgRepository) ObtenerComprobante(ctx context.Context, empresaID, docID string) (Comprobante, error) {
+// ObtenerComprobante devuelve uno de los dos archivos adjuntos de una factura (para descargar).
+func (r *pgRepository) ObtenerComprobante(ctx context.Context, empresaID, docID, tipo string) (Comprobante, error) {
 	const q = `SELECT filename, mime, contenido FROM comprobante_pago
-	           WHERE empresa_id = $1::uuid AND documento_id = $2::uuid`
+	           WHERE empresa_id = $1::uuid AND documento_id = $2::uuid AND tipo = $3`
 	var c Comprobante
-	err := r.pool.QueryRow(ctx, q, empresaID, docID).Scan(&c.Filename, &c.Mime, &c.Contenido)
+	err := r.pool.QueryRow(ctx, q, empresaID, docID, tipo).Scan(&c.Filename, &c.Mime, &c.Contenido)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Comprobante{}, ErrComprobanteNoEncontrado
 	}
@@ -85,10 +100,28 @@ func (r *pgRepository) ObtenerComprobanteEnvio(ctx context.Context, empresaID, d
 		SELECT cp.filename, cp.mime, cp.contenido, cp.subido_en,
 		       COALESCE(p.email, ''), p.nombre, COALESCE(d.consecutivo, ''), d.total_crc::text,
 		       d.moneda, d.total::text, COALESCE(d.huella, ''), COALESCE(d.descripcion, ''),
-		       COALESCE(ap.email, ''), COALESCE(ap.nombre, '')
+		       COALESCE(ap.email, ''), COALESCE(ap.nombre, ''),
+		       COALESCE(to_char(d.fecha_emision, 'DD/MM/YYYY'), ''),
+		       COALESCE(p.telefono, ''),
+		       -- LA REFERENCIA QUE DE VERDAD VIAJA AL BANCO (19-oct-2026).
+		       --
+		       -- Si la factura se pagó dentro de una REMESA, lo que vuelve en el estado de cuenta es
+		       -- el código de la remesa, no el de la factura. El correo mandaba el de la factura, así
+		       -- que el proveedor buscaba un código que su banco nunca trae — y esa frase («la
+		       -- referencia con la que aparece en el banco es…») existe justamente para que lo
+		       -- encuentre. Medido: 9 facturas dentro de remesa, todas con huella propia distinta a
+		       -- la de su remesa.
+		       COALESCE(rcxp.huella, d.huella, ''),
+		       CASE WHEN rcxp.id IS NOT NULL THEN ` + referenciaRemesaSQL + ` ELSE '' END,
+		       -- Cuántas facturas cubre el pago: decide si el correo habla en singular o lista.
+		       CASE WHEN rcxp.id IS NOT NULL
+		            THEN (SELECT count(*) FROM documento_cxp dr WHERE dr.remesa_id = rcxp.id)
+		            ELSE 1 END
 		FROM comprobante_pago cp
 		JOIN documento_cxp d ON d.id = cp.documento_id
 		JOIN proveedor p ON p.id = d.proveedor_id
+		LEFT JOIN remesa_pago rcxp ON rcxp.id = d.remesa_id
+		LEFT JOIN lote_pago lrem ON lrem.id = rcxp.lote_id
 		LEFT JOIN LATERAL (
 			SELECT u.email, u.nombre
 			FROM documento_cxp_aprobacion a
@@ -102,14 +135,70 @@ func (r *pgRepository) ObtenerComprobanteEnvio(ctx context.Context, empresaID, d
 	err := r.pool.QueryRow(ctx, q, empresaID, docID).
 		Scan(&e.Filename, &e.Mime, &e.Contenido, &e.SubidoEn, &e.ProveedorEmail, &e.ProveedorNombre,
 			&e.Consecutivo, &e.TotalCRC, &e.Moneda, &e.Total, &e.Huella, &e.Descripcion,
-			&e.AprobadorEmail, &e.AprobadorNombre)
+			&e.AprobadorEmail, &e.AprobadorNombre,
+			&e.FechaEmision, &e.ProveedorTelefono,
+			&e.HuellaQueViaja, &e.ReferenciaRemesa, &e.FacturasDelPago)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ComprobanteEnvio{}, ErrComprobanteNoEncontrado
 	}
 	if err != nil {
 		return ComprobanteEnvio{}, fmt.Errorf("cxp: comprobante para envío: %w", err)
 	}
+	// Las facturas hermanas solo se piden cuando el pago cubre más de una: en el caso normal —una
+	// factura, un pago— sería una consulta de más en cada envío.
+	if e.FacturasDelPago > 1 {
+		if e.Facturas, err = r.facturasDelPago(ctx, empresaID, docID); err != nil {
+			return ComprobanteEnvio{}, err
+		}
+	}
 	return e, nil
+}
+
+// GuardarTelefonoProveedorDeDocumento deja el número en la ficha del proveedor de esa factura.
+//
+// Solo lo escribe si estaba VACÍO: el número de la ficha es el contacto oficial y un envío suelto
+// —a un celular que alguien pasó por ahí— no debería reemplazarlo sin que nadie lo decida.
+func (r *pgRepository) GuardarTelefonoProveedorDeDocumento(ctx context.Context, empresaID, docID, telefono string) error {
+	const q = `
+		UPDATE proveedor p
+		   SET telefono = $3, actualizado_en = now()
+		  FROM documento_cxp d
+		 WHERE d.id = $2::uuid AND d.empresa_id = $1::uuid
+		   AND p.id = d.proveedor_id AND p.empresa_id = $1::uuid
+		   AND COALESCE(p.telefono, '') = ''`
+	if _, err := r.pool.Exec(ctx, q, empresaID, docID, telefono); err != nil {
+		return fmt.Errorf("cxp: guardar teléfono del proveedor: %w", err)
+	}
+	return nil
+}
+
+// facturasDelPago lista TODAS las facturas que cubre el mismo pago agrupado, con lo que el
+// proveedor necesita para reconocerlas en sus propios registros.
+//
+// Sin esto, el correo de un pago de cinco facturas decía «su factura fue pagada» en singular y sin
+// decir cuál: el proveedor recibía un monto que no calzaba con ninguna de las suyas.
+func (r *pgRepository) facturasDelPago(ctx context.Context, empresaID, docID string) ([]FacturaDelPago, error) {
+	const q = `
+		SELECT COALESCE(d.consecutivo, ''), COALESCE(to_char(d.fecha_emision, 'DD/MM/YYYY'), ''),
+		       d.total::text, d.moneda
+		FROM documento_cxp d
+		WHERE d.empresa_id = $1::uuid
+		  AND d.remesa_id = (SELECT remesa_id FROM documento_cxp WHERE id = $2::uuid)
+		ORDER BY d.fecha_emision, d.consecutivo`
+	rows, err := r.pool.Query(ctx, q, empresaID, docID)
+	if err != nil {
+		return nil, fmt.Errorf("cxp: facturas del pago: %w", err)
+	}
+	defer rows.Close()
+	out := make([]FacturaDelPago, 0, 8)
+	for rows.Next() {
+		var f FacturaDelPago
+		if err := rows.Scan(&f.Consecutivo, &f.FechaEmision, &f.Total, &f.Moneda); err != nil {
+			return nil, fmt.Errorf("cxp: scan factura del pago: %w", err)
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }
 
 // RegistrarEnvio escribe UNA fila de bitácora por intento —incluidos los que fallaron— y, solo si
@@ -208,4 +297,22 @@ func (r *pgRepository) ListarEnvios(ctx context.Context, empresaID, docID string
 		return nil, fmt.Errorf("cxp: listar envíos del comprobante: %w", err)
 	}
 	return out, nil
+}
+
+// GuardarEmailProveedorDeDocumento deja en la ficha el correo que se escribió al reenviar.
+//
+// Solo si estaba VACÍO, igual que el teléfono: un envío puntual al contacto de Contabilidad no
+// debería reemplazar el correo oficial del proveedor sin que nadie lo decida.
+func (r *pgRepository) GuardarEmailProveedorDeDocumento(ctx context.Context, empresaID, docID, email string) error {
+	const q = `
+		UPDATE proveedor p
+		   SET email = $3, actualizado_en = now()
+		  FROM documento_cxp d
+		 WHERE d.id = $2::uuid AND d.empresa_id = $1::uuid
+		   AND p.id = d.proveedor_id AND p.empresa_id = $1::uuid
+		   AND COALESCE(p.email, '') = ''`
+	if _, err := r.pool.Exec(ctx, q, empresaID, docID, email); err != nil {
+		return fmt.Errorf("cxp: guardar correo del proveedor: %w", err)
+	}
+	return nil
 }

@@ -39,7 +39,10 @@ func (h *Handler) AdjuntarComprobante(c *gin.Context) {
 	if mime == "" {
 		mime = "application/pdf"
 	}
-	if err := h.svc.AdjuntarComprobante(c.Request.Context(), empresaID, c.Param("id"), fh.Filename, mime, data, usuarioID); err != nil {
+	// `?tipo=FACTURA` sube el documento del PROVEEDOR; sin tipo, el recibo del banco (el de
+	// siempre). Son los dos papeles que hacen falta para verificar un pago.
+	if err := h.svc.AdjuntarComprobante(c.Request.Context(), empresaID, c.Param("id"),
+		c.Query("tipo"), fh.Filename, mime, data, usuarioID); err != nil {
 		h.responderError(c, err, "adjuntar-comprobante")
 		return
 	}
@@ -52,7 +55,7 @@ func (h *Handler) DescargarComprobante(c *gin.Context) {
 	if !ok {
 		return
 	}
-	comp, err := h.svc.DescargarComprobante(c.Request.Context(), empresaID, c.Param("id"))
+	comp, err := h.svc.DescargarComprobante(c.Request.Context(), empresaID, c.Param("id"), c.Query("tipo"))
 	if err != nil {
 		h.responderError(c, err, "descargar-comprobante")
 		return
@@ -71,7 +74,15 @@ func (h *Handler) EnviarComprobante(c *gin.Context) {
 	if !ok {
 		return
 	}
-	res, err := h.svc.EnviarComprobante(c.Request.Context(), empresaID, c.Param("id"), usuarioID)
+	// `destino` opcional: vacío usa el correo de la ficha, que es el camino normal. Con valor, se
+	// manda ahí y queda en la bitácora igual — es lo que permite contestar después a qué dirección
+	// salió el comprobante de este pago.
+	var req struct {
+		Destino string `json:"destino"`
+	}
+	_ = c.ShouldBindJSON(&req) // sin cuerpo es válido: el envío normal no manda nada
+
+	res, err := h.svc.EnviarComprobanteA(c.Request.Context(), empresaID, c.Param("id"), req.Destino, usuarioID)
 	if err != nil {
 		h.responderError(c, err, "enviar-comprobante")
 		return

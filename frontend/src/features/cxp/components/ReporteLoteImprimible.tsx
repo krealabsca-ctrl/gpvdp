@@ -300,7 +300,7 @@ export function abrirReporteLoteImprimible(r: ReporteLote, empresa: string): boo
 <body>
   <!-- Banda de marca a sangre, con el folio del lote como identificador del documento. El número de
        lote es el folio natural: ya es único, ya se usa al hablar («el corte 32») y ya viaja en la
-       referencia de cada transferencia («REM 0032-01»). Inventarle otro consecutivo sería darle dos
+       referencia de cada transferencia («REM 003201»). Inventarle otro consecutivo sería darle dos
        nombres a la misma cosa. -->
   <div class="banda">
     <div class="fila">

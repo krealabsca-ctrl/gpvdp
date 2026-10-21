@@ -77,8 +77,12 @@ func TestCatalogoSinDuplicados(t *testing.T) {
 	// detalle (CABYS, cantidad, precio unitario) del XML de cada factura. Va aparte de
 	// `cxp.dashboard` porque son dos preguntas distintas —cómo va el PROCESO contra en qué se va
 	// la plata— aunque hoy lo reciban los mismos roles.
-	if len(Catalogo) != 91 {
-		t.Errorf("catálogo tiene %d permisos, se esperaban 91", len(Catalogo))
+	// → 93 con la Calculadora de Precios (14-oct-2026). `precios.ver` y `precios.editar` van
+	// separados porque consultar el costeo lo necesita cualquiera que cotice, mientras que
+	// cambiarlo mueve el precio de todo lo que se vende: son dos decisiones distintas sobre quién
+	// puede qué, y juntarlas obligaría a dar la segunda para conceder la primera.
+	if len(Catalogo) != 93 {
+		t.Errorf("catálogo tiene %d permisos, se esperaban 93", len(Catalogo))
 	}
 }
 

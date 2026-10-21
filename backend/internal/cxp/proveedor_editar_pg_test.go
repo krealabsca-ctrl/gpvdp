@@ -29,7 +29,7 @@ func baseDeProveedor(t *testing.T) *pgRepository {
 	repo := baseDeLotes(t)
 	if _, err := repo.pool.Exec(context.Background(),
 		`INSERT INTO proveedor (id, empresa_id, nombre, identificacion, condicion_pago, plazo_credito_dias)
-		 VALUES ($1::uuid, $2::uuid, 'KEISY MELISSA CECILIANO MATA', '116290134', 'CONTADO', 0)`,
+		 VALUES ($1::uuid, $2::uuid, 'MARCELA FERNANDA QUIROS VARGAS', '116230456', 'CONTADO', 0)`,
 		provEditar, empresaLote); err != nil {
 		t.Fatalf("sembrar proveedor: %v", err)
 	}
@@ -42,12 +42,12 @@ func TestEditarProveedorGuardaTodosLosCampos(t *testing.T) {
 	ctx := context.Background()
 
 	p, err := repo.Actualizar(ctx, empresaLote, provEditar, ProveedorInput{
-		Nombre:             "Keisy Melissa Ceciliano Mata",
+		Nombre:             "Marcela Fernanda Quiros Vargas",
 		TipoIdentificacion: "FISICA",
-		Identificacion:     "116290134",
-		Email:              "cecilianokeisy@gmail.com",
-		Telefono:           "8529-9792",
-		IBAN:               "CR16015202001239892030",
+		Identificacion:     "116230456",
+		Email:              "mquiros@ejemplo.com",
+		Telefono:           "8500-1234",
+		IBAN:               "CR16015202001234567890",
 		RetencionRentaPct:  decimal.Zero,
 		CondicionPago:      "CREDITO",
 		PlazoCreditoDias:   8,
@@ -57,7 +57,7 @@ func TestEditarProveedorGuardaTodosLosCampos(t *testing.T) {
 		t.Fatalf("actualizar: %v", err)
 	}
 
-	if p.Nombre != "Keisy Melissa Ceciliano Mata" {
+	if p.Nombre != "Marcela Fernanda Quiros Vargas" {
 		t.Errorf("nombre = %q", p.Nombre)
 	}
 	if p.CondicionPago != "CREDITO" {
@@ -66,10 +66,10 @@ func TestEditarProveedorGuardaTodosLosCampos(t *testing.T) {
 	if p.PlazoCreditoDias != 8 {
 		t.Errorf("plazo = %d, quería 8", p.PlazoCreditoDias)
 	}
-	if p.IBAN != "CR16015202001239892030" {
+	if p.IBAN != "CR16015202001234567890" {
 		t.Errorf("IBAN = %q", p.IBAN)
 	}
-	if p.Email != "cecilianokeisy@gmail.com" {
+	if p.Email != "mquiros@ejemplo.com" {
 		t.Errorf("email = %q", p.Email)
 	}
 }
@@ -93,7 +93,7 @@ func TestEditarProveedorNoPierdeElConvenioManda(t *testing.T) {
 
 	// …y después se edita otra cosa sin tocar ese campo.
 	soloNombre := base
-	soloNombre.Nombre = "Keisy Melissa Ceciliano Mata"
+	soloNombre.Nombre = "Marcela Fernanda Quiros Vargas"
 	p, err := repo.Actualizar(ctx, empresaLote, provEditar, soloNombre)
 	if err != nil {
 		t.Fatalf("segunda edición: %v", err)

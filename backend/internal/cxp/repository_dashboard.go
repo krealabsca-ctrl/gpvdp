@@ -175,6 +175,9 @@ func (r *pgRepository) DashboardCxP(ctx context.Context, empresaID, periodo stri
 	if err := r.topProveedoresCartera(ctx, empresaID, deptIDs, &d.Cartera); err != nil {
 		return DashboardCxP{}, err
 	}
+	if err := r.porConfirmarCxP(ctx, empresaID, deptIDs, &d.Cartera); err != nil {
+		return DashboardCxP{}, err
+	}
 	if err := r.movimientoCxP(ctx, empresaID, periodo, deptIDs, &d.Movimiento); err != nil {
 		return DashboardCxP{}, err
 	}
@@ -187,6 +190,40 @@ func (r *pgRepository) DashboardCxP(ctx context.Context, empresaID, periodo stri
 		return DashboardCxP{}, fmt.Errorf("cxp: proveedores activos: %w", err)
 	}
 	return d, nil
+}
+
+// porConfirmarCxP mide la partida conciliatoria: lo que el sistema da por PAGADO y que ningún
+// movimiento bancario confirmó.
+//
+// Va en consulta aparte y no en `carteraCxP` porque no sale del CTE `abiertos`: PAGADO ya no está
+// en la cartera viva. Es justamente lo que lo hacía invisible —salió de la cartera y se contó como
+// cerrado junto con CONCILIADO— cuando el pago puede no haber ocurrido nunca.
+//
+// La antigüedad se mide desde el EVENTO de pago, como todo el resto del tablero: `actualizado_en`
+// se reescribe con cualquier edición posterior y envejecería mal. Una factura PAGADA sin evento
+// (carga histórica) suma al monto pero no aporta antigüedad: no se le puede inventar una fecha.
+func (r *pgRepository) porConfirmarCxP(ctx context.Context, empresaID string, deptIDs []string, c *CarteraCxP) error {
+	args := []any{empresaID}
+	deptCond, args := condDepto(deptIDs, args)
+	q := `
+		SELECT COUNT(*), COALESCE(SUM(neto), 0)::text, COALESCE(MAX(dias), 0)
+		FROM (
+			SELECT ` + netoCRCSQL + ` AS neto,
+			       GREATEST(` + hoyCR + ` - (ev.ts AT TIME ZONE 'America/Costa_Rica')::date, 0) AS dias
+			FROM documento_cxp d
+			LEFT JOIN LATERAL (
+				SELECT MIN(a.ts) AS ts FROM auditoria_evento a
+				WHERE a.empresa_id = d.empresa_id
+				  AND a.entidad = 'documento_cxp' AND a.entidad_id = d.id
+				  AND a.accion IN ` + accionesDePago + `
+			) ev ON true
+			WHERE d.empresa_id = $1::uuid AND d.estado = 'PAGADO'` + deptCond + `
+		) t`
+	if err := r.pool.QueryRow(ctx, q, args...).
+		Scan(&c.PorConfirmar.Cantidad, &c.PorConfirmar.Monto, &c.DiasSinConfirmar); err != nil {
+		return fmt.Errorf("cxp: pagos por confirmar: %w", err)
+	}
+	return nil
 }
 
 // carteraCxP saca en UNA foto todos los cortes de la cartera abierta (evita que dos

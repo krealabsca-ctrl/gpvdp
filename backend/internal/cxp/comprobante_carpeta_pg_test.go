@@ -320,13 +320,15 @@ func TestPagosSinComprobante(t *testing.T) {
 	if rem.Facturas != 3 {
 		t.Errorf("la remesa dice %d facturas, quería 3", rem.Facturas)
 	}
-	if rem.Referencia != "REM 0043-07" {
-		t.Errorf("referencia %q, quería «REM 0043-07» — es lo que se busca en el estado de cuenta", rem.Referencia)
+	if rem.Referencia != "REM 004307" {
+		t.Errorf("referencia %q, quería «REM 004307» — es lo que el banco devuelve, sin el guion", rem.Referencia)
 	}
 	if rem.MontoCRC != "300000.00" {
 		t.Errorf("monto %q, quería «300000.00» (la suma de las tres)", rem.MontoCRC)
 	}
-	if rem.NombreSugerido != "REM 0043-07 CXPR-AAAA1111BBBB.pdf" {
+	// El NOMBRE DE ARCHIVO conserva el guion del código: no viaja al banco, y acá sí ayuda a
+	// ver dónde empieza el código. Lo que cambió es la REFERENCIA, que sí viaja.
+	if rem.NombreSugerido != "REM 004307 CXPR-AAAA1111BBBB.pdf" {
 		t.Errorf("nombre sugerido %q", rem.NombreSugerido)
 	}
 

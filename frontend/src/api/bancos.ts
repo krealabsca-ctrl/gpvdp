@@ -578,7 +578,7 @@ export interface PrevisualizacionPagosExternos {
 export interface PagoCxPDeMovimiento {
   documento_id: string;
   /**
-   * El número de la factura, o la referencia del GRUPO («REM 0029-01») cuando el pago cubre varias
+   * El número de la factura, o la referencia del GRUPO («REM 002901») cuando el pago cubre varias
    * de un proveedor: ahí no hay una sola factura que nombrar, y mostrar la primera haría creer que
    * ese débito pagó solo esa.
    */
@@ -1286,6 +1286,15 @@ export interface ResumenSeleccion {
   total_credito: string;
   neto: string;
   conceptos: CuadreConceptoNodo[];
+  /**
+   * Cuántos de esos `movs` están fuera de los libros (la reversa de una carga duplicada, o una
+   * exclusión a mano) y por eso NO entran en los totales.
+   *
+   * `movs` los sigue contando porque la lista los sigue mostrando. Sin este número el encabezado
+   * dice «3 movimientos · ₡75 000» sobre una lista de tres filas de ₡75 000 cada una, y las dos
+   * cifras se contradicen en silencio: parece que el sistema perdió plata.
+   */
+  excluidos: number;
 }
 
 export interface CuadreArbol {
@@ -1294,6 +1303,34 @@ export interface CuadreArbol {
   total_credito: string;
   movs: number;
   conceptos: CuadreConceptoNodo[];
+}
+
+/**
+ * Hasta qué día se midió el período, y cuánto de eso tiene respaldo cargado.
+ *
+ * El corte es el día de HOY cuando el mes está en curso: el tablero muestra la realidad del
+ * calendario para que un estado de cuenta atrasado se vea y se termine de cargar. Por eso hace
+ * falta `dias_sin_cargar`: esos días entran a la comparación en cero, y sin decirlo un atraso de
+ * carga se lee igual que una caída de ventas.
+ */
+export interface CorteDelPeriodo {
+  /** Hasta qué día se sumó. 0 = el mes entero (mes ya cerrado). */
+  dia: number;
+  /** true = el mes no terminó, y entonces las comparaciones van a paridad de día. */
+  en_curso: boolean;
+  /** Día del último movimiento que hay cargado en el período. */
+  ultimo_dia_cargado: number;
+  /** `dia − ultimo_dia_cargado` cuando el banco va atrasado; 0 si está al día. */
+  dias_sin_cargar: number;
+}
+
+/** Promedio de los meses ya transcurridos del año, cada uno al mismo tramo de día. */
+export interface PromedioDelAnio {
+  /** Sobre cuántos meses se promedió. 0 = enero, o ningún mes previo con datos. */
+  meses: number;
+  ingresos: string;
+  gastos: string;
+  ebitda: string;
 }
 
 export interface DashboardComparativo {
@@ -1317,6 +1354,13 @@ export interface DashboardData {
   /** Conceptos EN USO que todavía no declararon su naturaleza: la acción pendiente. */
   conceptos_sin_declarar: number;
   comparativo: DashboardComparativo;
+  /**
+   * Hasta qué día se midió el período. Cuando el mes está en curso, `comparativo` y
+   * `promedio_anio` vienen cortados al MISMO día, así que las tres cifras miden tramos iguales.
+   */
+  corte: CorteDelPeriodo;
+  /** Promedio de los meses previos del año, al mismo tramo. `meses: 0` = no hay con qué comparar. */
+  promedio_anio: PromedioDelAnio;
 }
 
 /** Un mes de la tendencia (Fase B). Ingresos/gastos excluyen traslados emparejados. */

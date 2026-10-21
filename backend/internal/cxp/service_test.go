@@ -31,6 +31,17 @@ type fakeRepo struct {
 	capCodigoNivel   string
 	capCodigoID      string
 
+	// Medio de pago alterno (mig 0102): lo que el repositorio recibió, y lo que contesta.
+	medioGuardado     *MedioPagoInput
+	medioGuardadoPor  string
+	medioEstabaEnLote bool
+	multiRechaza      bool
+	valesQueExisten   map[string]bool
+	telefonoGuardado  string
+	emailGuardado     string
+	tipoGuardado      string
+	tipoPedido        string
+
 	creado      *ProveedorInput
 	doc         Documento            // lo que devuelve DocumentoPorID por defecto (para probar guards)
 	docs        map[string]Documento // por id (anticipos: factura y anticipo distintos)
@@ -327,6 +338,12 @@ func (f *fakeRepo) UsuariosEmpresa(context.Context, string) ([]UsuarioRef, error
 }
 func (f *fakeRepo) CambiarEstadoMulti(_ context.Context, _ string, _ string, _ []string, a string) (int64, error) {
 	f.capMultiA = a
+	// `multiRechaza` simula la transición que no aplica (0 filas), que es como la base rechaza un
+	// documento cuyo estado no está en la lista. Por defecto false: las pruebas que ya existían
+	// siguen viendo el 1 de siempre.
+	if f.multiRechaza {
+		return 0, nil
+	}
 	return 1, nil
 }
 func (f *fakeRepo) AsignarTipo(context.Context, string, string, string) (int64, error) {
@@ -347,6 +364,31 @@ func (f *fakeRepo) AsignarPrioridad(context.Context, string, string, string) (in
 	return 0, nil
 }
 func (f *fakeRepo) GuardarNotaRevision(context.Context, string, string, string) error { return nil }
+
+// Guarda el teléfono que se escribió al momento del envío por WhatsApp.
+func (f *fakeRepo) GuardarTelefonoProveedorDeDocumento(_ context.Context, _, _, telefono string) error {
+	f.telefonoGuardado = telefono
+	return nil
+}
+
+// Guarda el correo que se escribió en el «Para» al reenviar.
+func (f *fakeRepo) GuardarEmailProveedorDeDocumento(_ context.Context, _, _, email string) error {
+	f.emailGuardado = email
+	return nil
+}
+
+// El medio de pago alterno (mig 0102). El fake GUARDA lo que recibe en vez de tragárselo: lo que
+// hay que poder comprobar es que el medio y el motivo llegan al repositorio, y un stub que
+// devuelve nil pasaría igual con el servicio sin escribir nada.
+func (f *fakeRepo) GuardarMedioPago(_ context.Context, _, _ string, in MedioPagoInput, usuarioID string) (bool, error) {
+	f.medioGuardado = &in
+	f.medioGuardadoPor = usuarioID
+	return f.medioEstabaEnLote, nil
+}
+
+func (f *fakeRepo) ValeDeCajaChicaExiste(_ context.Context, _, valeID string) (bool, error) {
+	return f.valesQueExisten[valeID], nil
+}
 func (f *fakeRepo) RegistrarGastoProveedor(context.Context, string, string, string, string, string) error {
 	return nil
 }
@@ -453,10 +495,16 @@ func (f *fakeRepo) DocumentosParaPagoPorLote(context.Context, string, string) ([
 func (f *fakeRepo) Reintentar(context.Context, string, string) (int64, error) {
 	return 0, nil
 }
-func (f *fakeRepo) GuardarComprobante(context.Context, string, string, string, string, []byte, string) error {
+
+// Guarda el TIPO recibido: es lo que hay que poder comprobar, porque adjuntar la factura y
+// adjuntar el comprobante son la misma llamada con un parámetro distinto, y confundirlos haría que
+// un documento pise al otro.
+func (f *fakeRepo) GuardarComprobante(_ context.Context, _, _, tipo, _, _ string, _ []byte, _ string) error {
+	f.tipoGuardado = tipo
 	return nil
 }
-func (f *fakeRepo) ObtenerComprobante(context.Context, string, string) (Comprobante, error) {
+func (f *fakeRepo) ObtenerComprobante(_ context.Context, _, _, tipo string) (Comprobante, error) {
+	f.tipoPedido = tipo
 	return Comprobante{}, nil
 }
 

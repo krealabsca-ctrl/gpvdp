@@ -26,7 +26,7 @@ func TestConciliarUnPagoAgrupado(t *testing.T) {
 			remesaPorHuella: laRemesa, cerradas: 3,
 			conceptoComun: "con-9", clasifComun: "clas-9",
 		}
-		res, err := servicioHuella(repo).ConciliarHuella(ctx, "e1", delBanco, "400000.00", "u1")
+		res, err := servicioHuella(repo).ConciliarHuella(ctx, "e1", delBanco, "400000.00", MonedaCRC, "u1")
 		if err != nil {
 			t.Fatalf("err = %v", err)
 		}
@@ -39,10 +39,10 @@ func TestConciliarUnPagoAgrupado(t *testing.T) {
 		if res.RemesaID != "rem-1" {
 			t.Errorf("remesa = %q, quiere rem-1", res.RemesaID)
 		}
-		// La referencia lleva el número REAL del lote. Con 0 saldría «REM 0000-07», que no calza
+		// La referencia lleva el número REAL del lote. Con 0 saldría «REM 000007», que no calza
 		// con nada de lo que trae el estado de cuenta y vuelve el reporte imposible de cruzar.
-		if res.Consecutivo != "REM 0029-07" {
-			t.Errorf("referencia = %q, quiere REM 0029-07", res.Consecutivo)
+		if res.Consecutivo != "REM 002907" {
+			t.Errorf("referencia = %q, quiere REM 002907", res.Consecutivo)
 		}
 		// DocumentoID vacío a propósito: enlazar el débito a una de las tres diría que esa factura
 		// costó ₡400.000.
@@ -60,7 +60,7 @@ func TestConciliarUnPagoAgrupado(t *testing.T) {
 
 	t.Run("monto distinto NO cierra nada", func(t *testing.T) {
 		repo := &fakeRepo{remesaPorHuella: laRemesa, cerradas: 3}
-		res, err := servicioHuella(repo).ConciliarHuella(ctx, "e1", delBanco, "399999.00", "u1")
+		res, err := servicioHuella(repo).ConciliarHuella(ctx, "e1", delBanco, "399999.00", MonedaCRC, "u1")
 		if err != nil {
 			t.Fatalf("err = %v", err)
 		}
@@ -79,7 +79,7 @@ func TestConciliarUnPagoAgrupado(t *testing.T) {
 		// El repositorio devuelve el gasto común vacío cuando las facturas no comparten uno. El
 		// movimiento queda sin clasificar, que es lo honesto: no hay UN gasto que lo describa.
 		repo := &fakeRepo{remesaPorHuella: laRemesa, cerradas: 3}
-		res, err := servicioHuella(repo).ConciliarHuella(ctx, "e1", delBanco, "400000.00", "u1")
+		res, err := servicioHuella(repo).ConciliarHuella(ctx, "e1", delBanco, "400000.00", MonedaCRC, "u1")
 		if err != nil {
 			t.Fatalf("err = %v", err)
 		}
@@ -94,7 +94,7 @@ func TestConciliarUnPagoAgrupado(t *testing.T) {
 	t.Run("si no se movió ninguna factura no se declara conciliado", func(t *testing.T) {
 		// Pasa cuando las facturas ya estaban cerradas o se anularon entre el corte y hoy.
 		repo := &fakeRepo{remesaPorHuella: laRemesa, cerradas: 0}
-		res, err := servicioHuella(repo).ConciliarHuella(ctx, "e1", delBanco, "400000.00", "u1")
+		res, err := servicioHuella(repo).ConciliarHuella(ctx, "e1", delBanco, "400000.00", MonedaCRC, "u1")
 		if err != nil {
 			t.Fatalf("err = %v", err)
 		}
@@ -105,7 +105,7 @@ func TestConciliarUnPagoAgrupado(t *testing.T) {
 
 	t.Run("un código de remesa que no existe no es un error", func(t *testing.T) {
 		repo := &fakeRepo{errRemesa: ErrRemesaNoEncontrada}
-		res, err := servicioHuella(repo).ConciliarHuella(ctx, "e1", delBanco, "400000.00", "u1")
+		res, err := servicioHuella(repo).ConciliarHuella(ctx, "e1", delBanco, "400000.00", MonedaCRC, "u1")
 		if err != nil {
 			t.Fatalf("err = %v", err)
 		}
@@ -127,7 +127,7 @@ func TestElPagoDeUnaFacturaSigueCerrandoUnaSola(t *testing.T) {
 		netoAPagar: "118650.00", filasCambio: 1,
 	}
 	res, err := servicioHuella(repo).ConciliarHuella(ctx, "e1",
-		"FC 025786 CXP-A1B2C3D4E5F6", "118650.00", "u1")
+		"FC 025786 CXP-A1B2C3D4E5F6", "118650.00", MonedaCRC, "u1")
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}

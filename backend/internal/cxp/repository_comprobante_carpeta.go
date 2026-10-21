@@ -98,13 +98,17 @@ func (r *pgRepository) GuardarComprobantesCarpeta(ctx context.Context, empresaID
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// La carpeta de una corrida trae RECIBOS DEL BANCO, así que todo lo que entra por acá es
+	// COMPROBANTE. El tipo va explícito —aunque sea el default de la columna— porque el
+	// `ON CONFLICT` tiene que nombrar el índice entero (documento_id, tipo) desde la mig 0103, y
+	// dejarlo implícito hacía que Postgres no encontrara restricción que calzara.
 	const qArchivo = `
-		INSERT INTO comprobante_pago (empresa_id, documento_id, filename, mime, contenido, subido_por)
-		SELECT $1::uuid, $2::uuid, $3, $4, $5, $6::uuid
+		INSERT INTO comprobante_pago (empresa_id, documento_id, tipo, filename, mime, contenido, subido_por)
+		SELECT $1::uuid, $2::uuid, 'COMPROBANTE', $3, $4, $5, $6::uuid
 		WHERE EXISTS (
 			SELECT 1 FROM documento_cxp
 			WHERE id = $2::uuid AND empresa_id = $1::uuid AND estado = ANY($7::text[]))
-		ON CONFLICT (documento_id) DO UPDATE
+		ON CONFLICT (documento_id, tipo) DO UPDATE
 			SET filename = EXCLUDED.filename, mime = EXCLUDED.mime, contenido = EXCLUDED.contenido,
 			    subido_por = EXCLUDED.subido_por, subido_en = now()`
 	const qMarca = `UPDATE documento_cxp SET comprobante_enviado_en = NULL, actualizado_en = now()

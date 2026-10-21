@@ -6,25 +6,8 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { EmpresaSwitcher } from "@/components/shell/EmpresaSwitcher";
 import { BrandLogo } from "@/components/shell/BrandLogo";
 import { usePeriodoActivo } from "@/app/PeriodoProvider";
+import { migasDeRuta } from "@/app/nav";
 import { etiquetaPeriodo, periodosRecientes } from "@/lib/format";
-
-/** Migaja de pan por ruta (módulo / pantalla). */
-function breadcrumb(path: string): { group: string; page: string } {
-  if (path === "/") return { group: "Bancos", page: "Dashboard" };
-  if (path.startsWith("/importador")) return { group: "Bancos", page: "Importador" };
-  if (path.startsWith("/clasificar")) return { group: "Bancos", page: "Clasificar" };
-  if (path.startsWith("/catalogo")) return { group: "Bancos", page: "Catálogo" };
-  if (path.startsWith("/tipo-cambio")) return { group: "Bancos", page: "Tipo de cambio" };
-  if (path.startsWith("/exportar")) return { group: "Bancos", page: "Exportar" };
-  if (path.startsWith("/proyecciones")) return { group: "Bancos", page: "Proyecciones" };
-  if (path.startsWith("/saldos-diarios")) return { group: "Bancos", page: "Saldos diarios" };
-  if (path.startsWith("/conciliacion")) return { group: "Bancos", page: "Actas de conciliación" };
-  if (path.startsWith("/cxp/proveedores")) return { group: "Cuentas por pagar", page: "Proveedores" };
-  if (path.startsWith("/cxp/documentos/nuevo")) return { group: "Cuentas por pagar", page: "Nuevo documento" };
-  if (path.startsWith("/cxp/documentos")) return { group: "Cuentas por pagar", page: "Documentos" };
-  if (path.startsWith("/cxp/pagos")) return { group: "Cuentas por pagar", page: "Pagos y conciliación" };
-  return { group: "", page: "" };
-}
 
 /** Barra superior del shell autenticado: marca, breadcrumb, buscador, contexto (período + empresa) y perfil. */
 export function TopBar() {
@@ -32,7 +15,9 @@ export function TopBar() {
   const toast = useToast();
   const { periodo, setPeriodo } = usePeriodoActivo();
   const { pathname } = useLocation();
-  const crumb = breadcrumb(pathname);
+  // Migas derivadas del REGISTRO de navegación: una lista a mano acá dejaba sin migas a
+  // Inventario, RRHH, CxC, Grupo y Configuración, y se volvió crítico al poder colapsar la sidebar.
+  const crumb = migasDeRuta(pathname);
 
   const periodoOptions = periodosRecientes().map((p) => ({ value: p, label: etiquetaPeriodo(p) }));
 
@@ -40,11 +25,11 @@ export function TopBar() {
     <header className="flex h-16 items-center gap-3 border-b border-border bg-surface-raised px-4 md:px-6">
       <div className="flex min-w-0 items-center gap-4">
         <BrandLogo size={28} />
-        {crumb.page && (
+        {crumb.pagina && (
           <div className="hidden items-center gap-1.5 border-l border-border pl-4 text-sm lg:flex">
-            <span className="text-content-muted">{crumb.group}</span>
+            <span className="text-content-muted">{crumb.modulo}</span>
             <ChevronRight className="h-4 w-4 text-content-muted" aria-hidden />
-            <span className="font-medium text-content">{crumb.page}</span>
+            <span className="font-medium text-content">{crumb.pagina}</span>
           </div>
         )}
       </div>

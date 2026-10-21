@@ -1111,28 +1111,53 @@ const TONO_VEREDICTO: Record<string, BadgeTone> = {
  * de verdad se movió, y los colones aparecen debajo solo si hay tipo de cambio. Si no lo hay, lo
  * dice.
  */
+/**
+ * El importe de una fila.
+ *
+ * UN MOVIMIENTO FUERA DE LOS LIBROS SE MUESTRA TACHADO. La lista lo sigue trayendo a propósito
+ * —revertir una carga no lo borra, y lo que desaparece de la pantalla no se revisa más— pero sin
+ * la marca se lee como plata viva: tres filas de ₡75 000 bajo un encabezado que dice ₡0 parecen un
+ * error del sistema, no una reversa. La única diferencia visible era que a la fila excluida no le
+ * salía el botón «⋯», que nadie puede interpretar.
+ *
+ * Es la misma marca que usa «Mi partida» desde que se detectó ahí el mismo problema: dos pantallas
+ * que muestran lo mismo tienen que decirlo igual.
+ */
 function Importe({ m }: { m: MovimientoRow }) {
   const original = toNumber(m.debito) > 0 ? m.debito : m.credito;
-  if (m.moneda === "CRC") {
-    return <>{formatMonto(m.monto_crc)}</>;
-  }
-  const crc = toNumber(m.monto_crc);
+  const cuerpo =
+    m.moneda === "CRC" ? (
+      <>{formatMonto(m.monto_crc)}</>
+    ) : (
+      <>
+        <span className="whitespace-nowrap">$ {formatMonto(original)}</span>
+        {toNumber(m.monto_crc) > 0 ? (
+          <span className="block whitespace-nowrap text-[11px] font-normal text-content-muted">
+            ₡ {formatMonto(m.monto_crc)}
+          </span>
+        ) : (
+          <span
+            className="block whitespace-nowrap text-[11px] font-normal text-pendiente"
+            title="La cuenta es en dólares y el mes no tiene tipo de cambio registrado. Registralo en Tipo de cambio para que el equivalente en colones se calcule."
+          >
+            sin tipo de cambio
+          </span>
+        )}
+      </>
+    );
+  if (m.incluido) return cuerpo;
   return (
-    <>
-      <span className="whitespace-nowrap">$ {formatMonto(original)}</span>
-      {crc > 0 ? (
-        <span className="block whitespace-nowrap text-[11px] font-normal text-content-muted">
-          ₡ {formatMonto(m.monto_crc)}
-        </span>
-      ) : (
-        <span
-          className="block whitespace-nowrap text-[11px] font-normal text-pendiente"
-          title="La cuenta es en dólares y el mes no tiene tipo de cambio registrado. Registralo en Tipo de cambio para que el equivalente en colones se calcule."
-        >
-          sin tipo de cambio
-        </span>
-      )}
-    </>
+    <span
+      className="text-content-muted"
+      title="Fuera de los libros: salió al revertir una carga o se excluyó a mano. Se sigue viendo, pero no suma en ningún total."
+    >
+      <span className="line-through">{cuerpo}</span>
+      {/* En bloque y no al lado: con el badge en la misma línea el número se corre a la izquierda
+          y la columna deja de estar alineada, que es lo que hace ilegible una lista de montos. */}
+      <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-wide text-pendiente">
+        no suma
+      </span>
+    </span>
   );
 }
 

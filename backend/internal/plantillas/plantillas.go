@@ -77,16 +77,25 @@ var Catalogo = []Tipo{
 		Modulo:      "Cuentas por pagar",
 		Variables: append([]Variable{
 			{"NOMBRE_PROVEEDOR", "Nombre del proveedor", "Gas Tomza de Costa Rica"},
-			{"CONSECUTIVO", "Consecutivo de la factura", "00100001010000025786"},
+			{"CONSECUTIVO", "La factura pagada. En un pago agrupado dice cuántas son («3 facturas»); si la factura no tiene consecutivo, su fecha", "00100001010000025786"},
 			{"MONTO", "Monto pagado, con su símbolo de moneda", "₡137 450,00"},
 			{"MONEDA", "Moneda de la factura", "CRC"},
-			{"REFERENCIA", "Referencia del pago en el banco (la huella)", "CXP-A1B2C3D4E5F6"},
+			{"REFERENCIA", "Con lo que el pago aparece en SU estado de cuenta. En un pago agrupado es el código de la remesa, que es el que el banco devuelve", "REM 006127 CXPR9D191E93161E"},
 			{"DESCRIPCION_FACTURA", "Descripción de la factura", "Gas para crematorio"},
+			{"FECHA_FACTURA", "Fecha de emisión de la factura", "12/09/2026"},
+			{"DETALLE_FACTURAS", "Lista de las facturas cuando el pago cubre varias (una por línea). Vacío si se pagó una sola", "  · 00100001010000025786 — 12/09/2026 — ₡56 500,00"},
+			{"LO_PAGADO", "Qué se pagó, con el verbo ya concordado: «se le pagó la factura X» o «se le pagaron 3 facturas»", "se le pagó la factura 00100001010000025786"},
 		}, variablesEmpresa...),
 		AsuntoDefault: "Comprobante de pago — factura [CONSECUTIVO]",
+		// [LO_PAGADO] trae el verbo adentro porque el número cambia la conjugación: con «su factura
+		// [CONSECUTIVO] fue pagada», un pago de tres facturas salía «su factura 3 facturas fue
+		// pagada». [DETALLE_FACTURAS] viene vacío en el pago por factura y el párrafo desaparece
+		// solo: quien recibe UNA factura no ve una lista de un ítem.
 		CuerpoDefault: `Estimado proveedor [NOMBRE_PROVEEDOR],
 
-Le informamos que su factura [CONSECUTIVO] fue pagada por un monto de [MONTO].
+Le informamos que [LO_PAGADO] por un monto de [MONTO].
+
+[DETALLE_FACTURAS]
 
 Adjuntamos el comprobante del pago para sus registros. La referencia con la que aparece en el banco es [REFERENCIA].
 
@@ -223,10 +232,42 @@ func (t Tipo) Desconocidas(textos ...string) []string {
 // Render reemplaza las variables por sus valores. Una variable sin valor queda VACÍA, nunca
 // como «[VARIABLE]»: al proveedor no le llega un marcador crudo.
 func Render(texto string, valores map[string]string) string {
-	return reVariable.ReplaceAllStringFunc(texto, func(m string) string {
+	out := reVariable.ReplaceAllStringFunc(texto, func(m string) string {
 		nombre := strings.Trim(m, "[]")
 		return valores[nombre]
 	})
+	return limpiarHuecos(out)
+}
+
+// limpiarHuecos saca lo que deja atrás una variable que vino vacía.
+//
+// Una variable OPCIONAL —[DETALLE_FACTURAS] solo existe en los pagos agrupados— deja su línea en
+// blanco y, si estaba sola en un párrafo, tres saltos seguidos. El texto llega al proveedor con un
+// agujero en el medio que se lee como un error de armado.
+//
+// También recorta los espacios que quedan dentro de una línea: el correo decía «su factura  fue
+// pagada» —con doble espacio— cuando la factura no tenía consecutivo, y ese hueco fue justamente
+// lo que Contabilidad reportó (19-oct-2026).
+func limpiarHuecos(s string) string {
+	lineas := strings.Split(s, "\n")
+	limpias := make([]string, 0, len(lineas))
+	for _, l := range lineas {
+		// Dos o más espacios seguidos DENTRO de la línea pasan a uno. No se toca la sangría: las
+		// líneas del detalle empiezan con espacios a propósito.
+		sangria := l[:len(l)-len(strings.TrimLeft(l, " \t"))]
+		cuerpo := strings.Join(strings.Fields(strings.TrimLeft(l, " \t")), " ")
+		if cuerpo == "" {
+			limpias = append(limpias, "")
+			continue
+		}
+		limpias = append(limpias, sangria+cuerpo)
+	}
+	// Tres o más saltos seguidos (el agujero de la variable vacía) quedan en dos: un párrafo.
+	texto := strings.Join(limpias, "\n")
+	for strings.Contains(texto, "\n\n\n") {
+		texto = strings.ReplaceAll(texto, "\n\n\n", "\n\n")
+	}
+	return strings.TrimSpace(texto)
 }
 
 // Ejemplos arma los valores de muestra del tipo, para la vista previa.

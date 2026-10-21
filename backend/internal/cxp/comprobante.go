@@ -55,6 +55,36 @@ type ComprobanteEnvio struct {
 	// SubidoEn es cuándo se adjuntó ESTE archivo. Se guarda en la bitácora para poder distinguir
 	// «se reenvió el mismo PDF» de «se mandó otro PDF».
 	SubidoEn time.Time
+
+	// ── Lo que hace que el proveedor RECONOZCA el pago (19-oct-2026) ──
+
+	// FechaEmision de la factura, dd/mm/aaaa. Es el respaldo cuando no hay consecutivo: sin él, el
+	// correo decía «su factura  fue pagada» con un hueco donde iba el número.
+	FechaEmision string
+	// ProveedorTelefono, para el envío por WhatsApp. Vacío en los 649 proveedores de hoy: se
+	// escribe al momento del envío.
+	ProveedorTelefono string
+	// HuellaQueViaja es la referencia que DE VERDAD aparece en el estado de cuenta: la de la
+	// REMESA cuando el pago fue agrupado, y la de la factura cuando se pagó sola.
+	//
+	// `Huella` (la de la factura) se conserva para el expediente interno, pero NO es lo que se le
+	// manda al proveedor: en un pago agrupado el banco nunca trae ese código.
+	HuellaQueViaja string
+	// ReferenciaRemesa es la mitad legible («REM 006127»). Vacía en un pago por factura.
+	ReferenciaRemesa string
+	// FacturasDelPago es cuántas cubre la transferencia. 1 = pago suelto.
+	FacturasDelPago int
+	// Facturas es el detalle, solo cuando son varias. Vacío en el pago suelto.
+	Facturas []FacturaDelPago
+}
+
+// FacturaDelPago es una de las facturas que cubre un pago agrupado, con lo mínimo para que el
+// proveedor la reconozca en sus propios registros.
+type FacturaDelPago struct {
+	Consecutivo  string
+	FechaEmision string
+	Total        string
+	Moneda       string
 }
 
 // RegistroEnvio es lo que se escribe en la bitácora `comprobante_envio`: una fila por intento,
@@ -115,3 +145,10 @@ type ResultadoEnvioComprobante struct {
 	Reenvio      bool      `json:"reenvio"`
 	EnviadoEn    time.Time `json:"enviado_en"`
 }
+
+// ErrEmailDestinoInvalido: la dirección escrita a mano al reenviar no sirve como destinatario.
+//
+// Se valida acá y no se deja fallar al servidor de correo: un rechazo del SMTP llega como «error
+// del servidor» y manda a revisar la configuración, cuando lo que pasó es que alguien escribió mal
+// una dirección.
+var ErrEmailDestinoInvalido = errors.New("cxp: ese correo no es válido; revisá la dirección")

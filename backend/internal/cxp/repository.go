@@ -38,6 +38,12 @@ type Repository interface {
 	ProgramarAprobados(ctx context.Context, empresaID string, ids []string, fecha string) (int64, error)
 	AsignarPrioridad(ctx context.Context, empresaID, id, prioridad string) (int64, error)
 	GuardarNotaRevision(ctx context.Context, empresaID, id, nota string) error
+	// GuardarMedioPago deja escrito con qué se pagó una factura que no salió por el banco, y la
+	// saca del lote si estaba en uno (mig 0102). Devuelve si salió de un lote, para poder decirlo.
+	GuardarMedioPago(ctx context.Context, empresaID, id string, in MedioPagoInput, usuarioID string) (bool, error)
+	// ValeDeCajaChicaExiste verifica el vale antes de ligarlo: un id que no existe guardaría una
+	// referencia muerta, y el expediente diría que hay respaldo donde no lo hay.
+	ValeDeCajaChicaExiste(ctx context.Context, empresaID, valeID string) (bool, error)
 	RegistrarGastoProveedor(ctx context.Context, empresaID, proveedorID, conceptoID, clasificacionID, subclasificacionID string) error
 	AprenderCondicionPago(ctx context.Context, empresaID, proveedorID, condicion string, plazoDias int) error
 	GastosDeProveedor(ctx context.Context, empresaID, proveedorID string) ([]GastoFrecuente, error)
@@ -143,9 +149,18 @@ type Repository interface {
 	DocumentosParaPagoPorLote(ctx context.Context, empresaID, loteID string) ([]PagoRow, error)
 	Reintentar(ctx context.Context, empresaID, id string) (int64, error)
 
+	// GuardarTelefonoProveedorDeDocumento deja el número de WhatsApp en la ficha del proveedor de
+	// esa factura: se escribe al momento la primera vez y queda para la próxima.
+	GuardarTelefonoProveedorDeDocumento(ctx context.Context, empresaID, docID, telefono string) error
+	// GuardarEmailProveedorDeDocumento hace lo mismo con el correo que se escribe al reenviar.
+	GuardarEmailProveedorDeDocumento(ctx context.Context, empresaID, docID, email string) error
+
 	// Comprobante de pago (adjunto + envío)
-	GuardarComprobante(ctx context.Context, empresaID, docID, filename, mime string, contenido []byte, usuarioID string) error
-	ObtenerComprobante(ctx context.Context, empresaID, docID string) (Comprobante, error)
+	// `tipo` distingue los dos documentos del expediente (mig 0103): COMPROBANTE es el recibo del
+	// banco y FACTURA el que emitió el proveedor. Son los dos papeles que hay que cruzar para
+	// verificar un pago, y hasta la 0103 solo se podía guardar el segundo.
+	GuardarComprobante(ctx context.Context, empresaID, docID, tipo, filename, mime string, contenido []byte, usuarioID string) error
+	ObtenerComprobante(ctx context.Context, empresaID, docID, tipo string) (Comprobante, error)
 	ObtenerComprobanteEnvio(ctx context.Context, empresaID, docID string) (ComprobanteEnvio, error)
 	// RegistrarEnvio deja la fila de bitácora del intento y, solo si salió bien, mueve la marca de
 	// enviado — las dos cosas en una transacción. Reemplazó a `MarcarComprobanteEnviado`, que

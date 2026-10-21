@@ -240,6 +240,8 @@ function Contenido({ data, periodo }: { data: DashboardCxp; periodo: string }) {
         />
       </div>
 
+      <PorConfirmar cartera={c} />
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Aging cartera={c} verCartera={verCartera} />
         <Concentracion cartera={c} />
@@ -360,6 +362,65 @@ function Kpi({ label, valor, detalle, tono = "neutral", destacado, to }: KpiProp
     </Link>
   ) : (
     cuerpo
+  );
+}
+
+/**
+ * La partida conciliatoria: lo que declaramos haber pagado y el banco todavía no confirmó.
+ *
+ * Va en su propia banda y no entre los KPI de cartera porque NO es cartera: estas facturas ya
+ * salieron de lo que se debe. Ese es justamente el problema que esto corrige — el tablero leía
+ * PAGADO y CONCILIADO como lo mismo, así que un pago que nunca salió del banco se veía igual que
+ * uno cobrado, y la cifra que un arqueo pide primero no existía en ninguna pantalla.
+ *
+ * Se muestra SIEMPRE, también en cero: un control que solo aparece cuando falla no se puede
+ * distinguir de un control que no existe.
+ */
+function PorConfirmar({ cartera }: { cartera: CarteraCxp }) {
+  const hay = cartera.por_confirmar.cantidad > 0;
+  const dias = cartera.dias_sin_confirmar;
+  return (
+    <Card className={cn(hay && "border-pendiente/50")}>
+      <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-3 py-4">
+        <div>
+          <p className="flex items-center gap-2 text-xs uppercase tracking-wide text-content-muted">
+            Pagado · sin confirmar del banco
+            <Badge tone={hay ? "pendiente" : "positivo"}>
+              {hay ? "por conciliar" : "todo conciliado"}
+            </Badge>
+          </p>
+          <p
+            className={cn(
+              "mt-1 text-2xl font-semibold tabular-nums",
+              hay ? "text-pendiente" : "text-positivo",
+            )}
+          >
+            {formatMoneda(cartera.por_confirmar.monto, "CRC")}
+          </p>
+        </div>
+        <p className="max-w-xl text-xs text-content-muted">
+          {hay ? (
+            <>
+              <span className="font-medium text-content">
+                {cartera.por_confirmar.cantidad.toLocaleString("es-CR")} factura
+                {cartera.por_confirmar.cantidad === 1 ? "" : "s"}
+              </span>{" "}
+              que el sistema da por pagadas y que ningún movimiento bancario confirmó
+              {dias > 0 && (
+                <>
+                  {" · la más vieja lleva "}
+                  <span className="font-medium text-content">{dias} días</span>
+                </>
+              )}
+              . O el pago no salió del banco, o salió y no se reconoció: las dos cosas hay que
+              mirarlas.
+            </>
+          ) : (
+            "Todo lo que figura como pagado tiene su movimiento bancario. Es la diferencia entre lo que dijimos que pagamos y lo que el banco debitó."
+          )}
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 

@@ -236,7 +236,11 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 	// ErrSinDestinatario lo devuelve el transporte cuando la dirección queda vacía al limpiarla
 	// (un correo de proveedor de solo espacios pasa el `!= ""` del service). Sin este caso saldría
 	// como 500 «error interno» sobre algo que sí se puede explicar.
-	case errors.Is(err, ErrProveedorSinEmail), errors.Is(err, shared.ErrSinDestinatario):
+	// `ErrTelefonoInvalido` va con ellos: es el mismo hecho —no hay a quién mandarle— por el otro
+	// canal, y su frase dice qué escribir.
+	case errors.Is(err, ErrProveedorSinEmail), errors.Is(err, shared.ErrSinDestinatario),
+		errors.Is(err, ErrTelefonoInvalido), errors.Is(err, ErrEmailDestinoInvalido),
+		errors.Is(err, ErrTipoAdjuntoInvalido):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
 	case errors.Is(err, ErrProveedorDuplicado), errors.Is(err, ErrDocumentoDuplicado), errors.Is(err, ErrDepartamentoDuplicado):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoCxP(err))
@@ -293,6 +297,12 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
 	case errors.Is(err, ErrNoEstaBloqueada):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoCxP(err))
+	// «Ya se pagó por otro medio» (mig 0102). Mismo criterio: lo que le falta al pedido es 422; el
+	// vale que no existe es 404, porque se pidió un recurso que no está.
+	// El vale inexistente ya lo traduce el bloque de caja chica (es el mismo ErrValeNoEncontrado).
+	case errors.Is(err, ErrMedioPagoInvalido), errors.Is(err, ErrMotivoMedioPagoRequerido),
+		errors.Is(err, ErrValeSoloCajaChica):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
 	case errors.Is(err, ErrMotivoObligatorio), errors.Is(err, ErrPruebaObligatoria),
 		errors.Is(err, ErrSinComprobanteNoDeducible), errors.Is(err, ErrRespaldoSinArchivo),
 		errors.Is(err, ErrPeriodicidadInvalida):
