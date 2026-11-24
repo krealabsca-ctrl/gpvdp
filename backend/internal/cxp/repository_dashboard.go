@@ -96,9 +96,56 @@ const retencionCRCSQL = `ROUND(d.retencion * COALESCE(d.tc_aplicado, 1), 2)`
 // netoCRCSQL es lo que de verdad sale del banco por una factura, en colones: total menos
 // retención (se entera a Hacienda) menos anticipos ya aplicados (si no, doble pago). Misma
 // fórmula que el archivo de pago (ver DocumentosParaPagoPorLote).
-const netoCRCSQL = `GREATEST(d.total_crc - ` + retencionCRCSQL + `
-	- COALESCE((SELECT SUM(aa.monto_crc) FROM anticipo_aplicacion aa
-	            WHERE aa.factura_id = d.id AND aa.activo), 0), 0)`
+// Resta además los PAGOS PARCIALES (mig 0105), convertidos como la retención: están en la moneda
+// de la factura y acá todo va en colones. Sin esa conversión, un parcial de USD 300 se restaría
+// como ₡300 y el saldo quedaría casi igual al total.
+const netoCRCSQL = NetoCRCSQL
+
+// JoinsNetoSQL son los tres cruces que NetoCRCSQL necesita. VAN JUNTOS SIEMPRE: una consulta que
+// use la fórmula sin pegar estos JOIN no compila en la base.
+//
+// SE AGRUPA ANTES DE CRUZAR, NO SE PREGUNTA POR FACTURA (9-nov-2026). Hasta hoy la fórmula llevaba
+// tres subconsultas correlacionadas adentro, así que la base las resolvía UNA VEZ POR FILA: con
+// 4 465 facturas abiertas eran 13 395 búsquedas, y el tablero rearma esta cartera siete veces por
+// carga. Medido contra una copia de 200 000 documentos, una sola pasada tocaba 591 798 bloques;
+// así agrupada toca 8 051 —73 veces menos— y devuelve exactamente lo mismo (mismas 4 465 facturas,
+// mismo total, cero filas distintas).
+//
+// Cada subconsulta AGRUPA por factura, así que devuelve a lo sumo una fila por factura y el LEFT
+// JOIN no puede multiplicar filas. Esa es la razón de agregar adentro en vez de cruzar la tabla
+// pelada: con dos anticipos aplicados a la misma factura, el cruce directo la contaría dos veces
+// y el monto del tablero se duplicaría en silencio.
+//
+// No filtran por empresa a propósito: el cruce es por id de factura, que es único en todo el
+// sistema, y así la fórmula sigue sirviendo en consultas que no tienen el id de empresa a mano.
+// Son tablas de excepción (anticipos, notas de crédito, parciales), chicas por naturaleza; si
+// alguna creciera a millones habría que acotarlas por empresa.
+const JoinsNetoSQL = `
+	LEFT JOIN (SELECT factura_id, SUM(monto_crc) AS monto FROM anticipo_aplicacion
+	            WHERE activo GROUP BY factura_id) neto_aa ON neto_aa.factura_id = d.id
+	LEFT JOIN (SELECT factura_id, SUM(monto) AS monto FROM cxp_nota_credito_aplicacion
+	            WHERE activo GROUP BY factura_id) neto_nc ON neto_nc.factura_id = d.id
+	LEFT JOIN (SELECT documento_id, SUM(monto) AS monto FROM pago_parcial
+	            WHERE activo GROUP BY documento_id) neto_pp ON neto_pp.documento_id = d.id`
+
+// NetoCRCSQL es la misma fórmula, exportada para el flujo de caja a 13 semanas.
+//
+// SE EXPORTA EN VEZ DE COPIARSE porque ya hubo que mantenerla sincronizada con el archivo de
+// pago, y una tercera copia garantiza que algún día tres pantallas digan tres montos distintos
+// para la misma factura. Quien proyecte una salida de banco tiene que usar ESTE neto: el total
+// no sale nunca —siempre va menos retención, anticipos, notas de crédito y parciales—.
+//
+// Expone columnas de `documento_cxp` con el alias `d`, así que la consulta que la use tiene que
+// nombrar esa tabla así, y pegar JoinsNetoSQL después del FROM.
+const NetoCRCSQL = `GREATEST(d.total_crc - ` + retencionCRCSQL + `
+	- COALESCE(neto_aa.monto, 0)
+	- COALESCE(ROUND(neto_nc.monto * COALESCE(d.tc_aplicado, 1), 2), 0)
+	- COALESCE(ROUND(neto_pp.monto * COALESCE(d.tc_aplicado, 1), 2), 0), 0)`
+
+// EstadosCerradosSQL son los estados que ya salieron de la cartera, en forma de lista SQL.
+// Exportado por la misma razón que NetoCRCSQL: quien proyecte la cartera abierta tiene que usar
+// el mismo corte que el tablero, o los dos números no van a coincidir nunca.
+const EstadosCerradosSQL = estadosCerrados
 
 // condVencimiento traduce un tramo del panel de vencimientos a una condición SQL sobre
 // d.fecha_vencimiento. Es la MISMA escala que tramosCartera: si el tablero dice «1 934
@@ -148,11 +195,16 @@ func cteAbiertos(deptCond string) string {
 		       d.departamento_id, d.concepto_id, d.total_crc,
 		       p.id AS proveedor_id, p.nombre AS proveedor,
 		       ` + retencionCRCSQL + ` AS retencion_crc,
-		       COALESCE((SELECT SUM(aa.monto_crc) FROM anticipo_aplicacion aa
-		                 WHERE aa.factura_id = d.id AND aa.activo), 0) AS anticipos_crc,
+		       COALESCE(neto_aa.monto, 0) AS anticipos_crc,
+		       -- ¿Cuenta como «se paga sí o sí»? Lo declara el CATÁLOGO (mig 0121), no un código
+		       -- escrito acá: con las prioridades configurables, preguntar por 'AA' dejaría fuera
+		       -- cualquier otra que el usuario marque urgente, y el tablero mostraría menos cartera
+		       -- urgente de la que hay sin que nadie toque una factura.
+		       COALESCE(pri.urgente AND pri.activa, false) AS es_urgente,
 		       ` + netoCRCSQL + ` AS neto
 		FROM documento_cxp d
-		JOIN proveedor p ON p.id = d.proveedor_id
+		JOIN proveedor p ON p.id = d.proveedor_id` + JoinsNetoSQL + `
+		LEFT JOIN prioridad_cxp pri ON pri.empresa_id = d.empresa_id AND pri.codigo = d.prioridad
 		WHERE d.empresa_id = $1::uuid AND d.estado NOT IN ` + estadosCerrados + deptCond + `)`
 }
 
@@ -210,7 +262,7 @@ func (r *pgRepository) porConfirmarCxP(ctx context.Context, empresaID string, de
 		FROM (
 			SELECT ` + netoCRCSQL + ` AS neto,
 			       GREATEST(` + hoyCR + ` - (ev.ts AT TIME ZONE 'America/Costa_Rica')::date, 0) AS dias
-			FROM documento_cxp d
+			FROM documento_cxp d` + JoinsNetoSQL + `
 			LEFT JOIN LATERAL (
 				SELECT MIN(a.ts) AS ts FROM auditoria_evento a
 				WHERE a.empresa_id = d.empresa_id
@@ -241,9 +293,9 @@ func (r *pgRepository) carteraCxP(ctx context.Context, empresaID string, deptIDs
 			COALESCE(SUM(neto) FILTER (WHERE fecha_vencimiento BETWEEN ` + hoyCR + ` AND ` + hoyCR + ` + 7), 0)::text,
 			COUNT(*) FILTER (WHERE estado = 'REBOTADA'),
 			COALESCE(SUM(neto) FILTER (WHERE estado = 'REBOTADA'), 0)::text,
-			COUNT(*) FILTER (WHERE prioridad = 'AA'),
-			COALESCE(SUM(neto) FILTER (WHERE prioridad = 'AA'), 0)::text,
-			COUNT(*) FILTER (WHERE prioridad = 'AA' AND fecha_vencimiento < ` + hoyCR + `),
+			COUNT(*) FILTER (WHERE es_urgente),
+			COALESCE(SUM(neto) FILTER (WHERE es_urgente), 0)::text,
+			COUNT(*) FILTER (WHERE es_urgente AND fecha_vencimiento < ` + hoyCR + `),
 			GREATEST(COALESCE(MAX(` + hoyCR + ` - fecha_vencimiento), 0), 0),
 			COUNT(*) FILTER (WHERE departamento_id IS NULL),
 			COALESCE(SUM(neto) FILTER (WHERE departamento_id IS NULL), 0)::text,

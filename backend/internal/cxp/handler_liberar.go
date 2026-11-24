@@ -36,13 +36,28 @@ func (h *Handler) LiberarParaPago(c *gin.Context) {
 	var req struct {
 		DocumentoIDs []string `json:"documento_ids"`
 		Motivo       string   `json:"motivo"`
+		// ConfigurarProveedor: que las PRÓXIMAS de este proveedor no nazcan bloqueadas.
+		//
+		// Puntero y no bool: la pantalla lo manda MARCADO por defecto (decisión del Director
+		// Financiero, 4-nov-2026), y con un bool pelado un cliente viejo —que no lo manda—
+		// recibiría `false` y perdería silenciosamente la parte que resuelve el problema. Con
+		// puntero, ausente significa «usá el default», que es sí.
+		ConfigurarProveedor *bool `json:"configurar_proveedor"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.responderError(c, ErrAccionInvalida, "liberar-para-pago")
 		return
 	}
+	configurar := true
+	if req.ConfigurarProveedor != nil {
+		configurar = *req.ConfigurarProveedor
+	}
 	res, err := h.svc.LiberarParaPago(c.Request.Context(), empresaID, c.Param("id"),
-		LiberacionInput{DocumentoIDs: req.DocumentoIDs, Motivo: req.Motivo}, usuarioID)
+		LiberacionInput{
+			DocumentoIDs:        req.DocumentoIDs,
+			Motivo:              req.Motivo,
+			ConfigurarProveedor: configurar,
+		}, usuarioID)
 	if err != nil {
 		h.responderError(c, err, "liberar-para-pago")
 		return

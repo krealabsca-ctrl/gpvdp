@@ -24,8 +24,15 @@ import (
 )
 
 var tablasPorConfirmar = []string{
+	// El pago parcial (mig 0105): `netoCRCSQL` lo resta, así que el tablero lo consulta en cada
+	// tramo. Sin esta tabla el esquema temporal falla, que es lo correcto: el pool solo ve este
+	// esquema, así que una tabla olvidada rompe en vez de leer la de producción.
+	"pago_parcial",
+	"cxp_nota_credito_aplicacion",
 	"empresa", "usuario", "proveedor", "concepto", "clasificacion", "subclasificacion",
 	"departamento", "lote_pago", "remesa_pago", "documento_cxp", "anticipo_aplicacion",
+	// El catálogo de prioridades (mig 0121): el listado lo cruza para ordenar por prioridad.
+	"prioridad_cxp",
 	"comprobante_pago", "cxp_recepcion", "cxp_linea",
 	"movimiento_bancario", "cuenta_bancaria", "banco",
 	// El vale del fondo fijo (mig 0102): `documentoCols` lo consulta para el medio de pago.

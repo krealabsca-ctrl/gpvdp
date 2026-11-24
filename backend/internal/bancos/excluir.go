@@ -26,7 +26,7 @@ var (
 	// así que el enlace queda huérfano para siempre y no hay forma de repararlo desde la aplicación.
 	//
 	// La reversa de la carga entera ya bloquea por esto (ver BloqueosReversa.FacturasCxP) y dividir
-	// también (ErrDivisionConCxP). Excluir suelto es el tercer camino hacia `incluido = false` y
+	// también lo hacía hasta el 2-nov-2026. Excluir suelto es el tercer camino hacia `incluido = false` y
 	// durante un tiempo fue el único sin la guarda.
 	ErrExclusionConCxP = errors.New("bancos: ese movimiento es el pago de una factura de CxP; desenlazalo antes de sacarlo de los libros")
 	// ErrRangoDuplicadosRequerido: el detector cruza la tabla contra sí misma y necesita un rango.

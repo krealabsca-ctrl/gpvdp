@@ -91,8 +91,11 @@ func TestResponderErrorTraduceLosEnlacesConCxP(t *testing.T) {
 		err     error
 		enTexto string
 	}{
+		// Dividir un pago enlazado ya NO es un error (2-nov-2026): el enlace dice qué factura se
+		// pagó y el reparto a qué partida va el gasto. Excluirlo sigue siéndolo, y por un motivo
+		// que no cambió: sacar el movimiento de los libros deja la factura conciliada contra
+		// plata que ya no está.
 		{"excluir un pago enlazado", ErrExclusionConCxP, "desenlazalo"},
-		{"dividir un pago enlazado", ErrDivisionConCxP, "desenlazalo"},
 	}
 	for _, c := range casos {
 		t.Run(c.nombre, func(t *testing.T) {

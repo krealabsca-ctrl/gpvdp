@@ -36,6 +36,7 @@ import { mensajeError } from "@/lib/apiError";
 import { usePeriodoActivo } from "@/app/PeriodoProvider";
 import { useEscenarios, useGuardarEscenario, useProyeccion } from "@/features/bancos/hooks";
 import { SendaChart } from "@/features/bancos/components/SendaChart";
+import { FlujoProyectadoPanel } from "@/features/bancos/components/FlujoProyectadoPanel";
 import type { MetodoProyeccion, ProyeccionResultado } from "@/api/bancos";
 
 const METODOS: { id: MetodoProyeccion; nombre: string; desc: string }[] = [
@@ -98,6 +99,11 @@ export function ProyeccionesPage() {
         title="Proyecciones"
         description={`Cierre estimado de ${etiquetaPeriodo(periodo)} por líneas de ingreso, con meta de crecimiento.`}
       />
+
+      {/* El flujo de los PRÓXIMOS meses, que es otra pregunta que el cierre del mes en curso:
+          lo de abajo estima cómo termina este mes con lo que ya entró; esto estima qué va a
+          pasar después, con el patrón de la historia. */}
+      <FlujoProyectadoPanel periodo={periodo} />
 
       {/* Configuración del escenario */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr]">

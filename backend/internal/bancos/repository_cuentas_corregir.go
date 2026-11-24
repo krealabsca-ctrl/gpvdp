@@ -167,6 +167,11 @@ type CambioDeCuenta struct {
 	IBAN    *string
 	Moneda  *string
 	BancoID *string
+	// EsReserva marca la cuenta como de fondos reservados (mig 0122): lo que sale de acá no entra
+	// en el flujo normal del cronograma de pago. Es una etiqueta, así que se puede cambiar siempre
+	// —a diferencia de la moneda y el IBAN— pero mueve los totales del cronograma de los cortes
+	// que ya la usan, que es justamente para lo que existe.
+	EsReserva *bool
 }
 
 // ActualizarCuenta corrige los datos de una cuenta.
@@ -201,6 +206,9 @@ func (r *pgRepository) ActualizarCuenta(ctx context.Context, empresaID, cuentaID
 	}
 	if c.Moneda != nil {
 		add("moneda = $%d", *c.Moneda)
+	}
+	if c.EsReserva != nil {
+		add("es_reserva = $%d", *c.EsReserva)
 	}
 	if c.BancoID != nil {
 		// El banco destino tiene que ser de la misma empresa: si no, la cuenta saltaría de

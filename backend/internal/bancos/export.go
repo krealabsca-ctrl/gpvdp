@@ -21,6 +21,13 @@ type MovimientoExport struct {
 	// que el usuario eligió las clasificaciones en el filtro: por nombre no se puede ordenar, porque
 	// dos conceptos distintos pueden tener una clasificación con el mismo nombre.
 	ClasificacionID string
+	// Reparto es el código del movimiento dividido («DIV-A3F2B1C4»), compartido por todas sus
+	// caras. Vacío en los que no se dividieron, que son casi todos.
+	//
+	// Sin esta columna, las dos caras de un reparto salen con la misma fecha, el mismo consecutivo
+	// y la misma descripción: quien cruza el .xlsx contra el estado de cuenta las ve como un
+	// duplicado y no tiene con qué distinguirlas de uno de verdad.
+	Reparto string
 }
 
 // ConsecutivoLargo deriva el "Consecutivo Largo" de Davivienda desde la descripción

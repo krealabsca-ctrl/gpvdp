@@ -10,6 +10,7 @@
 
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/api/queryKeys";
+import { formatosBancoApi, type FormatoBanco } from "@/api/formatosBanco";
 import {
   bancosApi,
   type AmbitoCatalogo,
@@ -945,11 +946,31 @@ export function useClasificarDesdeExcel() {
  * Análisis de partidas en el tiempo. El rango va explícito en la clave: pedir otro semestre
  * es otra consulta, no la misma con otros datos.
  */
-export function useAnalisisPartidas(desde: string, hasta: string) {
+/**
+ * `habilitado` en false para no pedir un rango que el servidor va a rechazar —más de 24 meses, o
+ * invertido—. Con el rango libre eso se puede teclear, y gastar la consulta solo sirve para
+ * cambiar un mensaje claro de la pantalla por un error del servidor.
+ */
+export function useAnalisisPartidas(desde: string, hasta: string, comparar = false, habilitado = true) {
   const empresaId = useEmpresaId();
   return useQuery({
-    queryKey: queryKeys.bancos.analisisPartidas(empresaId, desde, hasta),
-    queryFn: () => bancosApi.analisisPartidas(desde, hasta),
+    queryKey: queryKeys.bancos.analisisPartidas(empresaId, desde, hasta, comparar),
+    queryFn: () => bancosApi.analisisPartidas(desde, hasta, comparar),
+    enabled: habilitado,
+  });
+}
+
+/**
+ * El flujo esperado de los próximos meses.
+ *
+ * El histórico va en la clave junto con el horizonte: cambiar cualquiera de los dos es otra
+ * proyección, no la misma con más datos.
+ */
+export function useFlujoProyectado(desde: string, hasta: string, meses: number) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.bancos.flujoProyectado(empresaId, desde, hasta, meses),
+    queryFn: () => bancosApi.flujoProyectado(desde, hasta, meses),
   });
 }
 
@@ -1272,5 +1293,50 @@ export function useFusionarClasificacion() {
     mutationFn: (vars: { id: string; destinoId: string; confirmarCambioDeConcepto?: boolean }) =>
       bancosApi.fusionarClasificacion(vars.id, vars.destinoId, vars.confirmarCambioDeConcepto ?? false),
     onSuccess: () => void qc.invalidateQueries(),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Formatos de banco configurables (mig 0108)
+// ---------------------------------------------------------------------------
+
+/** Los formatos configurados, los seis de fábrica y la lista cerrada de formatos de fecha. */
+export function useFormatosBanco() {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.bancos.formatos(empresaId),
+    queryFn: () => formatosBancoApi.listar(),
+  });
+}
+
+export function useGuardarFormatoBanco() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (f: Omit<FormatoBanco, "id"> & { id?: string }) => formatosBancoApi.guardar(f),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.bancos.formatos(empresaId) }),
+  });
+}
+
+export function useBorrarFormatoBanco() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => formatosBancoApi.borrar(id),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.bancos.formatos(empresaId) }),
+  });
+}
+
+/**
+ * Corre el formato contra un archivo de verdad.
+ *
+ * Mutación y no query a propósito: no es un dato que se consulta, es una acción que se dispara
+ * con un archivo que la persona acaba de elegir. Cachearla haría que al corregir una columna se
+ * siguiera viendo el resultado anterior, que es lo contrario de lo que esta pantalla sirve.
+ */
+export function useProbarFormatoBanco() {
+  return useMutation({
+    mutationFn: (v: { formato: Partial<FormatoBanco>; archivo: File }) =>
+      formatosBancoApi.probar(v.formato, v.archivo),
   });
 }

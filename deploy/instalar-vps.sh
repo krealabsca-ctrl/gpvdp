@@ -377,6 +377,37 @@ else
 	ama "  La API no respondió a través de Caddy. Si el sitio tampoco, es el mismo motivo."
 fi
 
+# ¿Y SIRVE? `/healthz` dice que el proceso vive y nada más: devuelve «ok» sin mirar la base.
+#
+# Esto NO es redundante, es la comprobación que faltaba. Durante 36 migraciones la siembra inicial
+# falló en silencio —el arranque registraba el error y continuaba— y una instalación nueva quedaba
+# con el backend «sano» y SIN NINGUNA EMPRESA. Como entrar exige elegir una, el sistema quedaba
+# instalado y era inusable, y todas las verificaciones de este script decían que todo estaba bien.
+#
+# `/readyz` mira la base, que el esquema no haya quedado a medias y que haya al menos una empresa.
+# Si algo de eso falla, el instalador lo dice ACÁ y no dentro de tres días, en otra pantalla.
+#
+# SIN `-f` A PROPÓSITO. `CURL_OPTS` lleva `--fail`, que ante un 503 descarta el cuerpo y devuelve
+# error: el chequeo seguiría avisando, pero sin el motivo — y el motivo ES el punto de este
+# chequeo. Acá se quieren las dos cosas, el código y la explicación, así que se arma la invocación
+# a mano conservando lo que importa de CURL_OPTS (el timeout y, con dominio, el --resolve).
+#
+# SIN `--fail`, A PROPÓSITO. `CURL_OPTS` lo lleva, y ante un 503 descarta el cuerpo: el chequeo
+# seguiría avisando pero sin el motivo — y el motivo ES el punto de este chequeo. Por eso se arma
+# la llamada acá, con `-k` y `--resolve` solo cuando hay dominio (HTTPS con certificado recién
+# emitido contra 127.0.0.1).
+READY_OPTS=(-sS --max-time 25)
+if [[ -n "${DOMINIO:-}" ]]; then
+	READY_OPTS+=(-k --resolve "${DOMINIO}:443:127.0.0.1")
+fi
+READY=$(curl "${READY_OPTS[@]}" "$BASE_LOCAL/v1/readyz" 2>/dev/null || true)
+if printf '%s' "$READY" | grep -q '"listo":true'; then
+	verde "  El sistema está listo: base, esquema y datos iniciales en orden."
+else
+	ama "  EL SISTEMA RESPONDE PERO NO ESTÁ LISTO. Respuesta: ${READY:-sin respuesta}"
+	ama "  Revisá antes de entregarlo: $COMPOSE logs backend"
+fi
+
 titulo "9. Respaldo automático"
 mkdir -p "$RAIZ/respaldos"
 chmod 700 "$RAIZ/respaldos"

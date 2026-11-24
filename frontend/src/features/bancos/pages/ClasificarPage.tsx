@@ -894,6 +894,31 @@ function MovsTab({
                         <span className="block whitespace-normal break-words text-[13px] leading-snug">
                           {m.descripcion}
                         </span>
+                        {/* LA HUELLA DEL REPARTO. Va PRIMERA de las tres señales porque cambia
+                            cómo se lee el monto de la fila: sin ella, una parte apartada se ve
+                            idéntica a un movimiento normal y su monto parece el del banco.
+                            El código es lo que agrupa las caras entre sí, y el clic abre el
+                            reparto completo —el panel normaliza al principal, así que sirve
+                            igual desde una parte que desde el original—. */}
+                        {m.division && (
+                          <button
+                            type="button"
+                            onClick={() => setDividiendo(m.id)}
+                            className="mt-0.5 block text-left text-[11px] font-medium text-brand-gold hover:underline"
+                            title={
+                              m.division.es_parte
+                                ? `Esta fila se apartó de un movimiento de ${formatMoneda(m.division.monto_original)}. El reparto ${m.division.codigo} tiene ${m.division.partes} partes en total; entre todas suman lo que trajo el banco.`
+                                : `A este movimiento se le apartaron partes. El banco trajo ${formatMoneda(m.division.monto_original)} y el reparto ${m.division.codigo} lo divide en ${m.division.partes} partes que suman ese total.`
+                            }
+                          >
+                            ✂ {m.division.es_parte ? "Parte de" : "Dividido"} {m.division.codigo}
+                            <span className="text-content-muted">
+                              {" · "}
+                              {m.division.partes} partes · del banco{" "}
+                              {formatMoneda(m.division.monto_original)}
+                            </span>
+                          </button>
+                        )}
                         {/* La factura que este débito pagó. El código interno viaja DENTRO del
                             texto del banco (y sin el guion, porque el banco lo borra), así que a
                             ojo es ilegible: acá se traduce a proveedor y número de factura. */}
@@ -1014,6 +1039,7 @@ function MovsTab({
                           <DividirMovimiento
                             movimientoId={m.id}
                             esDebito={esDebito}
+                            pagoCxP={m.pago_cxp}
                             onCerrar={() => setDividiendo(null)}
                           />
                         </TD>

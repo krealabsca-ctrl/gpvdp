@@ -24,6 +24,30 @@ export const queryKeys = {
     raiz: (empresaId: string) => ["grupo", empresaId] as const,
   },
 
+  /**
+   * Ratios del ciclo de efectivo. Cruzan CxC y CxP, así que tienen su propia raíz: invalidar
+   * «bancos» no tiene por qué recalcularlos, y cobrar una factura de CxC sí.
+   */
+  ratios: {
+    raiz: (empresaId: string) => ["ratios", empresaId] as const,
+    ciclo: (empresaId: string, meses: number) => ["ratios", empresaId, "ciclo", meses] as const,
+    drivers: (empresaId: string, dimension: string, meses: number) =>
+      ["ratios", empresaId, "drivers", dimension, meses] as const,
+  },
+
+  /**
+   * Flujo de caja a 13 semanas. Cruza bancos, CxP, CxC y nómina, así que no vive bajo ninguno:
+   * tiene su propia raíz. La política va aparte del flujo porque se invalidan juntas pero se
+   * piden por separado —la pantalla de política no necesita recalcular trece semanas—.
+   */
+  flujoCaja: {
+    raiz: (empresaId: string) => ["flujoCaja", empresaId] as const,
+    flujo: (empresaId: string, moneda: string) =>
+      ["flujoCaja", empresaId, "flujo", moneda] as const,
+    politica: (empresaId: string, moneda: string) =>
+      ["flujoCaja", empresaId, "politica", moneda] as const,
+  },
+
   // Nivel empresa — módulo Bancos (Fase 1). Todas namespaced por empresaId.
   bancos: {
     /** Raíz para invalidación amplia (invalida todo el módulo de la empresa). */
@@ -31,6 +55,8 @@ export const queryKeys = {
 
     cuentas: (empresaId: string, incluirInactivas = false) =>
       ["bancos", "cuentas", empresaId, incluirInactivas] as const,
+    /** Formatos de banco configurables (mig 0108). */
+    formatos: (empresaId: string) => ["bancos", "formatos", empresaId] as const,
     conceptos: (empresaId: string, ambito?: string) =>
       ["bancos", "conceptos", empresaId, ambito ?? "todos"] as const,
     conceptosRaiz: (empresaId: string) => ["bancos", "conceptos", empresaId] as const,
@@ -118,6 +144,9 @@ export const queryKeys = {
       ["bancos", "proyeccion", empresaId, periodo, metodo, metaPct] as const,
     escenarios: (empresaId: string, periodo?: string) =>
       ["bancos", "escenarios", empresaId, periodo ?? "todos"] as const,
+    /** El flujo esperado de los próximos meses, estimado por patrón histórico. */
+    flujoProyectado: (empresaId: string, desde: string, hasta: string, meses: number) =>
+      ["bancos", "flujo-proyectado", empresaId, desde, hasta, meses] as const,
     escenariosRaiz: (empresaId: string) => ["bancos", "escenarios", empresaId] as const,
 
     // Análisis visual (Fase B) — comparten prefijo con dashboard para invalidación.
@@ -133,14 +162,28 @@ export const queryKeys = {
     presupuesto: (empresaId: string, desde: string, hasta: string) =>
       ["bancos", "presupuesto", empresaId, desde, hasta] as const,
     presupuestoRaiz: (empresaId: string) => ["bancos", "presupuesto", empresaId] as const,
+    /**
+     * Presupuesto de INGRESO (mig 0116). Cuelgan de «bancos» y no de «presupuesto» a propósito:
+     * guardar una meta de ingreso invalida la raíz del módulo, y con ella el control de gasto y
+     * el resultado presupuestado, que son las tres vistas del mismo cambio.
+     */
+    controlIngreso: (empresaId: string, desde: string, hasta: string) =>
+      ["bancos", "control-ingreso", empresaId, desde, hasta] as const,
+    resultadoPresupuestado: (empresaId: string, desde: string, hasta: string) =>
+      ["bancos", "resultado-presupuestado", empresaId, desde, hasta] as const,
+    /** Outlook del año: la tercera columna. Por año, no por rango. */
+    outlook: (empresaId: string, anio: number) =>
+      ["bancos", "outlook", empresaId, anio] as const,
     sedes: (empresaId: string, incluirInactivas: boolean) =>
       ["bancos", "catalogo", empresaId, "sedes", incluirInactivas] as const,
     sedesRaiz: (empresaId: string) => ["bancos", "catalogo", empresaId, "sedes"] as const,
     departamentosBancos: (empresaId: string) =>
       ["bancos", "catalogo", empresaId, "departamentos"] as const,
     /** Análisis de partidas en el tiempo: cambia con el rango. */
-    analisisPartidas: (empresaId: string, desde: string, hasta: string) =>
-      ["bancos", "dashboard", empresaId, "partidas", desde, hasta] as const,
+    // `comparar` va EN LA CLAVE: con la comparación anual la respuesta trae columnas que sin
+    // ella no existen, así que son dos consultas distintas y no la misma con más datos.
+    analisisPartidas: (empresaId: string, desde: string, hasta: string, comparar: boolean) =>
+      ["bancos", "dashboard", empresaId, "partidas", desde, hasta, comparar] as const,
     /**
      * Día a día por partida. Las clasificaciones van EN LA CLAVE: cambiar la selección es otra
      * consulta, no la misma con otros datos, y sin esto la pantalla mostraría la serie anterior.
@@ -230,8 +273,16 @@ export const queryKeys = {
     proveedoresTodos: (empresaId: string) => ["cxp", "proveedores-todos", empresaId] as const,
     proveedor: (empresaId: string, id: string) =>
       ["cxp", "proveedor", empresaId, id] as const,
+    /** Proveedores que declaran «contado» en sus comprobantes (marcado del convenio en lote). */
+    candidatosConvenio: (empresaId: string, soloPendientes: boolean) =>
+      ["cxp", "candidatos-convenio", empresaId, soloPendientes] as const,
+    candidatosConvenioRaiz: (empresaId: string) =>
+      ["cxp", "candidatos-convenio", empresaId] as const,
     departamentos: (empresaId: string, soloActivos: boolean) =>
       ["cxp", "departamentos", empresaId, soloActivos] as const,
+
+    // El arqueo de excepción (hallazgo 3.1): lo declarado pagado que el banco no debitó.
+    arqueo: (empresaId: string) => ["cxp", "arqueo", empresaId] as const,
 
     documentos: (empresaId: string, filtros?: unknown) =>
       ["cxp", "documentos", empresaId, filtros ?? null] as const,
@@ -303,10 +354,49 @@ export const queryKeys = {
    * La empresa va SEGUNDA: `configRaiz` invalida por prefijo todo lo del módulo, que es lo que hace
    * falta cuando una pantalla de acá cambia algo que otra muestra.
    */
+  // Nivel empresa — módulo Contabilidad (mig 0109, Fase 1).
+  conta: {
+    raiz: (empresaId: string) => ["conta", empresaId] as const,
+    /** El plan de cuentas, como árbol. */
+    plan: (empresaId: string, soloActivas: boolean) =>
+      ["conta", empresaId, "plan", soloActivas] as const,
+    /** La lista plana, que es lo que necesita un selector de cuenta. */
+    cuentasPlanas: (empresaId: string) => ["conta", empresaId, "cuentas-planas"] as const,
+    /**
+     * El mapeo partida → cuenta (mig 0110, Fase 2), con su cobertura.
+     *
+     * Cuelga de la misma raíz que el plan a propósito: borrar o apagar una cuenta cambia lo que
+     * el mapeo puede mostrar, y `conta.raiz` invalida las dos cosas de una vez.
+     */
+    mapeo: (empresaId: string, pendientes: boolean, conMovimientos: boolean) =>
+      ["conta", empresaId, "mapeo", pendientes, conMovimientos] as const,
+    /** El enlace cuenta bancaria → cuenta contable (mig 0111), con su cobertura. */
+    bancos: (empresaId: string) => ["conta", empresaId, "bancos"] as const,
+    /** El libro diario. El filtro entero va en la clave: cada rango es otra consulta. */
+    diario: (empresaId: string, filtro: Record<string, string | number>) =>
+      ["conta", empresaId, "diario", filtro] as const,
+    asiento: (empresaId: string, id: string) => ["conta", empresaId, "asiento", id] as const,
+    /** El mayor de una cuenta en un rango. */
+    mayor: (empresaId: string, cuentaId: string, desde: string, hasta: string) =>
+      ["conta", empresaId, "mayor", cuentaId, desde, hasta] as const,
+    /** Qué pasaría al generar los asientos de un período. */
+    generacion: (empresaId: string, periodo: string) =>
+      ["conta", empresaId, "generacion", periodo] as const,
+    /** El balance de comprobación de un rango. */
+    balance: (empresaId: string, desde: string, hasta: string) =>
+      ["conta", empresaId, "balance", desde, hasta] as const,
+    /** Los meses con su estado de cierre. */
+    periodos: (empresaId: string) => ["conta", empresaId, "periodos"] as const,
+  },
+
   config: {
     raiz: (empresaId: string) => ["config", empresaId] as const,
     /** Desde qué buzón manda esta empresa (mig 0084). */
     correoSaliente: (empresaId: string) => ["config", empresaId, "correo-saliente"] as const,
+    /** Los errores internos registrados (mig 0107). */
+    incidentes: (empresaId: string, filtros?: unknown) =>
+      ["config", empresaId, "incidentes", filtros ?? null] as const,
+    resumenIncidentes: (empresaId: string) => ["config", empresaId, "incidentes-resumen"] as const,
   },
 
   // Nivel empresa — módulo RRHH / Nómina (Fase 3).

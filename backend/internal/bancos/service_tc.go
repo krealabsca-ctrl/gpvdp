@@ -134,10 +134,13 @@ func (s *Service) recalcularProvisional(ctx context.Context, empresaID string, a
 		return // sin día 1 no hay base provisional
 	}
 	d15, tieneD15 := valorDia(cots, 15)
-	tcAntes15 := d1.Round(4)
-	tcDesde15 := d1.Round(4)
+	// Misma precisión que el congelado (DecimalesTC): el provisional y el definitivo tienen que
+	// medirse igual, o al congelar el mes todos los montos se moverían por el redondeo y no por el
+	// tipo de cambio.
+	tcAntes15 := d1.Round(DecimalesTC)
+	tcDesde15 := d1.Round(DecimalesTC)
 	if tieneD15 {
-		tcDesde15 = promedioDecimales(d1, d15).Round(4)
+		tcDesde15 = promedioDecimales(d1, d15).Round(DecimalesTC)
 	}
 	_, _ = s.repo.AplicarProvisional(ctx, empresaID, anio, mes, tcAntes15, tcDesde15)
 }

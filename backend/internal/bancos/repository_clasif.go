@@ -96,6 +96,12 @@ func condicionesMovimientos(empresaID string, f FiltrosMovimientos) (string, []a
 			conds = append(conds, fmt.Sprintf("m.clasificacion_id = ANY($%d::uuid[])", addArg(f.Alcance)))
 		}
 	}
+	// Lo que no suma, fuera (ver SoloIncluidos). Se agrega al MISMO WHERE que todo lo demás, así
+	// que recorta la lista, el conteo y los totales de una sola vez: si se filtrara únicamente la
+	// lista, el paginador seguiría contando filas que ya no se muestran.
+	if f.SoloIncluidos {
+		conds = append(conds, "m.incluido")
+	}
 	// Rango de MONTO. Se compara contra `monto_crc` —el valor en colones— y no contra
 	// debito/credito, que vienen en la moneda de la cuenta: con 15 cuentas y dos de ellas en
 	// dólares, filtrar «desde 1.000.000» sobre la columna cruda dejaría afuera un depósito de
@@ -233,7 +239,15 @@ func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, 
 		       -- esto dice a QUIÉN se le pagó, y hay que abrir la factura para saber de QUÉ era.
 		       -- Viene vacío si la factura todavía no se clasificó, y eso está bien: no hay nada
 		       -- que decir todavía.
-		       COALESCE(gcxp.concepto, ''), COALESCE(gcxp.clasificacion, '')
+		       COALESCE(gcxp.concepto, ''), COALESCE(gcxp.clasificacion, ''),
+		       -- LA HUELLA DEL REPARTO (mig 0094). Dos preguntas distintas con una sola salida:
+		       --   dividido_de no nulo        → esta fila es una PARTE apartada de otra
+		       --   monto_antes_de_dividir     → esta fila es la ORIGINAL y se le apartó algo
+		       -- Las dos salen vacías en casi todos los movimientos y entonces la fila no lleva
+		       -- huella, que es lo correcto: no hay nada que decir.
+		       COALESCE(m.dividido_de::text, ''),
+		       COALESCE(div.monto_original, ''),
+		       COALESCE(div.partes, 0)
 		FROM movimiento_bancario m
 		LEFT JOIN concepto co ON co.id = m.concepto_id
 		LEFT JOIN clasificacion cl ON cl.id = m.clasificacion_id
@@ -268,6 +282,17 @@ func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, 
 		    WHERE (m.documento_cxp_id IS NOT NULL AND d2.id = m.documento_cxp_id)
 		       OR (m.remesa_id IS NOT NULL AND d2.remesa_id = m.remesa_id)
 		) gcxp ON m.documento_cxp_id IS NOT NULL OR m.remesa_id IS NOT NULL
+		-- El reparto se resuelve desde el PRINCIPAL, sea esta fila el principal o una parte:
+		-- COALESCE(dividido_de, id) apunta al mismo movimiento en los dos casos, así que una sola
+		-- rama sirve para las dos caras. El ON lo deja fuera del plan para los movimientos que no
+		-- participan de ningún reparto, que son casi todos.
+		LEFT JOIN LATERAL (
+		    SELECT COALESCE(p.monto_antes_de_dividir, 0)::text AS monto_original,
+		           (1 + (SELECT count(*) FROM movimiento_bancario h
+		                  WHERE h.dividido_de = p.id AND h.incluido))::int AS partes
+		    FROM movimiento_bancario p
+		    WHERE p.id = COALESCE(m.dividido_de, m.id)
+		) div ON m.dividido_de IS NOT NULL OR m.monto_antes_de_dividir IS NOT NULL
 		WHERE ` + where + fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", ordenSQL(f.Orden), limIdx, offIdx)
 
 	rows, err := r.pool.Query(ctx, listQ, args...)
@@ -285,6 +310,11 @@ func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, 
 			mcrc      decimal.Decimal
 			confianza decimal.NullDecimal
 			pago      PagoCxPDeMovimiento
+			// Huella del reparto: el padre (vacío si esta fila no es una parte) y los datos del
+			// grupo, que vienen vacíos cuando el movimiento no participa de ninguno.
+			divididoDe    string
+			montoOriginal string
+			partes        int
 		)
 		if err := rows.Scan(&row.ID, &fecha, &row.Documento, &row.Descripcion,
 			&deb, &cred, &row.Moneda, &mcrc,
@@ -293,7 +323,8 @@ func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, 
 			&row.Estado, &confianza, &row.EsTraslado, &row.Incluido,
 			&row.Banco, &row.Cuenta,
 			&pago.DocumentoID, &pago.Consecutivo, &pago.Proveedor, &pago.Huella,
-			&pago.Facturas, &pago.Concepto, &pago.Clasificacion); err != nil {
+			&pago.Facturas, &pago.Concepto, &pago.Clasificacion,
+			&divididoDe, &montoOriginal, &partes); err != nil {
 			return ListaMovimientos{}, fmt.Errorf("bancos: scan movimiento: %w", err)
 		}
 		// Solo cuando hay enlace de verdad. El id es la prueba: el consecutivo o el proveedor
@@ -302,6 +333,7 @@ func (r *pgRepository) ListarMovimientos(ctx context.Context, empresaID string, 
 			p := pago
 			row.PagoCxP = &p
 		}
+		row.Division = huellaDeReparto(row.ID, divididoDe, montoOriginal, partes)
 		row.Fecha = fecha.Format("2006-01-02")
 		row.Debito = deb.String()
 		row.Credito = cred.String()

@@ -161,6 +161,108 @@ De ahí salen tres consecuencias que conviene saber **antes** de que pasen:
 
 ---
 
+## El tipo de cambio arranca 100 % manual
+
+El sistema puede traer el tipo de cambio solo desde el BCCR, pero **viene apagado**. En un servidor
+recién instalado el arranque lo dice en el log:
+
+```
+BCCR sin credenciales; tipo de cambio 100% manual
+```
+
+No es un error y no rompe nada: se escribe la cotización a mano en Bancos → Tipo de cambio, como se
+venía haciendo. Para encenderlo hay que **registrarse en el BCCR** (dan un correo y un token por
+suscripción) y agregar al `.env`:
+
+```
+BCCR_SYNC_ENABLED=true
+BCCR_EMAIL=el-correo-registrado
+BCCR_TOKEN=el-token-que-dan
+```
+
+Después, `docker compose -f deploy/docker-compose.prod.yml up -d backend` para que lo lea. El
+indicador y la URL ya traen el valor correcto (318, el de venta) y no hay que tocarlos.
+
+---
+
+## Un servidor para MOSTRAR el sistema
+
+Si el VPS no es la operación real sino una vitrina —para que Gerencia General, un auditor o un
+socio recorran el sistema—, tres cosas cambian:
+
+**1 · Dale el rol que mira, no el que firma.** Medido sobre los permisos reales, `GERENCIA_GENERAL`
+y `AUDITOR_INTERNO` **ven exactamente los mismos seis módulos** (Bancos, CxP, CxC, Inventario,
+Precios y RRHH). La diferencia es lo que pueden hacer:
+
+| | Ve | Escribe |
+|---|---|---|
+| `AUDITOR_INTERNO` | los 6 módulos | **nada** |
+| `GERENCIA_GENERAL` | los 6 módulos | **aprueba facturas de CxP**, levanta el candado anti-doble-pago y edita costos y precios |
+
+Para recorrer y mirar, `AUDITOR_INTERNO` muestra lo mismo sin poder mover nada. Usá
+`GERENCIA_GENERAL` solo si esa persona de verdad aprueba pagos en el proceso.
+
+> Ojo con la descripción del rol: `GERENCIA_GENERAL` dice «Vista consolidada de lectura» y **no es
+> solo lectura**. El texto quedó viejo; los permisos son los de la tabla de arriba.
+
+**2 · Ninguno de los dos ve salarios.** El único permiso de RRHH que tienen es «pedir mis
+vacaciones». La nómina no se abre con estos roles.
+
+**3 · Si vas a cargar el histórico real, es un servidor con la plata de la empresa en internet.**
+Deja de ser una demo a efectos de seguridad: instalá **con dominio y HTTPS** (nunca
+`--sin-dominio`), un usuario por persona, y tené presente que **no hay límite de intentos de
+login** (ver el final de esta guía). Si lo que se quiere es solo que alguien recorra las pantallas,
+un servidor con los catálogos y sin movimientos muestra el sistema igual y no expone nada.
+
+---
+
+## Los dos chequeos: vivo y listo
+
+Son dos preguntas distintas y por eso son dos direcciones.
+
+**`/v1/healthz` — ¿el proceso vive?** Contesta «ok» sin mirar nada, a propósito: lo usa Docker para
+decidir si reinicia el contenedor, y si dependiera de la base, una caída de PostgreSQL reiniciaría
+el backend en bucle sin arreglar nada. No sirve para monitorear.
+
+**`/v1/readyz` — ¿el sistema sirve?** Comprueba tres cosas y devuelve **503** si alguna falla:
+
+| | Qué detecta |
+|---|---|
+| La base responde | PostgreSQL caído o inalcanzable |
+| El esquema no quedó a medias | una migración que falló por la mitad: el esquema está incompleto y el problema aparece días después, en otra pantalla |
+| Hay al menos una empresa | la siembra inicial no se completó. El sistema arranca «sano» pero **nadie puede entrar**, porque el ingreso exige elegir una empresa |
+
+Los tres pasaron de verdad en este proyecto y los tres se veían perfectos desde afuera.
+
+**Poné el monitor externo acá, no en `healthz`:**
+
+```
+https://tudominio/v1/readyz
+```
+
+Un chequeo gratuito (UptimeRobot y similares) cada 5 minutos alcanza. Lo que se vigila es el código
+de estado: 200 es que sirve, 503 es que no. El cuerpo trae el detalle para quien entre a mirar.
+
+---
+
+## El login se frena solo
+
+Cinco intentos fallidos desde un mismo equipo para una misma cuenta y el sexto responde **429**,
+diciendo cuántos minutos faltan. Los contadores se olvidan a los quince minutos.
+
+**Nunca se bloquea la cuenta, solo la pareja (cuenta, equipo).** Es deliberado: si bastara con
+errar cinco veces la contraseña de alguien para dejarlo afuera, el control contra la fuerza bruta
+sería una herramienta para sabotear a quien trabaja. La persona de verdad, desde otro equipo,
+entra sin enterarse.
+
+Hay además un tope por equipo (30 intentos de cualquier cuenta), para que nadie esquive el primero
+rotando correos.
+
+Los contadores viven en memoria: **reiniciar el backend los borra**, y ese es el camino si alguien
+quedó trancado y no puede esperar.
+
+---
+
 ## Uso diario
 
 Todo desde `/opt/gpvdp-erp`:
@@ -329,6 +431,24 @@ docker compose -p gpvdp_prueba_prod -f deploy/docker-compose.prod.yml -f deploy/
 Hacé una copia de `deploy/.env.prueba` a partir del ejemplo y poné valores propios — ese archivo trae
 credenciales de juguete y **no sirve para producción**.
 
+> **En Windows, guardá ese archivo con fin de línea Unix (LF).** Si se copia con el fin de línea de
+> Windows, Docker Compose avisa «variable is not set» para algunas variables y las pasa vacías al
+> contenedor. No afecta al VPS —ahí el instalador escribe el `.env` en Linux—, solo a la prueba
+> local. Para arreglarlo: `sed -i 's/\r$//' deploy/.env.prueba`.
+
+El montaje de prueba trae `SEED_ON_START=false`, así que levanta con la base **vacía**. Para
+probar la instalación como será en el servidor —con empresas, roles y catálogo— hay que encender la
+siembra en el primer arranque, igual que hace el instalador:
+
+```bash
+SEED_ON_START=true docker compose -p gpvdp_prueba_prod --env-file deploy/.env.prueba -f deploy/docker-compose.prod.yml -f deploy/docker-compose.prueba-local.yml up -d backend
+```
+
+Tiene que quedar con **3 empresas**. Si queda en cero, la siembra falló: el arranque registra el
+error y **continúa**, así que el sistema responde sano con la base vacía y el problema solo se nota
+al intentar entrar (no hay empresa que elegir). Se ve con
+`docker compose ... logs backend | grep "seed inicial"`.
+
 ---
 
 ## Mantener al día el paquete de los programadores
@@ -356,10 +476,7 @@ Se dice para que nadie lo dé por hecho:
 
 - **Réplica de la base.** Si el servidor se cae, el sistema queda fuera hasta que se restaure. Para
   algo así hace falta una base administrada (DigitalOcean Managed Database) o una réplica.
-- **Monitoreo y alertas.** Nadie avisa si el sistema se cae. Lo más simple es un chequeo externo
-  gratuito (UptimeRobot y similares) apuntando a `https://tudominio/v1/healthz`.
-- **Límite de intentos de login.** No hay bloqueo por fuerza bruta. Con el sistema en internet, esto
-  sube de prioridad: hoy la protección son contraseñas fuertes y que cada ingreso queda auditado.
+- **Alertas.** Nadie te avisa si el sistema se cae; hay que poner el monitor externo (ver abajo).
 - **Envío de correo real.** En desarrollo los correos van a un buzón de prueba (MailHog). Para que
   salgan de verdad hay que configurar un proveedor de SMTP.
 - **Actualizaciones de seguridad del sistema operativo.** Conviene activar las automáticas:

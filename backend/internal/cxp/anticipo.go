@@ -11,7 +11,7 @@ var (
 	ErrNoEsAnticipo            = errors.New("cxp: el documento seleccionado no es un anticipo")
 	ErrAnticipoNoPagado        = errors.New("cxp: el anticipo debe estar pagado para poder aplicarse")
 	ErrProveedorDistinto       = errors.New("cxp: el anticipo y la factura deben ser del mismo proveedor")
-	ErrMonedaNoNeteable        = errors.New("cxp: el neteo de anticipos solo está disponible en colones (CRC)")
+	ErrMonedaNoNeteable        = errors.New("cxp: el anticipo y la factura tienen que estar en la misma moneda; no se convierte sola porque con qué tipo de cambio es una decisión de negocio")
 	ErrFacturaNoNeteable       = errors.New("cxp: los anticipos se aplican antes de aprobar la factura")
 	ErrMontoAplicacionInvalido = errors.New("cxp: el monto excede el saldo del anticipo o el neto de la factura")
 	ErrReversaNoPermitida      = errors.New("cxp: no se puede reversar: la factura ya fue pagada")

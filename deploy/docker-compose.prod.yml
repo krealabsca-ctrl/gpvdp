@@ -27,6 +27,26 @@ services:
       #  imagen y initdb falla con «invalid locale settings».)
     # SIN `ports`: nadie fuera del servidor puede tocar la base. El backend la alcanza por
     # el nombre `db` en la red interna de Docker.
+    #
+    # `pg_stat_statements` es el contador de consultas de PostgreSQL: cuántas veces se ejecutó cada
+    # una y cuánto tiempo se llevó en total. Sin él, cuando alguien dice «el sistema está lento» no
+    # hay forma de saber QUÉ está lento —hubo que activarlo a mano en desarrollo para encontrar que
+    # una sola consulta del tablero de CxP se comía el 92 % del tiempo de esa pantalla—.
+    #
+    # NO guarda datos de nadie: PostgreSQL reemplaza los valores por marcadores ($1, $2), así que
+    # se ve la FORMA de la consulta, nunca el monto, el proveedor ni la cédula que llevaba.
+    #
+    # Va como `command` porque esta librería tiene que cargarse al ARRANCAR el motor: no se puede
+    # encender después sin reiniciar. `track=top` cuenta solo las consultas que manda la aplicación
+    # y no las de adentro de las funciones, que es lo que se quiere mirar.
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.max=2000
+      - -c
+      - pg_stat_statements.track=top
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

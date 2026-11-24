@@ -408,16 +408,46 @@ const sqlFechaPagada = `(SELECT MIN(a.ts) FROM auditoria_evento a
 	WHERE a.empresa_id = d.empresa_id AND a.entidad = 'documento_cxp' AND a.entidad_id = d.id
 	  AND a.accion IN ('PAGAR_DOCUMENTO', 'CONCILIAR_AUTO', 'CONCILIAR_DOCUMENTO'))`
 
-// prioridadesFiltro son los valores aceptados por FiltrosDocumentos.Prioridad.
+// Valores ESPECIALES del filtro de prioridad. No son códigos: describen un conjunto.
 //
-// Se valida contra esta lista y no se interpola lo que llegue: un valor libre acabaría en la
-// consulta. Y un valor desconocido NO filtra nada en vez de filtrar mal —el criterio del proyecto
-// es que un filtro que no se entiende se ignora, nunca que devuelva un subconjunto silencioso—.
-var prioridadesFiltro = map[string]string{
-	"AA":   "d.prioridad = 'AA'",
-	"A":    "d.prioridad = 'A'",
-	"AA_A": "d.prioridad IN ('AA', 'A')",
-	"sin":  "COALESCE(d.prioridad, '') = ''",
+// Antes de la mig 0121 el filtro era un mapa cerrado con los tres códigos que existían ('AA', 'A',
+// 'AA_A'). Con las prioridades configurables eso dejó de servir: un código nuevo no estaría en el
+// mapa y el filtro lo ignoraría en silencio, que es justo lo que el comentario de abajo previene.
+//
+// `FiltroPrioridadUrgentes` reemplaza al viejo 'AA' donde lo que se quería decir era «lo que se
+// paga sí o sí»: eso ahora lo declara el catálogo con su bandera `urgente`, así que sigue
+// funcionando aunque mañana haya tres prioridades urgentes en vez de una.
+const (
+	FiltroPrioridadSin      = "sin"
+	FiltroPrioridadCon      = "con"
+	FiltroPrioridadUrgentes = "urgentes"
+)
+
+// condicionPrioridad arma la condición del filtro y devuelve los parámetros que necesita.
+//
+// NUNCA interpola el valor recibido: un código que viene del cliente va como parámetro. Y un valor
+// vacío no filtra nada —el criterio del proyecto es que un filtro que no se entiende se ignora,
+// nunca que devuelva un subconjunto silencioso—.
+//
+// Devuelve la condición con un marcador `%d` por cada parámetro que agrega, para que quien la use
+// numere los suyos: esta función no sabe cuántos argumentos lleva ya la consulta.
+func condicionPrioridad(valor string) (plantilla string, params []any) {
+	switch valor {
+	case "":
+		return "", nil
+	case FiltroPrioridadSin:
+		return "COALESCE(d.prioridad, '') = ''", nil
+	case FiltroPrioridadCon:
+		return "COALESCE(d.prioridad, '') <> ''", nil
+	case FiltroPrioridadUrgentes:
+		// Las urgentes salen del CATÁLOGO DE LA MISMA EMPRESA del documento: así el filtro sigue
+		// la configuración de cada una, y nunca cruza la de otra.
+		return `d.prioridad IN (SELECT pr.codigo FROM prioridad_cxp pr
+		                         WHERE pr.empresa_id = d.empresa_id AND pr.urgente AND pr.activa)`, nil
+	default:
+		// Un código cualquiera. Va como parámetro, no interpolado.
+		return "d.prioridad = $%d", []any{valor}
+	}
 }
 
 // GastoFrecuente es una categoría usada históricamente con un proveedor.

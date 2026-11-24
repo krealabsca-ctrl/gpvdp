@@ -105,6 +105,9 @@ type actualizarCuentaRequest struct {
 	IBAN    *string `json:"iban"`
 	Moneda  *string `json:"moneda" validate:"omitempty,oneof=CRC USD"`
 	BancoID *string `json:"banco_id" validate:"omitempty,uuid"`
+	// EsReserva: la cuenta guarda fondos reservados (mig 0122). Lo que sale de acá no entra en el
+	// flujo normal del cronograma de pago.
+	EsReserva *bool `json:"es_reserva"`
 }
 
 // ActualizarCuenta PATCH /v1/bancos/catalogo/cuentas/:id — alias, banco, IBAN o moneda.
@@ -124,11 +127,12 @@ func (h *Handler) ActualizarCuenta(c *gin.Context) {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, err.Error())
 		return
 	}
-	if req.Alias == nil && req.IBAN == nil && req.Moneda == nil && req.BancoID == nil {
+	if req.Alias == nil && req.IBAN == nil && req.Moneda == nil && req.BancoID == nil && req.EsReserva == nil {
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, "nada que actualizar")
 		return
 	}
-	cambio := CambioDeCuenta{Alias: req.Alias, IBAN: req.IBAN, Moneda: req.Moneda, BancoID: req.BancoID}
+	cambio := CambioDeCuenta{Alias: req.Alias, IBAN: req.IBAN, Moneda: req.Moneda,
+		BancoID: req.BancoID, EsReserva: req.EsReserva}
 	if err := h.svc.ActualizarCuenta(c.Request.Context(), claims.EmpresaID, c.Param("id"), cambio, claims.UsuarioID()); err != nil {
 		h.responderError(c, err, "actualizar-cuenta")
 		return

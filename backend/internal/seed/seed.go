@@ -24,6 +24,27 @@ var roles = []struct{ Codigo, Nombre, Desc string }{
 
 var empresas = []string{"Valle de Paz", "Coopeprofa", "Memorial Pets"}
 
+// SQLUpsertRolBase siembra un rol BASE (el que vale en todas las empresas, `empresa_id` NULL).
+//
+// El `WHERE empresa_id IS NULL` NO es decorativo: es el predicado del índice, y sin él esta
+// sentencia no corre.
+//
+// La migración 0067 cambió el único de `rol` por DOS índices PARCIALES —uno para los roles base y
+// otro para los propios de cada empresa— porque `UNIQUE (empresa_id, codigo)` con `empresa_id` en
+// NULL no impide duplicados: NULL nunca es igual a NULL. PostgreSQL no calza un `ON CONFLICT
+// (codigo)` pelado contra un índice parcial; responde 42P10, «no hay restricción que coincida».
+//
+// Eso rompió la siembra de toda base NUEVA desde la 0067, y no se notaba: el arranque registra el
+// error y CONTINÚA, así que el sistema queda arriba y sano pero sin empresas — y sin empresa que
+// elegir, nadie puede entrar. Las bases que ya tenían sus roles nunca ejecutaban el camino que
+// falla, y por eso sobrevivió 36 migraciones hasta que se instaló en un servidor limpio.
+//
+// Es exportada a propósito: la prueba ejecuta ESTA constante contra la forma real de la tabla. Una
+// copia del SQL en el test no protegería nada, porque seguiría pasando con el código roto.
+const SQLUpsertRolBase = `INSERT INTO rol (codigo, nombre, descripcion) VALUES ($1, $2, $3)
+	 ON CONFLICT (codigo) WHERE empresa_id IS NULL
+	 DO UPDATE SET nombre = EXCLUDED.nombre RETURNING id::text`
+
 // Catálogo mínimo de demostración por empresa (Concepto -> Clasificaciones).
 var conceptosDemo = []struct {
 	Concepto        string
@@ -39,10 +60,7 @@ var conceptosDemo = []struct {
 func Run(ctx context.Context, pool *pgxpool.Pool, log *zap.Logger, cfg config.Config) error {
 	rolIDs := make(map[string]string, len(roles))
 	for _, r := range roles {
-		id, err := upsertID(ctx, pool,
-			`INSERT INTO rol (codigo, nombre, descripcion) VALUES ($1, $2, $3)
-			 ON CONFLICT (codigo) DO UPDATE SET nombre = EXCLUDED.nombre RETURNING id::text`,
-			r.Codigo, r.Nombre, r.Desc)
+		id, err := upsertID(ctx, pool, SQLUpsertRolBase, r.Codigo, r.Nombre, r.Desc)
 		if err != nil {
 			return fmt.Errorf("seed rol %s: %w", r.Codigo, err)
 		}
@@ -110,13 +128,13 @@ var cuentasVDP = []struct{ Banco, Alias, IBAN, Moneda string }{
 	{"BN", "BN Privado de Cartago", "", "CRC"},
 	{"BN", "BN Valle de Paz Colones", "", "CRC"},
 	{"BN", "BN Valle de Paz Dólares", "", "USD"},
-	{"BAC", "BAC Religiosa", "CR26010200009038253541", "CRC"},
-	{"BAC", "BAC Valle de Paz Colones", "CR10010200009510302389", "CRC"},
-	{"BCR", "BCR Religiosa", "CR48015201349000020206", "CRC"},
-	{"Banco Popular", "BP Valle de Paz Colones", "CR62016101008810244232", "CRC"},
-	{"Davivienda", "Davivienda Colones", "CR76010409142215626710", "CRC"},
-	{"Davivienda", "Davivienda Comisiones COPENAE", "CR17010402842201520116", "CRC"},
-	{"Davivienda", "Davivienda Dólares", "CR74010409142215627425", "USD"},
+	{"BAC", "BAC Religiosa", "CR26010200010000000003", "CRC"},
+	{"BAC", "BAC Valle de Paz Colones", "CR10010200010000000001", "CRC"},
+	{"BCR", "BCR Religiosa", "CR48015200010000000004", "CRC"},
+	{"Banco Popular", "BP Valle de Paz Colones", "CR62016100010000000005", "CRC"},
+	{"Davivienda", "Davivienda Colones", "CR76010400010000000008", "CRC"},
+	{"Davivienda", "Davivienda Comisiones COPENAE", "CR17010400010000000002", "CRC"},
+	{"Davivienda", "Davivienda Dólares", "CR74010400010000000007", "USD"},
 }
 
 func seedCuentas(ctx context.Context, pool *pgxpool.Pool, empresaID string) error {

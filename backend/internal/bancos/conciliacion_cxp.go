@@ -23,6 +23,13 @@ const (
 	// aparte de MONTO_DIFERENTE porque no es lo mismo: comparar 1.500 contra 1.500 sin mirar que
 	// uno es en colones y el otro en dólares los daría por iguales.
 	HuellaMonedaDiferente = "MONEDA_DIFERENTE"
+	// HuellaEstadoInvalido: la factura que una persona eligió no está declarada como pagada, así
+	// que no hay pago que conciliar (solo lo usa el enlace manual: el barrido llega desde la
+	// huella, y una factura sin pagar no tiene huella en el banco).
+	//
+	// Es un VEREDICTO y no un error del paquete CxP a propósito: Bancos no puede importar CxP —para
+	// eso existe este puerto—, así que un error de allá llegaría acá opaco y saldría como 500.
+	HuellaEstadoInvalido = "ESTADO_INVALIDO"
 )
 
 // ResultadoHuella es la respuesta de CxP para un movimiento.
@@ -57,6 +64,20 @@ type ConciliadorCxP interface {
 	// ninguna: un importe sin su moneda no se puede comparar con nada, y suponer colones es la
 	// forma silenciosa de equivocarse (hay cinco cuentas en dólares).
 	ConciliarHuella(ctx context.Context, empresaID, descripcion, montoBanco, monedaBanco, usuarioID string) (ResultadoHuella, error)
+	// ConciliarDocumento cierra una factura ELEGIDA por una persona contra este débito.
+	//
+	// Es el camino inverso al de arriba y existe por el arqueo de excepción: ahí el débito está y
+	// el pago salió, pero la descripción NO trae la huella —si la trajera, el barrido ya lo habría
+	// enlazado solo—. Que lo elija una persona no relaja la moneda ni el monto: CxP los verifica
+	// igual y devuelve error si no calzan, porque un monto distinto es un hecho distinto (pago
+	// parcial) y cerrarlo acá lo taparía.
+	//
+	// El motivo es obligatorio: es la única evidencia de por qué se emparejaron.
+	ConciliarDocumento(ctx context.Context, empresaID, documentoID, montoBanco, monedaBanco, usuarioID, motivo string) (ResultadoHuella, error)
+	// DesconciliarPago devuelve a PAGADO lo que cerraba este movimiento (una factura, o todas las
+	// de una remesa) y contesta cuántas volvieron. Deshace la confirmación del banco, NO la
+	// declaración de que el pago se hizo.
+	DesconciliarPago(ctx context.Context, empresaID, documentoID, remesaID, usuarioID, motivo string) (int, error)
 }
 
 // MovimientoConHuella es un movimiento bancario candidato a ser el pago de una factura.

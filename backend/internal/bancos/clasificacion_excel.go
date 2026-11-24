@@ -279,7 +279,11 @@ func parseMontoTolerante(s string) (decimal.Decimal, error) {
 func LeerClasifExcel(g Grid) ([]FilaClasifExcel, error) {
 	col, filaEnc := columnasClasifExcel(g)
 	if col == nil {
-		return nil, ErrClasifExcelSinEncabezado
+		// Mismo diagnóstico que el lector del histórico: decir qué se encontró, no solo qué
+		// faltaba. Acá los papeles requeridos son otros porque el trabajo es otro —este pinta la
+		// partida sobre movimientos que ya existen—. Ver encabezado_diagnostico.go.
+		return nil, DiagnosticarEncabezado(g, "",
+			[]string{"una columna de fecha", "una de clasificación o partida"})
 	}
 	filas := make([]FilaClasifExcel, 0, 256)
 	for i := filaEnc + 1; i < len(g); i++ {

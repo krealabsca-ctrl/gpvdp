@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"go.uber.org/zap"
 )
 
@@ -12,6 +13,22 @@ import (
 type fakeRepo struct {
 	cuenta   Cuenta
 	existing map[string]bool
+	// Reemisiones del banco (mig 0118). Lo que el servicio LEE para decidir si deja enlazar, y lo
+	// que ESCRIBIÓ, para que la prueba pueda comprobar que no enlazó cuando no correspondía.
+	candidatosReemision    []CandidatoReemision
+	reemisiones            []Reemision
+	vigenteReemision       datosDeMovimiento
+	salienteReemision      datosDeMovimiento
+	errDatosReemision      error
+	dependenciasMovimiento []DependenciaDeMovimiento
+	enlazoVigente          string
+	enlazoSaliente         string
+	enlazoMotivo           string
+	enlazoMotivoExclusion  string
+	enlazoHeredar          bool
+	deshizoReemision       string
+	// Formatos de banco configurados (mig 0108). Vacío = solo los seis del código.
+	formatos []FormatoBanco
 	// Tipo de cambio: en cero se comportan como los stubs originales.
 	cotizaciones     []Cotizacion
 	tcEstado         string
@@ -43,6 +60,18 @@ type fakeRepo struct {
 	agrupoPor     string
 	pidioDimID    string
 	presuGuardado [3]string
+	// Presupuesto de INGRESO (mig 0116): la otra mitad de la meta.
+	metasIngreso     []MetaIngreso
+	metaGuardada     [3]string
+	metaBorrada      [2]string
+	ingresoReal      []FilaIngreso
+	ingresoHistorico []FilaIngreso
+	ingresoTotal     decimal.Decimal
+	gastoTotal       decimal.Decimal
+	naturalezaClasif string
+	// Outlook del año (la tercera columna).
+	realPorMes  map[string][2]decimal.Decimal
+	metasPorMes map[string][2]decimal.Decimal
 	// Subpresupuesto por partida y administración del catálogo de departamentos
 	presuClasifID  string
 	usoDepto       UsoDepartamento
@@ -57,6 +86,14 @@ type fakeRepo struct {
 	// Análisis de partidas en el tiempo (tendencia y desvío contra su propio promedio)
 	saludMeses    []SaludMes
 	seriePartidas []TendenciaPartida
+	// Por rango «desde..hasta»: lo necesita la comparación anual, que pide DOS rangos distintos
+	// en la misma llamada. Si está vacío se usan los campos de arriba, que es lo que esperan las
+	// pruebas que ya existían.
+	saludPorRango map[string][]SaludMes
+	seriePorRango map[string][]TendenciaPartida
+	// La cartera de CxP que ve el flujo proyectado.
+	cxpVencido   decimal.Decimal
+	cxpPorVencer decimal.Decimal
 	// Día a día por partida: `serieDiaria` es lo que devuelve y `diarioPedido` guarda los ids con
 	// los que se lo llamó, para poder verificar el recorte y el dedup que hace el service.
 	serieDiaria  []SerieDiariaPartida
@@ -174,6 +211,23 @@ func (f *fakeRepo) ConfirmarConMovimientos(_ context.Context, _, _, _, _ string,
 }
 func (f *fakeRepo) SetCuentaIBANSiVacio(context.Context, string, string, string) error { return nil }
 
+// Formatos de banco configurables (mig 0108). El doble devuelve LO QUE SE LE SIEMBRE: la lista
+// vacía es el estado de toda instalación hasta que alguien configure el primero, y es la que hace
+// que estas pruebas sigan midiendo exactamente lo que medían antes —los seis del código—.
+func (f *fakeRepo) FormatosDeBanco(context.Context, string, bool) ([]FormatoBanco, error) {
+	return f.formatos, nil
+}
+
+func (f *fakeRepo) GuardarFormatoBanco(_ context.Context, _ string, fb FormatoBanco, _ string) (FormatoBanco, error) {
+	if fb.ID == "" {
+		fb.ID = "formato-de-prueba"
+	}
+	f.formatos = append(f.formatos, fb)
+	return fb, nil
+}
+
+func (f *fakeRepo) BorrarFormatoBanco(context.Context, string, string) error { return nil }
+
 func mp(fecha, doc, deb, cred string, indice int) MovimientoParsed {
 	t, _ := time.Parse("2006-01-02", fecha)
 	return MovimientoParsed{
@@ -234,3 +288,17 @@ func TestSeleccionarParaInsertar(t *testing.T) {
 		t.Errorf("USD: monto_original=%s monto_crc=%s, quería 100/0", usd[0].MontoOriginal, usd[0].MontoCRC)
 	}
 }
+
+// MovimientoEnlazable: el débito que una persona elige desde el arqueo de excepción (mig 0104).
+// Doble inerte: lo que hace es una consulta con sus guardas en el WHERE, y eso se prueba contra
+// PostgreSQL de verdad; acá existe para que el fake siga cumpliendo la interfaz.
+func (f *fakeRepo) MovimientoEnlazable(context.Context, string, string) (MovimientoEnlazable, error) {
+	return MovimientoEnlazable{}, ErrMovimientoNoEnlazable
+}
+
+// Deshacer el enlace (mig 0104). Dobles inertes: son consultas con sus guardas en el WHERE y se
+// prueban contra PostgreSQL de verdad.
+func (f *fakeRepo) EnlaceDelMovimiento(context.Context, string, string) (EnlaceDelMovimiento, error) {
+	return EnlaceDelMovimiento{}, ErrMovimientoSinEnlace
+}
+func (f *fakeRepo) LimpiarEnlacePago(context.Context, string, string) (int64, error) { return 0, nil }

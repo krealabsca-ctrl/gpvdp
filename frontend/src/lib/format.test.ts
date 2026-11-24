@@ -4,6 +4,7 @@ import {
   aFechaHora,
   finDeMes,
   formatMoneda,
+  formatTipoCambio,
   montoACentimos,
   montoLegible,
   montoParaApi,
@@ -139,5 +140,38 @@ describe("finDeMes", () => {
     // Armado con toISOString() daría el día anterior en Costa Rica (UTC−6), y el rango dejaría
     // afuera justo el último día del mes al que se saltó.
     expect(finDeMes("2026-12")).toBe("2026-12-31");
+  });
+});
+
+describe("formatTipoCambio", () => {
+  /**
+   * Los dos extremos tienen razones distintas y las dos salen de la operación real.
+   *
+   * ARRIBA: el TC del mes es el PROMEDIO de tres cotizaciones y casi nunca es exacto. Las de
+   * octubre 2026 dan (460,73 + 453,25 + 456,04) / 3 = 456,673333…, y recortar eso descuadra cada
+   * monto en dólares del mes contra el estado de cuenta: es el defecto que motivó la mig 0119.
+   *
+   * ABAJO: la base devuelve el valor sin ceros de relleno, así que un TC de 452,60 llega como
+   * «452.6». Un tipo de cambio con un solo decimal se lee como un error de carga.
+   */
+  it("conserva hasta seis decimales cuando el promedio los tiene", () => {
+    expect(formatTipoCambio("456.673333")).toBe("456,673333");
+  });
+
+  it("rellena hasta dos decimales cuando el valor viene corto", () => {
+    expect(formatTipoCambio("452.6")).toBe("452,60");
+    expect(formatTipoCambio("500")).toBe("500,00");
+  });
+
+  it("deja los decimales intermedios como están", () => {
+    expect(formatTipoCambio("460.73")).toBe("460,73");
+    expect(formatTipoCambio("454.8167")).toBe("454,8167");
+  });
+
+  it("no inventa un cero cuando no hay tipo de cambio", () => {
+    // Un mes sin congelar NO tiene TC; mostrar «0,00» diría que el dólar no vale nada.
+    expect(formatTipoCambio(null)).toBe("—");
+    expect(formatTipoCambio("")).toBe("—");
+    expect(formatTipoCambio(undefined)).toBe("—");
   });
 });

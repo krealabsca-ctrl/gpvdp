@@ -7,6 +7,7 @@ package cxp
 // y macros para dólares sin perder la integridad del mismo.»
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -108,15 +109,40 @@ func TestLineasDeMonedaFiltraYAvisaCuandoNoHay(t *testing.T) {
 
 // El neto a pagar NO puede restarle colones a una factura en dólares.
 //
-// `d.total` está en la moneda de la factura y `aa.monto_crc` en colones: a una factura de USD 1.000
-// con un anticipo de ₡100.000 le quedaba «1000 − 100000» y el GREATEST la dejaba en CERO. El
-// proveedor habría recibido una transferencia por nada.
+// EL RIESGO NO CAMBIÓ: `d.total` está en la moneda de la factura y `aa.monto_crc` guarda un
+// importe; a una factura de USD 1.000 con un anticipo de ₡100.000 le quedaría «1000 − 100000» y el
+// GREATEST la dejaría en CERO. El proveedor recibiría una transferencia por nada.
 //
-// Se verifica sobre el SQL porque es donde vive la fórmula; la prueba contra la base está en
-// service_test (el camino completo) y acá se fija que la condición no desaparezca.
+// LO QUE CAMBIÓ ES DÓNDE SE IMPIDE (20-oct-2026, hallazgo 3.8). Antes la guarda estaba en el SQL
+// —`AND d.moneda = 'CRC'`— y evitaba el error peor al precio de otro: una factura en dólares con
+// anticipo aplicado **se pagaba completa**, ignorando lo ya entregado. Ahora la guarda está en
+// `AplicarAnticipo`, que exige que el anticipo y la factura estén en la MISMA moneda, así que todo
+// lo que llega a `anticipo_aplicacion` es comparable con el total de su factura por construcción
+// y el SQL puede restar sin condición.
+//
+// Por eso esta prueba mira el servicio y ya no el SQL: si alguien quita esa comparación, el neto
+// vuelve a poder mezclar monedas y nada más lo atraparía.
 func TestElNetoNoMezclaMonedas(t *testing.T) {
-	if !strings.Contains(netoAPagarSQL, "d.moneda = 'CRC'") {
-		t.Fatal("el neto a pagar volvió a restar anticipos sin mirar la moneda de la factura: " +
-			"a una factura en dólares le restaría colones y quedaría en cero")
+	src, err := os.ReadFile("service_anticipo.go")
+	if err != nil {
+		t.Fatalf("leer service_anticipo.go: %v", err)
+	}
+	fuente := string(src)
+
+	// Las DOS puertas: la aplicación individual y la del lote. Que una sola compare no alcanza —el
+	// lote netea varios anticipos de una vez y es el camino que más se usa.
+	if !strings.Contains(fuente, "factura.Moneda != anticipo.Moneda") {
+		t.Error("AplicarAnticipo dejó de comparar la moneda de la factura con la del anticipo: " +
+			"el neto puede volver a restar colones a una factura en dólares y dejarla en cero")
+	}
+	if !strings.Contains(fuente, "anticipo.Moneda != factura.Moneda") {
+		t.Error("AplicarAnticiposLote dejó de comparar monedas: el camino del lote netea varios " +
+			"anticipos de una vez y es el que más se usa")
+	}
+	// Y el SQL NO debe volver a traer la condición vieja: con ella, una factura en dólares se paga
+	// completa aunque tenga anticipo aplicado, que es el defecto que esto vino a arreglar.
+	if strings.Contains(netoAPagarSQL, "d.moneda = 'CRC'") {
+		t.Error("volvió el `AND d.moneda = 'CRC'` al neto: una factura en dólares con anticipo " +
+			"aplicado se pagaría completa, pagando dos veces lo ya entregado")
 	}
 }

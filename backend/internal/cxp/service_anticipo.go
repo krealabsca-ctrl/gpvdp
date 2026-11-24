@@ -56,7 +56,19 @@ func (s *Service) AplicarAnticipo(ctx context.Context, empresaID, facturaID, ant
 	if factura.ProveedorID != anticipo.ProveedorID {
 		return Documento{}, ErrProveedorDistinto
 	}
-	if factura.Moneda != "CRC" || anticipo.Moneda != "CRC" {
+	// LA MISMA MONEDA, NO «SOLO COLONES» (hallazgo 3.8, 20-oct-2026).
+	//
+	// Hasta hoy esto exigía CRC en los dos lados, y aguas abajo `netoAPagarSQL` llevaba un
+	// `AND d.moneda = 'CRC'` que, en una factura en dólares, hacía que los anticipos **no se
+	// restaran**: se pagaba completa, ignorando lo ya entregado. Inerte mientras las 4.542
+	// facturas estuvieran en colones, pero la migración 0095 ya trajo macros por moneda, o sea
+	// que el sistema espera facturas en dólares.
+	//
+	// NO se convierte entre monedas. Decisión del Director Financiero (20-oct-2026), y es la
+	// misma regla que ya aplica la conciliación por huella: con qué tipo de cambio —el del día,
+	// compra o venta, el congelado del mes— es una decisión contable que no está tomada, y
+	// elegir una acá la inventaría. Un anticipo en dólares netea una factura en dólares.
+	if factura.Moneda != anticipo.Moneda {
 		return Documento{}, ErrMonedaNoNeteable
 	}
 	// Pre-chequeo con mensaje específico (la guarda atómica definitiva vive en el repo).
@@ -99,9 +111,8 @@ func (s *Service) AplicarAnticiposLote(ctx context.Context, empresaID, facturaID
 	default:
 		return Documento{}, ErrFacturaNoNeteable
 	}
-	if factura.Moneda != "CRC" {
-		return Documento{}, ErrMonedaNoNeteable
-	}
+	// En el lote la moneda de referencia es la de la FACTURA: cada anticipo se compara contra
+	// ella, abajo. Ver el porqué en AplicarAnticipo.
 	neto, _ := decimal.NewFromString(factura.NetoCRC)
 	suma := decimal.Zero
 	vistos := map[string]bool{}
@@ -127,7 +138,7 @@ func (s *Service) AplicarAnticiposLote(ctx context.Context, empresaID, facturaID
 		if anticipo.ProveedorID != factura.ProveedorID {
 			return Documento{}, ErrProveedorDistinto
 		}
-		if anticipo.Moneda != "CRC" {
+		if anticipo.Moneda != factura.Moneda {
 			return Documento{}, ErrMonedaNoNeteable
 		}
 		saldo, err := s.repo.SaldoAnticipo(ctx, empresaID, l.AnticipoID)

@@ -8,6 +8,7 @@ import { NotFoundPage } from "@/routes/NotFoundPage";
 // Módulo Bancos (Fase 1 + Bandeja de clasificación Fase A)
 import { DashboardPage } from "@/features/bancos/pages/DashboardPage";
 import { ImportadorPage } from "@/features/bancos/pages/ImportadorPage";
+import { FormatosBancoPage } from "@/features/bancos/pages/FormatosBancoPage";
 import { DuplicadosPage } from "@/features/bancos/pages/DuplicadosPage";
 import { PagosExternosPage } from "@/features/bancos/pages/PagosExternosPage";
 import { ClasificarPage } from "@/features/bancos/pages/ClasificarPage";
@@ -16,6 +17,10 @@ import { MiSegmentoPage } from "@/features/bancos/pages/MiSegmentoPage";
 import { TipoCambioPage } from "@/features/bancos/pages/TipoCambioPage";
 import { ExportarPage } from "@/features/bancos/pages/ExportarPage";
 import { ProyeccionesPage } from "@/features/bancos/pages/ProyeccionesPage";
+import { FlujoCajaPage } from "@/features/flujocaja/pages/FlujoCajaPage";
+import { RatiosPage } from "@/features/ratios/pages/RatiosPage";
+import { DriversPage } from "@/features/ratios/pages/DriversPage";
+import { OutlookPage } from "@/features/bancos/pages/OutlookPage";
 import { AnalisisPage } from "@/features/bancos/pages/AnalisisPage";
 import { ControlPage } from "@/features/bancos/pages/ControlPage";
 import { SaldosDiariosPage } from "@/features/bancos/pages/SaldosDiariosPage";
@@ -25,6 +30,15 @@ import { SeguridadPage } from "@/features/bancos/pages/SeguridadPage";
 import { UsuariosPage } from "@/features/bancos/pages/UsuariosPage";
 import { NotificacionesPage } from "@/features/config/pages/NotificacionesPage";
 import { CorreoSalientePage } from "@/features/config/pages/CorreoSalientePage";
+import { IncidentesPage } from "@/features/config/pages/IncidentesPage";
+import { ConsultasLentasPage } from "@/features/config/pages/ConsultasLentasPage";
+import { AyudaPage } from "@/features/ayuda/pages/AyudaPage";
+import { PlanDeCuentasPage } from "@/features/conta/pages/PlanDeCuentasPage";
+import { MapeoContablePage } from "@/features/conta/pages/MapeoContablePage";
+import { BancosContablesPage } from "@/features/conta/pages/BancosContablesPage";
+import { LibrosPage } from "@/features/conta/pages/LibrosPage";
+import { GenerarAsientosPage } from "@/features/conta/pages/GenerarAsientosPage";
+import { CierrePage } from "@/features/conta/pages/CierrePage";
 import { ChangePasswordPage } from "@/features/auth/ChangePasswordPage";
 // Módulo CxP (Fase 2) — la Bandeja es la superficie de trabajo única.
 import { BandejaPage } from "@/features/cxp/pages/BandejaPage";
@@ -43,6 +57,7 @@ import { ComprobantesPage } from "@/features/cxp/pages/ComprobantesPage";
 import { GastoPage } from "@/features/cxp/pages/GastoPage";
 import { FuentesRecepcionPage } from "@/features/cxp/pages/FuentesRecepcionPage";
 import { DashboardCxpPage } from "@/features/cxp/pages/DashboardCxpPage";
+import { ArqueoPage } from "@/features/cxp/pages/ArqueoPage";
 import { ResponsabilidadesPage } from "@/features/cxp/pages/ResponsabilidadesPage";
 import { MisResponsabilidadesPage } from "@/features/cxp/pages/MisResponsabilidadesPage";
 // Módulo CxC (fase 1) — cartera sobre partidas abiertas.
@@ -113,6 +128,8 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <DashboardPage /> },
           { path: "importador", element: <ImportadorPage /> },
+          // Enseñarle al sistema a leer un banco que no viene de fábrica (mig 0108).
+          { path: "formatos", element: <FormatosBancoPage /> },
           { path: "pagos-externos", element: <PagosExternosPage /> },
           // Sacar de los libros un movimiento que el banco cargó dos veces (mig 0093).
           { path: "duplicados", element: <DuplicadosPage /> },
@@ -127,6 +144,10 @@ export const router = createBrowserRouter([
           { path: "analisis", element: <AnalisisPage /> },
           { path: "control", element: <ControlPage /> },
           { path: "proyecciones", element: <ProyeccionesPage /> },
+          { path: "flujo-caja", element: <FlujoCajaPage /> },
+          { path: "ratios", element: <RatiosPage /> },
+          { path: "drivers", element: <DriversPage /> },
+          { path: "outlook", element: <OutlookPage /> },
           { path: "saldos-diarios", element: <SaldosDiariosPage /> },
           // Ruta vieja (se llamó «tesoreria» un día): el nombre chocaba con el módulo futuro.
           { path: "tesoreria", element: <Navigate to="/saldos-diarios" replace /> },
@@ -136,9 +157,22 @@ export const router = createBrowserRouter([
           { path: "usuarios", element: <UsuariosPage /> },
           { path: "notificaciones", element: <NotificacionesPage /> },
           { path: "correo-saliente", element: <CorreoSalientePage /> },
+          // Donde se canjea la referencia que un usuario dicta por la causa exacta (mig 0107).
+          { path: "incidentes", element: <IncidentesPage /> },
+          { path: "consultas-lentas", element: <ConsultasLentasPage /> },
+          // El manual, adentro del sistema. Sin permiso: la ayuda la ve todo el mundo.
+          { path: "ayuda", element: <AyudaPage /> },
+          // Contabilidad · Fase 1: el plan de cuentas (mig 0109). Todavía no contabiliza nada.
+          { path: "conta/plan", element: <PlanDeCuentasPage /> },
+          { path: "conta/mapeo", element: <MapeoContablePage /> },
+          { path: "conta/bancos", element: <BancosContablesPage /> },
+          { path: "conta/libros", element: <LibrosPage /> },
+          { path: "conta/generar", element: <GenerarAsientosPage /> },
+          { path: "conta/cierre", element: <CierrePage /> },
           // Módulo CxP (Fase 2) — Bandeja única + páginas de apoyo.
           { path: "cxp/bandeja", element: <BandejaPage /> },
           { path: "cxp/dashboard", element: <DashboardCxpPage /> },
+          { path: "cxp/arqueo", element: <ArqueoPage /> },
           { path: "cxp/importar", element: <ImportarPage /> },
           { path: "cxp/recepcion", element: <RecepcionPage /> },
           // Responsabilidades mensuales (mig 0082): lo que se ESPERA, no lo que llegó.

@@ -192,3 +192,21 @@ func TestElBarridoLeMandaACxPLaMonedaDeLaCuenta(t *testing.T) {
 		t.Error("el hallazgo de moneda no llegó al detalle del reporte")
 	}
 }
+
+// ConciliarDocumento: el enlace que elige una persona (mig 0104). El fake devuelve lo que se le
+// haya cargado para el documento pedido, igual que hace con la huella.
+func (c *conciliadorFake) ConciliarDocumento(_ context.Context, _, documentoID, montoBanco, moneda, _, _ string) (ResultadoHuella, error) {
+	c.llamados++
+	if c.monedasVistas != nil {
+		c.monedasVistas[documentoID] = moneda
+	}
+	return ResultadoHuella{DocumentoID: documentoID, MontoBanco: montoBanco, Veredicto: HuellaConciliado}, nil
+}
+
+func (c *conciliadorFake) DesconciliarPago(_ context.Context, _, documentoID, remesaID, _, _ string) (int, error) {
+	c.llamados++
+	if documentoID == "" && remesaID == "" {
+		return 0, nil
+	}
+	return 1, nil
+}

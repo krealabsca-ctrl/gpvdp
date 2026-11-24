@@ -71,7 +71,7 @@ y documentado con la evidencia del débito SINPE real. Es el precedente directo 
 
 ## 3 · Hallazgos
 
-### 3.1 · CRÍTICO — No existe el control de «pagos declarados que el banco nunca debitó»
+### 3.1 · CRÍTICO — No existe el control de «pagos declarados que el banco nunca debitó» · **CERRADO 20-oct-2026**
 
 **Evidencia medida:** 66 facturas en estado PAGADO, con fecha de pago programada entre el 10 de julio
 y el 2 de octubre de 2026. Las 66 pasaron por `PAGAR_DOCUMENTO` y las 66 están asignadas a un lote.
@@ -125,7 +125,7 @@ Es el mismo riesgo que la reversa ya reconoció y cerró, por una puerta que se 
 
 ---
 
-### 3.3 · ALTO — Un lote de pago nunca se cierra
+### 3.3 · ALTO — Un lote de pago nunca se cierra · **CERRADO 20-oct-2026**
 
 **Evidencia medida:** 36 lotes, **todos en estado ABIERTO**, creados entre el 13 de julio y el 13 de
 octubre de 2026.
@@ -161,7 +161,7 @@ dice que falta.
 
 ---
 
-### 3.5 · MEDIO — El pago parcial no tiene salida
+### 3.5 · MEDIO — El pago parcial no tiene salida · **CERRADO 20-oct-2026**
 
 La conciliación exige coincidencia **exacta** («en colones no hay diferencial que justifique
 tolerancia»), lo cual es correcto como criterio. El problema es lo que pasa después: el veredicto
@@ -175,7 +175,7 @@ de montos parciales.
 
 ---
 
-### 3.6 · MEDIO — No existen las notas de crédito del proveedor
+### 3.6 · MEDIO — No existen las notas de crédito del proveedor · **CERRADO 21-oct-2026**
 
 El neto a pagar es `total − retención − anticipos`. No hay tabla, estado ni campo para una nota de
 crédito emitida por el proveedor.
@@ -186,7 +186,7 @@ Una NC se vuelve una factura que no se puede conciliar nunca.
 
 ---
 
-### 3.7 · MEDIO — El rebote del banco es enteramente manual
+### 3.7 · MEDIO — El rebote del banco es enteramente manual · **CERRADO 20-oct-2026**
 
 `REBOTADA` (el banco rechazó el pago dentro de un lote) solo se escribe desde
 `POST /cxp/documentos/:id/rebotar`. **Evidencia:** 16 rebotes registrados, los 16 a mano.
@@ -197,7 +197,7 @@ hallazgo 3.1 — un solo reporte resuelve los dos.
 
 ---
 
-### 3.8 · MEDIO — Los anticipos en dólares no se restan del neto
+### 3.8 · MEDIO — Los anticipos en dólares no se restan del neto · **CERRADO 20-oct-2026**
 
 Autodocumentado en `repository_conciliacion.go:25`:
 

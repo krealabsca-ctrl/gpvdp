@@ -134,6 +134,7 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 	var fechasIlegibles *FechasIlegiblesError
 	var reversaBloqueada *ReversaBloqueadaError
 	var historicoBloqueado *HistoricoBloqueadoError
+	var encabezado *ErrorDeEncabezado
 	switch {
 	case errors.Is(err, ErrCuentaNoEncontrada), errors.Is(err, ErrImportacionNoEncontrada),
 		errors.Is(err, ErrMovimientoNoEncontrado), errors.Is(err, ErrConceptoNoEncontrado),
@@ -159,26 +160,61 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 	// actual, y su frase entera dice qué hacer en su lugar.
 	case errors.Is(err, ErrMovimientoNoExcluible), errors.Is(err, ErrMovimientoNoIncluible):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoPaquete(err))
-	// `ErrExclusionConCxP` va con el mismo 422 que `ErrDivisionConCxP`: es el mismo hecho —el
-	// movimiento está enlazado a una factura— y el mismo arreglo.
+	// Enlazar a mano un débito con su factura (hallazgo 3.1). El movimiento que no se puede
+	// enlazar es un CONFLICTO —existe, pero ya está tomado, excluido o no es un débito— y su
+	// frase entera dice qué tendría que cumplir.
+	case errors.Is(err, ErrMovimientoSinEnlace), errors.Is(err, ErrNadaQueReabrir):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrMovimientoNoEnlazable):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrMotivoEnlaceRequerido):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrSinConciliadorCxP):
+		httpx.Abort(c, http.StatusServiceUnavailable, httpx.CodeReglaNegocio, sinPrefijoPaquete(err))
+	// `ErrExclusionConCxP` va con 422: el pedido está bien escrito y lo que no se cumple es la
+	// regla —el movimiento es el pago de una factura, y sacarlo de los libros dejaría esa factura
+	// conciliada contra plata que ya no está. Repartirlo SÍ se puede: no saca nada.
 	case errors.Is(err, ErrMotivoExclusionRequerido), errors.Is(err, ErrRangoDuplicadosRequerido),
 		errors.Is(err, ErrExclusionConCxP):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoPaquete(err))
+	// Enlazar dos movimientos reemitidos por el banco (mig 0118). «No encontrada» es 404; el resto
+	// son 422 porque el pedido está bien escrito y lo que falla es la regla. Cada uno lleva su frase
+	// entera: el arreglo es distinto según sea el período cerrado, un enlace previo o algo colgando,
+	// y `ErrReemisionConDependencias` viene envuelto con la lista de qué hay que deshacer.
+	case errors.Is(err, ErrReemisionNoEncontrada), errors.Is(err, ErrReemisionNoExiste):
+		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrReemisionYaEnlazada), errors.Is(err, ErrReemisionFueraDeLibros):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrMotivoReemisionRequerido), errors.Is(err, ErrReemisionMismoMovimiento),
+		errors.Is(err, ErrReemisionDistintaCuenta), errors.Is(err, ErrReemisionDistintoMonto),
+		errors.Is(err, ErrReemisionPeriodoCerrado), errors.Is(err, ErrReemisionConDependencias):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoPaquete(err))
 	// Dividir un movimiento (mig 0094). Cada causa lleva su frase entera porque cada una tiene un
-	// arreglo distinto —devolverlo a los libros, desenlazarlo de CxP, dividir el principal, bajar
-	// el monto—, y un «no se puede» a secas obliga a adivinar cuál es.
+	// arreglo distinto —devolverlo a los libros, dividir el principal, bajar el monto—, y un «no se
+	// puede» a secas obliga a adivinar cuál es.
 	case errors.Is(err, ErrParteNoEncontrada):
 		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, sinPrefijoPaquete(err))
 	case errors.Is(err, ErrMovimientoNoDivisible), errors.Is(err, ErrParteNoDivisible),
 		errors.Is(err, ErrMovimientoExcluidoNoSeDivide):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoPaquete(err))
 	case errors.Is(err, ErrMontoDivisionInvalido), errors.Is(err, ErrMontoDivisionExcede),
-		errors.Is(err, ErrDivisionConCxP), errors.Is(err, ErrDivisionSinClasificacion):
+		errors.Is(err, ErrDivisionSinClasificacion):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoPaquete(err))
 	// Dimensiones y presupuesto.
 	case errors.Is(err, ErrSedeNoEncontrada), errors.Is(err, ErrPresupuestoNoEncontrado),
 		errors.Is(err, ErrDepartamentoNoEncontrado):
 		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, sinPrefijoPaquete(err))
+	// Presupuesto de INGRESO (mig 0116). Van con su texto completo porque cada uno dice QUÉ
+	// corregir: un período mal escrito, un monto negativo o una partida que no es de ingreso se
+	// arreglan de formas distintas, y «datos inválidos» obliga a adivinar cuál de las tres es.
+	case errors.Is(err, ErrPeriodoMetaInvalido), errors.Is(err, ErrMetaIngresoInvalida):
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, sinPrefijoPaquete(err))
+	// Esta es de NEGOCIO y no de forma: el pedido está bien escrito y lo que no se cumple es que
+	// una meta de ingreso solo va sobre una partida de ingreso.
+	case errors.Is(err, ErrAnioInvalido):
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrLineaNoEsDeIngreso):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoPaquete(err))
 	// Consulta por segmento (mig 0077). `ErrFueraDeAlcance` es 404 y no 403 a propósito: para ese
 	// rol el movimiento no existe, y un 403 confirmaría que existe.
 	case errors.Is(err, ErrFueraDeAlcance), errors.Is(err, ErrReporteNoEncontrado),
@@ -203,6 +239,12 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 	// una caída del servidor, y reintentaba el mismo archivo.
 	case errors.Is(err, ErrClasifExcelSinEncabezado), errors.Is(err, ErrClasifExcelVacio),
 		errors.Is(err, ErrClasifExcelDemasiadasFilas):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoPaquete(err))
+	// El encabezado que no se reconoció, CON lo que el archivo traía (21-oct-2026). Es un error
+	// TIPADO, no un centinela, porque su texto cambia con cada archivo: lleva adentro las primeras
+	// filas y qué se entendió de cada una. Sin este caso saldría por el `default` como 500 y el
+	// diagnóstico entero —que es el punto— no llegaría a la pantalla.
+	case errors.As(err, &encabezado):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoPaquete(err))
 	// Lo mismo para el diccionario del catálogo: sus dos centinelas tampoco estaban mapeados.
 	case errors.Is(err, ErrDiccionarioVacio), errors.Is(err, ErrDiccionarioSinEncabezado):
@@ -287,6 +329,17 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, err.Error())
 	case errors.Is(err, ErrSaldoInvalido), errors.Is(err, ErrSinCuentas):
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, err.Error())
+	// Formatos de banco configurables (mig 0108). Los de validación van con su texto completo:
+	// cada uno explica QUÉ falta, y es lo único que tiene quien está configurando columnas por
+	// número. Un «datos inválidos» genérico acá deja a alguien probando a ciegas.
+	case errors.Is(err, ErrFormatoSinNombre), errors.Is(err, ErrFormatoFechaDesconocida),
+		errors.Is(err, ErrFormatoColumnaInvalida), errors.Is(err, ErrFormatoDebilParaDetectar),
+		errors.Is(err, ErrFormatoSenalVacia):
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrFormatoNoEncontrado):
+		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrFormatoDuplicado):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoPaquete(err))
 	default:
 		httpx.AbortInterno(c, h.log, "bancos "+op, err)
 	}

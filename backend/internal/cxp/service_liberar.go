@@ -3,6 +3,9 @@ package cxp
 import (
 	"context"
 	"fmt"
+	"strings"
+
+	"github.com/gpvdp/erp/internal/shared"
 )
 
 // FacturasDeContado lista lo que quedó trancado por el candado, para UN proveedor.
@@ -72,5 +75,49 @@ func (s *Service) LiberarParaPago(ctx context.Context, empresaID, proveedorID st
 			res.NoSePudo[id] = "No es de este proveedor, o cambió mientras se confirmaba."
 		}
 	}
+
+	// ── QUE LAS PRÓXIMAS NO NAZCAN BLOQUEADAS ───────────────────────────────────────────────
+	//
+	// Va DESPUÉS de liberar y solo si algo se liberó: configurar la ficha cuando no se pudo
+	// liberar nada dejaría al proveedor cambiado por una operación que falló, y nadie ataría una
+	// cosa con la otra después.
+	//
+	// El cambio se audita aparte del de cada factura: es de otro alcance —gobierna TODAS las
+	// facturas futuras— y mezclarlo en la nota de un documento lo haría invisible.
+	if in.ConfigurarProveedor && len(liberadas) > 0 {
+		cambio, err := s.repo.ConfigurarProveedorSinCandado(ctx, empresaID, proveedorID)
+		if err != nil {
+			return ResultadoLiberacion{}, err
+		}
+		res.ProveedorConfigurado = true
+		if cambio {
+			res.QueSeConfiguro = "La ficha quedó en CRÉDITO y con «manda el convenio»: las próximas facturas de este proveedor no van a nacer bloqueadas."
+			s.auditarProveedor(ctx, empresaID, proveedorID, "CONFIGURAR_SIN_CANDADO", usuarioID,
+				fmt.Sprintf("Al liberar %d factura(s) se dejó la ficha en CRÉDITO con «manda el convenio» para que las próximas no nazcan bloqueadas. Motivo de la liberación: %s",
+					len(liberadas), in.Motivo))
+		} else {
+			// Ya estaba configurada: no se anuncia un cambio que no ocurrió.
+			res.QueSeConfiguro = "La ficha ya estaba configurada para que las próximas no nazcan bloqueadas."
+		}
+	}
 	return res, nil
+}
+
+// auditarProveedor deja la huella de un cambio en la FICHA, distinto del de un documento.
+//
+// Entidad propia y no `documento_cxp`: el cambio gobierna todas las facturas futuras del
+// proveedor, y colgarlo de la nota de un documento lo volvería invisible justo cuando alguien
+// pregunte por qué dejaron de nacer bloqueadas.
+func (s *Service) auditarProveedor(ctx context.Context, empresaID, proveedorID, accion, usuarioID, nota string) {
+	if s.audit == nil {
+		return
+	}
+	ev := shared.Evento{
+		EmpresaID: &empresaID, Entidad: "proveedor", EntidadID: &proveedorID,
+		Accion: accion, UsuarioID: &usuarioID,
+	}
+	if strings.TrimSpace(nota) != "" {
+		ev.ValorNuevo = map[string]string{"nota": strings.TrimSpace(nota)}
+	}
+	s.audit.Registrar(ctx, ev)
 }

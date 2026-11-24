@@ -12,6 +12,8 @@ import { useState } from "react";
 
 import { Badge, Button, LoadingState, ErrorState } from "@/components/ui";
 import { formatFecha, formatMoneda } from "@/lib/format";
+import { AvisoDeCortePanel } from "@/features/cxp/components/AvisoDeCortePanel";
+import { CronogramaPanel } from "@/features/cxp/components/CronogramaPanel";
 import { mensajeError } from "@/lib/apiError";
 import { cxpApi } from "@/api/cxp";
 import { useReporteLote } from "@/features/cxp/hooks";
@@ -168,6 +170,14 @@ export function ReporteLotePanel({
               </p>
             </div>
           )}
+
+          {/* El cronograma va ANTES del respaldo: uno se manda para avisar lo que se va a pagar
+              y el otro cuando ya se pagó, y ese es el orden en que se usan. */}
+          <CronogramaPanel loteId={loteId} />
+
+          {/* El respaldo del pago va DENTRO del panel del corte y no en una pantalla aparte: es
+              el mismo corte visto de otra forma, y quien lo necesita ya está acá mirándolo. */}
+          <AvisoDeCortePanel loteId={loteId} />
         </div>
       </div>
     </div>

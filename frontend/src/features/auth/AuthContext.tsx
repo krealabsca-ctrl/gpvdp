@@ -27,6 +27,7 @@ import { authApi } from "@/api/auth";
 import { setOnSessionExpired } from "@/api/client";
 import { tokenStore } from "@/lib/tokenStore";
 import { getEmpresaIdFromToken } from "@/lib/jwt";
+import { olvidarPermisos } from "@/lib/permisosCache";
 import type { EmpresaActiva, EmpresaMembresia, Usuario } from "@/api/types";
 
 export type AuthStatus = "loading" | "authenticated" | "unauthenticated";
@@ -81,6 +82,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const setUnauthenticated = useCallback(() => {
     tokenStore.clear();
+    // Los permisos recordados son de QUIEN INICIÓ SESIÓN. `queryClient.clear()` vacía la memoria,
+    // pero estos viven en localStorage para sobrevivir a la recarga: sin este borrado, el siguiente
+    // que entre en esta máquina vería el menú del anterior hasta que llegue la revalidación.
+    olvidarPermisos();
     queryClient.clear();
     setState({
       status: "unauthenticated",

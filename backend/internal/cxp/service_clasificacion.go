@@ -44,10 +44,18 @@ func (s *Service) GastosFrecuentes(ctx context.Context, empresaID, proveedorID s
 	return s.repo.GastosDeProveedor(ctx, empresaID, proveedorID)
 }
 
-// AsignarPrioridadMasivo fija la prioridad interna (AA/A/"") de un lote de facturas.
+// AsignarPrioridadMasivo fija la prioridad interna de un lote de facturas.
+//
+// El código se valida contra el catálogo de la empresa ANTES de tocar nada (mig 0121): con el
+// CHECK fuera de la base, esta es la única puerta que impide dejar facturas marcadas con una
+// prioridad que ninguna pantalla sabe nombrar. Se comprueba una vez para todo el lote y no por
+// documento: el catálogo es el mismo para los mil.
 func (s *Service) AsignarPrioridadMasivo(ctx context.Context, empresaID, usuarioID string, ids []string, prioridad string) (ResultadoMasivo, error) {
 	if len(ids) == 0 {
 		return ResultadoMasivo{}, ErrSinDocumentos
+	}
+	if err := s.validarPrioridad(ctx, empresaID, prioridad); err != nil {
+		return ResultadoMasivo{}, err
 	}
 	res := ResultadoMasivo{Resultados: make([]ResultadoTransicion, 0, len(ids))}
 	for _, id := range ids {

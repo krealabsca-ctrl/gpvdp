@@ -53,6 +53,23 @@ const motivoLiberacionMinimo = 20
 type LiberacionInput struct {
 	DocumentoIDs []string
 	Motivo       string
+	// ConfigurarProveedor deja la ficha lista para que las PRÓXIMAS no nazcan bloqueadas.
+	//
+	// ── POR QUÉ ESTO ESTÁ ACÁ Y NO EN OTRA PANTALLA (4-nov-2026) ─────────────────────────────
+	//
+	// Textual del Director Financiero: «cuando una factura ya fue liberada, debería guardar el
+	// comportamiento de que las próximas deben venir liberadas; de lo contrario siempre hay que
+	// irlas a liberar y ya es algo de la cotidianidad del proveedor».
+	//
+	// Liberar no dejaba memoria: arreglaba las facturas que ya estaban y nada más. El ajuste que
+	// sí arregla las futuras vivía en la ficha, había que acordarse de ir a ponerlo, y —medido—
+	// NINGUNO de los 649 proveedores lo tenía.
+	//
+	// Peor: el aviso aconsejaba marcar «manda el convenio» a secas, y eso SOLO no alcanza. La
+	// regla de la migración 0097 exige las DOS cosas (`convenio_manda = PROVEEDOR` Y
+	// `condicion_pago = CREDITO`), y 573 de 649 proveedores están en CONTADO — o sea que para el
+	// caso dominante el consejo no hacía nada, y la factura siguiente volvía a nacer trancada.
+	ConfigurarProveedor bool
 }
 
 // FacturaDeContado es una factura trancada por el candado del contado, lista para mostrar antes
@@ -98,4 +115,13 @@ type ResultadoLiberacion struct {
 	Liberadas []FacturaLiberada `json:"liberadas"`
 	// NoSePudo: id → por qué. Vacío si todas entraron.
 	NoSePudo map[string]string `json:"no_se_pudo"`
+
+	// ProveedorConfigurado: la ficha quedó lista para que las próximas no nazcan bloqueadas.
+	//
+	// SE INFORMA SIEMPRE que se haya pedido, porque cambia cómo nacen TODAS las facturas futuras
+	// de ese proveedor —no solo las que se acaban de liberar—. Un cambio de ese alcance hecho en
+	// silencio, de pasada, es el que después nadie puede explicar.
+	ProveedorConfigurado bool `json:"proveedor_configurado"`
+	// QueSeConfiguro describe el cambio en palabras, para el mensaje de confirmación.
+	QueSeConfiguro string `json:"que_se_configuro,omitempty"`
 }

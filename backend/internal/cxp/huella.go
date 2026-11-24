@@ -35,6 +35,14 @@ const (
 	// una factura de USD 1.500 y un débito de ₡1.500 son números iguales y hechos incomparables.
 	// Comparar importes sin mirar la moneda los daría por conciliados.
 	HuellaMonedaDiferente = "MONEDA_DIFERENTE"
+	// HuellaEstadoInvalido: la factura que una persona eligió para enlazar a mano no está
+	// declarada como pagada, así que no hay pago que conciliar. Solo lo usa el enlace manual: el
+	// barrido llega desde la huella, y una factura sin pagar no tiene huella en el banco.
+	//
+	// Es un VEREDICTO y no un centinela a propósito. Esto cruza el puerto hacia Bancos, que NO
+	// puede importar este paquete, así que un error de acá llegaría allá opaco y saldría por el
+	// `default` como 500 «error interno» — el modo de falla que el centinela de traducción vigila.
+	HuellaEstadoInvalido = "ESTADO_INVALIDO"
 )
 
 // ResultadoHuella es lo que CxP le contesta a Bancos por cada movimiento examinado.

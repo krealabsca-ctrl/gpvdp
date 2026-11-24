@@ -252,6 +252,9 @@ func columnasDetalle() []ColumnaReporte {
 		{Titulo: "Concepto", Ancho: 22, Tipo: "texto"},
 		{Titulo: "Clasificación", Ancho: 28, Tipo: "texto"},
 		{Titulo: "Consecutivo largo", Ancho: 27, Tipo: "texto"},
+		// Va AL FINAL y no entre las columnas existentes: quien tenga una macro o una tabla
+		// dinámica armada sobre este reporte sigue encontrando cada columna donde estaba.
+		{Titulo: "Reparto", Ancho: 14, Tipo: "texto"},
 	}
 }
 
@@ -265,6 +268,7 @@ func filaDetalle(m MovimientoExport, concepto, clasificacion string) []any {
 		m.Descripcion, bancoCuenta(m),
 		concepto, clasificacion,
 		ConsecutivoLargo(m.Banco, m.Descripcion),
+		m.Reparto,
 	}
 }
 

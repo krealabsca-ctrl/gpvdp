@@ -83,6 +83,14 @@ func (s *Service) MiSegmento(ctx context.Context, empresaID, usuarioID, vista st
 
 	f.Alcance = alcance
 	f.Tipo = "CREDITO"
+	// Lo que no suma, no se muestra. Es la TERCERA cosa que esta pantalla fuerza y no pide.
+	//
+	// Revertir una importación es trabajo de quien administra Bancos; el equipo que consulta su
+	// partida no puede hacer nada con esa fila. Mostrársela costaba dos números que se
+	// contradicen —el paginador la cuenta, la suma de dinero no— y obligaba a explicarlo con una
+	// leyenda al pie que, encima, afirmaba «importación revertida» también sobre lo que la
+	// tesorera había sacado a mano por duplicado.
+	f.SoloIncluidos = true
 	// El estado de clasificación no se filtra: todo lo que sale TIENE clasificación por definición,
 	// porque el alcance ES una lista de clasificaciones.
 	lista, err := s.repo.ListarMovimientos(ctx, empresaID, f)

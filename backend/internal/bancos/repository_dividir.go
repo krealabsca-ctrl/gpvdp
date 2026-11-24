@@ -50,7 +50,6 @@ func (r *pgRepository) DividirMovimiento(ctx context.Context, empresaID, movID s
 		       actualizado_en = now()
 		 WHERE m.empresa_id = $1::uuid AND m.id = $2::uuid AND m.incluido
 		   AND m.dividido_de IS NULL
-		   AND m.documento_cxp_id IS NULL AND m.remesa_id IS NULL
 		   AND (COALESCE(m.debito,0) + COALESCE(m.credito,0)) > $3::numeric
 		RETURNING m.cuenta_bancaria_id::text, m.importacion_id::text, m.fecha::text,
 		          COALESCE(m.documento,''), COALESCE(m.descripcion,''),
@@ -61,8 +60,12 @@ func (r *pgRepository) DividirMovimiento(ctx context.Context, empresaID, movID s
 		Scan(&cuentaID, &impID, &fecha, &documento, &descripcion, &esDebito, &naturalKey, &monedaOrig)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Una sola respuesta para varias causas —no existe, ya está fuera de los libros, ya es una
-		// parte, está enlazado a una factura, o el monto no alcanza—, y el service ya las
-		// distinguió antes con un mensaje propio. Acá llega como la carrera que no se pudo ganar.
+		// parte, o el monto no alcanza—, y el service ya las distinguió antes con un mensaje
+		// propio. Acá llega como la carrera que no se pudo ganar.
+		//
+		// Estar enlazado a una factura YA NO es una de ellas (2-nov-2026): el enlace queda en el
+		// principal, la parte no lo hereda, y las caras siguen sumando lo que se le pagó. Ver
+		// PuedeDividirse.
 		return "", ErrMovimientoNoDivisible
 	}
 	if err != nil {
@@ -219,6 +222,9 @@ func (r *pgRepository) PartesDeMovimiento(ctx context.Context, empresaID, movID 
 		return Division{}, ErrMovimientoNoEncontrado
 	}
 	d.MovimientoID = raizID
+	// El código sale de la RAÍZ, que es el principal: así es el mismo se abra el reparto desde el
+	// original o desde cualquiera de sus partes, y el mismo que sale en la parrilla y en el .xlsx.
+	d.Codigo = CodigoDeReparto(raizID)
 	d.SumaDeLasPartes = total.StringFixed(2)
 	return d, nil
 }

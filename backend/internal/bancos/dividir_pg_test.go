@@ -359,3 +359,97 @@ func TestNoSeDivideUnMovimientoDeOtraEmpresa(t *testing.T) {
 		t.Fatal("el movimiento cambió desde otra empresa")
 	}
 }
+
+// ── El pago de una factura SÍ se reparte (2-nov-2026) ───────────────────────────────────────
+
+// EL CASO del Director Financiero: un débito de $4.565,14 que pagó una factura de Avantec por ese
+// mismo monto, del que $2.000 corresponden a Coopeprofa. El gasto es de la otra empresa; el pago
+// al proveedor no cambia.
+//
+// Hasta esta fecha estaba prohibido, por un riesgo que se midió y resultó ser de PRESENTACIÓN:
+// ningún proceso compara el monto del movimiento contra el de la factura —la conciliación enlaza
+// por la huella que viaja en la descripción—, y el único lugar donde se notaba era el expediente
+// de la factura, que ahora suma las caras.
+//
+// LO QUE ESTE TEST PROTEGE es lo que hace que eso sea cierto: que el enlace quede en el PRINCIPAL
+// y que la parte NO lo herede. Si la parte lo heredara, la factura quedaría apuntada desde dos
+// filas y el expediente contaría el pago dos veces.
+func TestSeDivideElPagoDeUnaFacturaYElEnlaceQuedaEnElPrincipal(t *testing.T) {
+	repo := baseDeExclusion(t)
+	ctx := context.Background()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := repo.pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("sembrar: %v\n%s", err, sql)
+		}
+	}
+
+	provID := "cccccccc-1111-4111-8111-111111111111"
+	facID := "dddddddd-2222-4222-8222-222222222222"
+	exec(`INSERT INTO proveedor (id, empresa_id, nombre) VALUES ($1::uuid,$2::uuid,'AVANCES TECNOLOGICOS V B S.A')`,
+		provID, empExc)
+	// `clave` es NOT NULL: la clave de Hacienda es obligatoria en todas las facturas.
+	exec(`INSERT INTO documento_cxp (id, empresa_id, proveedor_id, consecutivo, clave, fecha_emision,
+	        total, total_crc, moneda, estado)
+	      VALUES ($1::uuid,$2::uuid,$3::uuid,'003294',$4,'2026-10-20',4565.14,2084777.55,'USD','PAGADO')`,
+		facID, empExc, provID, "50620102600310286711000100001010000032941999999999")
+
+	// El débito que la pagó, enlazado.
+	mov := sembrarMovDebito(t, repo, "2026-10-30", "635972530",
+		"DEBITO MASIVO SINPE (Pagar Proveedores FC 003294)", 2084777.55)
+	exec(`UPDATE movimiento_bancario SET documento_cxp_id = $1::uuid WHERE id = $2::uuid`, facID, mov)
+
+	conceptoID, clasifID := clasificacionDePrueba(t, repo, "Coopeprofa")
+
+	// Repartir: ₡900.000 van a la otra empresa.
+	hijo, err := repo.DividirMovimiento(ctx, empExc, mov, DivisionInput{
+		Monto:           decimal.RequireFromString("900000"),
+		MontoCRC:        decimal.RequireFromString("900000"),
+		ConceptoID:      conceptoID,
+		ClasificacionID: clasifID,
+		Motivo:          "Reintegro sistema Coopeprofa",
+	}, usrExc)
+	if err != nil {
+		t.Fatalf("no se pudo repartir el pago de una factura: %v", err)
+	}
+
+	// EL ENLACE SIGUE EN EL PRINCIPAL Y LA PARTE NO LO HEREDÓ.
+	var enlacePadre, enlaceHijo string
+	if err := repo.pool.QueryRow(ctx,
+		`SELECT COALESCE(documento_cxp_id::text,'') FROM movimiento_bancario WHERE id = $1::uuid`,
+		mov).Scan(&enlacePadre); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.pool.QueryRow(ctx,
+		`SELECT COALESCE(documento_cxp_id::text,'') FROM movimiento_bancario WHERE id = $1::uuid`,
+		hijo).Scan(&enlaceHijo); err != nil {
+		t.Fatal(err)
+	}
+	if enlacePadre != facID {
+		t.Errorf("el principal perdió el enlace a la factura: %q", enlacePadre)
+	}
+	if enlaceHijo != "" {
+		t.Errorf("la parte heredó el enlace (%q): la factura quedaría apuntada desde dos filas", enlaceHijo)
+	}
+	// Y hay una segunda línea de defensa que no depende de este código: el índice único parcial
+	// `movimiento_bancario_documento_cxp_id_idx` impide que dos movimientos apunten a la misma
+	// factura. Se comprobó mutando el INSERT para que la parte heredara el enlace: Postgres lo
+	// rechaza con 23505. O sea que ni un cambio futuro descuidado puede duplicar el pago.
+
+	// Y LA SUMA DE LAS CARAS SIGUE SIENDO LO QUE SE LE PAGÓ A LA FACTURA. Es lo que sostiene que
+	// el expediente pueda seguir diciendo «se pagó con ₡2.084.777,55».
+	var suma decimal.Decimal
+	if err := repo.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(COALESCE(h.debito,0)),0)::text
+		  FROM movimiento_bancario h
+		 WHERE h.incluido AND (h.id = $1::uuid OR h.dividido_de = $1::uuid)`, mov).Scan(&suma); err != nil {
+		t.Fatal(err)
+	}
+	if !suma.Equal(decimal.RequireFromString("2084777.55")) {
+		t.Errorf("las caras suman %s; se le pagó 2084777.55 a la factura", suma)
+	}
+	// El principal, solo, ya NO es el total: por eso el expediente no puede leer esa fila sola.
+	if got := montoDe(t, repo, mov); got.Equal(decimal.RequireFromString("2084777.55")) {
+		t.Error("el principal no bajó: no se repartió nada")
+	}
+}

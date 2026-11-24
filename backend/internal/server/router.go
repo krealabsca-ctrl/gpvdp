@@ -11,26 +11,37 @@ import (
 	"github.com/gpvdp/erp/internal/auth"
 	"github.com/gpvdp/erp/internal/bancos"
 	"github.com/gpvdp/erp/internal/config"
+	"github.com/gpvdp/erp/internal/conta"
 	"github.com/gpvdp/erp/internal/correo"
 	"github.com/gpvdp/erp/internal/cxc"
 	"github.com/gpvdp/erp/internal/cxp"
+	"github.com/gpvdp/erp/internal/flujocaja"
 	"github.com/gpvdp/erp/internal/grupo"
 	"github.com/gpvdp/erp/internal/inventario"
 	"github.com/gpvdp/erp/internal/nomina"
 	"github.com/gpvdp/erp/internal/plantillas"
 	"github.com/gpvdp/erp/internal/precios"
+	"github.com/gpvdp/erp/internal/ratios"
 	"github.com/gpvdp/erp/internal/rbac"
+	"github.com/gpvdp/erp/internal/sistema"
 	"github.com/gpvdp/erp/internal/tenant"
 )
 
 // NewRouter construye el motor Gin. `perms` es el checker RBAC (permiso × rol × empresa).
 func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH *bancos.Handler, cxpH *cxp.Handler, cxcH *cxc.Handler, nominaH *nomina.Handler, rbacH *rbac.Handler, plantillasH *plantillas.Handler,
-	correoH *correo.Handler, inventarioH *inventario.Handler, grupoH *grupo.Handler, preciosH *precios.Handler, perms tenant.PermisoChecker) *gin.Engine {
+	correoH *correo.Handler, inventarioH *inventario.Handler, grupoH *grupo.Handler, preciosH *precios.Handler,
+	sistemaH *sistema.Handler, rendimientoH *sistema.HandlerRendimiento,
+	contaH *conta.Handler, flujoCajaH *flujocaja.Handler, ratiosH *ratios.Handler,
+	perms tenant.PermisoChecker, estado EstadoDelSistema,
+	registro RegistroDeIncidentes) *gin.Engine {
 	if cfg.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
-	r.Use(gin.Recovery(), requestLogger(log), cors(cfg.CORSOrigins))
+	// `incidentes` reemplaza a gin.Recovery(): atrapa el panic igual, pero además le responde al
+	// usuario el contrato de error con su referencia —antes un panic daba 500 sin cuerpo, sin nada
+	// que dictar— y deja todo 5xx escrito en la base. Ver incidentes.go.
+	r.Use(incidentes(log, registro), requestLogger(log), cors(cfg.CORSOrigins))
 
 	// P(permiso) exige ese permiso vía la matriz RBAC (deny-by-default; ADMIN bypass).
 	P := func(permiso string) gin.HandlerFunc { return tenant.RequirePermiso(perms, permiso) }
@@ -42,6 +53,9 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 
 	v1 := r.Group("/v1")
 	v1.GET("/healthz", health)
+	// `/healthz` dice si el PROCESO vive (lo usa Docker para reiniciar). `/readyz` dice si el
+	// sistema SIRVE: base, esquema sin marca de error y al menos una empresa. Ver readyz.go.
+	v1.GET("/readyz", readyz(estado))
 
 	// Públicos. Con límite de frecuencia por IP para frenar fuerza bruta / credential stuffing.
 	// login: 10/min; refresh: 30/min (el cliente lo llama al vencer el access token).
@@ -127,6 +141,15 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.GET("/bancos/analisis/partidas", P("bancos.ver_analisis"), bancosH.AnalisisPartidas)
 			// El día a día de unas partidas elegidas: CUÁNDO se movió, no si está mal.
 			scoped.GET("/bancos/analisis/partidas/diario", P("bancos.ver_analisis"), bancosH.SerieDiariaPartidas)
+			// El análisis en .xlsx. Mismo permiso que verlo: exportar no da acceso a nada que la
+			// pantalla no muestre, y sin esto el análisis solo sale del sistema por captura.
+			scoped.GET("/bancos/analisis/partidas/export", P("bancos.ver_analisis"), bancosH.ExportarAnalisis)
+			// El flujo esperado de los próximos meses, estimado por el PATRÓN histórico: la
+			// cartera de CxP está vencida al 99,9 %, así que proyectar por vencimiento no
+			// proyectaría nada. Va con el permiso de PROYECCIONES y no con el de análisis
+			// —aunque lea los mismos datos— porque es donde alguien lo busca: la pregunta
+			// «¿cómo vengo?» y la pregunta «¿qué viene?» las hacen personas distintas.
+			scoped.GET("/bancos/analisis/flujo", P("bancos.ver_proyecciones"), bancosH.FlujoProyectado)
 			// Dimensiones del gasto (departamento y sede) y control presupuestario.
 			scoped.GET("/bancos/catalogo/sedes", PAlguno("bancos.ver", "inventario.ver", "cxc.ver"), bancosH.Sedes)
 			scoped.GET("/bancos/catalogo/departamentos", P("bancos.ver"), bancosH.Departamentos)
@@ -164,6 +187,13 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			// Huella Bancos↔CxP: empareja los pagos del banco con su factura. Corre solo al
 			// importar; el endpoint sirve para repetirlo sobre lo ya cargado.
 			scoped.POST("/bancos/conciliacion-cxp", P("cxp.tesoreria"), bancosH.ConciliarCxP)
+			// Enlazar a mano un débito con su factura, para lo que el barrido por huella no puede
+			// resolver (hallazgo 3.1). Mismo permiso que el barrido: es la misma afirmación —este
+			// movimiento es el pago de esta factura— hecha por una persona en vez de por el código.
+			scoped.POST("/bancos/conciliacion-cxp/enlazar", P("cxp.tesoreria"), bancosH.EnlazarPagoAMano)
+			// Y la vuelta: sin ella, emparejar el par equivocado dejaba la factura cerrada contra
+			// plata ajena sin forma de deshacerlo. Mismo permiso: es la misma decisión.
+			scoped.POST("/bancos/conciliacion-cxp/desenlazar", P("cxp.tesoreria"), bancosH.DesenlazarPago)
 			scoped.GET("/bancos/conciliacion", P("bancos.ver_conciliacion"), bancosH.Conciliacion)
 			scoped.POST("/bancos/conciliacion/partidas", P("bancos.conciliar"), bancosH.RegistrarPartida)
 			scoped.DELETE("/bancos/conciliacion/partidas/:id", P("bancos.conciliar"), bancosH.AnularPartida)
@@ -177,6 +207,17 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			// Cargar HISTÓRICO (mig 0087): UN archivo con varias cuentas y varios meses. Es el mismo
 			// permiso que importar —es la misma acción, cargar movimientos— y los mismos dos pasos.
 			scoped.POST("/bancos/importaciones/historico", P("bancos.importar"), bancosH.SubirHistorico)
+
+			// Formatos de banco configurables (mig 0108): enseñarle al sistema a leer un banco
+			// que no viene de fábrica. Permiso PROPIO y no `bancos.importar`: importar es la
+			// tarea diaria; definir en qué columna viene el débito afecta todo lo que se cargue
+			// después, y un formato con los montos cambiados ensucia la contabilidad entera.
+			scoped.GET("/bancos/formatos", P("bancos.formatos"), bancosH.FormatosDeBancoHandler)
+			scoped.POST("/bancos/formatos", P("bancos.formatos"), bancosH.GuardarFormatoBancoHandler)
+			scoped.DELETE("/bancos/formatos/:id", P("bancos.formatos"), bancosH.BorrarFormatoBancoHandler)
+			// Probar NO guarda: corre el formato contra un archivo de verdad y devuelve lo que
+			// entendió, para poder corregir las columnas antes de que el formato exista.
+			scoped.POST("/bancos/formatos/probar", P("bancos.formatos"), bancosH.ProbarFormatoBancoHandler)
 
 			// Pagos que el sistema ANTERIOR ya tenía aplicados (mig 0091). El movimiento queda
 			// sellado y sigue visible; esto NO lo enlaza a una factura del ERP.
@@ -206,6 +247,13 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.POST("/bancos/movimientos/:id/incluir", P("bancos.excluir_movimiento"), bancosH.IncluirMovimiento)
 			scoped.GET("/bancos/movimientos/excluidos", P("bancos.ver_clasificar"), bancosH.ExcluidosAMano)
 			scoped.GET("/bancos/movimientos/duplicados", P("bancos.ver_clasificar"), bancosH.DuplicadosSospechosos)
+			// Reemisiones del banco (mig 0118): el mismo hecho que vuelve a entrar otro día. Se LEE
+			// con el permiso de ver —quien cierra el mes tiene que poder auditarlo— y se ESCRIBE con
+			// el de excluir, porque enlazar saca plata de los libros.
+			scoped.GET("/bancos/movimientos/reemisiones", P("bancos.ver_clasificar"), bancosH.Reemisiones)
+			scoped.GET("/bancos/movimientos/reemisiones/candidatos", P("bancos.ver_clasificar"), bancosH.CandidatosReemision)
+			scoped.POST("/bancos/movimientos/:id/reemplaza", P("bancos.excluir_movimiento"), bancosH.EnlazarReemision)
+			scoped.POST("/bancos/movimientos/:id/deshacer-reemplazo", P("bancos.excluir_movimiento"), bancosH.DeshacerReemision)
 			// Dividir un movimiento entre partidas (mig 0094): el recibo de luz que trae un
 			// proyecto especial adentro. El hecho bancario queda intacto —misma fecha, mismo
 			// consecutivo, misma descripción— y la suma de las partes da lo que trajo el banco.
@@ -283,6 +331,13 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.PATCH("/cxp/catalogo/conceptos/:id", P("cxp.catalogo"), bancosH.RenombrarConceptoCxP)
 			scoped.POST("/cxp/catalogo/clasificaciones", P("cxp.catalogo"), bancosH.CrearClasificacionCxP)
 			scoped.PATCH("/cxp/catalogo/clasificaciones/:id", P("cxp.catalogo"), bancosH.RenombrarClasificacionCxP)
+			// Prioridades de pago configurables (mig 0121). Se LEEN con `cxp.ver` porque la Bandeja
+			// necesita el catálogo para dibujar las insignias y el selector; se CONFIGURAN con
+			// `cxp.catalogo`, igual que el resto del catálogo de CxP.
+			scoped.GET("/cxp/prioridades", P("cxp.ver"), cxpH.ListarPrioridades)
+			scoped.POST("/cxp/prioridades", P("cxp.catalogo"), cxpH.CrearPrioridad)
+			scoped.PATCH("/cxp/prioridades/:id", P("cxp.catalogo"), cxpH.ActualizarPrioridad)
+			scoped.DELETE("/cxp/prioridades/:id", P("cxp.catalogo"), cxpH.EliminarPrioridad)
 			scoped.GET("/cxp/departamentos", P("cxp.ver"), cxpH.ListarDepartamentos)
 			scoped.GET("/cxp/departamentos/:id/validadores", P("cxp.ver"), cxpH.ListarValidadores)
 			scoped.GET("/cxp/usuarios", P("cxp.departamentos"), cxpH.ListarUsuarios)
@@ -293,6 +348,11 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			// trancado es lectura; levantarlo tiene permiso propio, porque es la última barrera
 			// contra el doble pago de una factura que pudo haberse pagado por caja chica.
 			scoped.GET("/cxp/proveedores/:id/bloqueadas", P("cxp.ver"), cxpH.FacturasDeContado)
+			// El convenio del proveedor en LOTE (21-oct-2026). La regla que esquiva el candado del
+			// contado existe desde la 0097 y estaba en 0 de 649 proveedores: no faltaba la función,
+			// faltaba poder aplicarla sin entrar 649 veces y saber a cuáles conviene.
+			scoped.GET("/cxp/proveedores/candidatos-convenio", P("cxp.ver"), cxpH.CandidatosConvenioHandler)
+			scoped.POST("/cxp/proveedores/bloqueadas", P("cxp.ver"), cxpH.BloqueadasDeProveedoresHandler)
 			scoped.GET("/cxp/documentos", P("cxp.ver"), cxpH.ListarDocumentos)
 			scoped.GET("/cxp/documentos/:id", P("cxp.ver"), cxpH.DocumentoPorID)
 			scoped.GET("/cxp/documentos/:id/historial", P("cxp.ver"), cxpH.HistorialDocumento)
@@ -368,6 +428,46 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			// El reporte de «lo que se va a pagar» se LEE: permiso de ver, no de tesorería. Quien
 			// revisa un corte antes de que se pague no siempre es quien lo sube al banco.
 			scoped.GET("/cxp/lotes/:id/reporte", P("cxp.ver"), cxpH.ReporteLote)
+			// El aviso de pago (mig 0117): el cuadro que se manda por correo al pagar. Verlo y
+			// bajarlo cuesta `cxp.ver` —es el detalle del corte, que ya se puede ver—; corregir
+			// su texto cuesta `cxp.tesoreria`, porque es lo que se le afirma al proveedor.
+			// El cronograma de pago (mig 0122): lo que se manda ANTES de pagar, con los bancos de
+			// donde salen los fondos. Verlo con `cxp.ver`; decidir cuenta, «por fuera» y tipo de
+			// cambio son decisiones de tesorería.
+			scoped.GET("/cxp/lotes/:id/cronograma", P("cxp.ver"), cxpH.CronogramaDeLote)
+			scoped.GET("/cxp/lotes/:id/cronograma.xlsx", P("cxp.ver"), cxpH.CronogramaXLSX)
+			scoped.PUT("/cxp/lotes/:id/cronograma/tipo-cambio", P("cxp.tesoreria"), cxpH.GuardarTCCronograma)
+			scoped.PUT("/cxp/lotes/:id/cronograma/:proveedorId/cuenta", P("cxp.tesoreria"), cxpH.AsignarCuentaDePago)
+			scoped.PUT("/cxp/lotes/:id/cronograma/:proveedorId/por-fuera", P("cxp.tesoreria"), cxpH.MarcarPorFuera)
+			scoped.GET("/cxp/lotes/:id/aviso", P("cxp.ver"), cxpH.AvisoDeLoteHandler)
+			scoped.GET("/cxp/lotes/:id/aviso.xlsx", P("cxp.ver"), cxpH.AvisoDeLoteXLSX)
+			scoped.PUT("/cxp/lotes/:id/aviso/:proveedorId", P("cxp.tesoreria"), cxpH.GuardarTextoDeAvisoHandler)
+			// El arqueo de excepción (hallazgo 3.1) y el corte del lote (3.3), mig 0104.
+			//
+			// LEER va con `cxp.ver`: es una cifra de cuadre y la primera que se pide en un arqueo,
+			// así que tiene que alcanzarla quien audita, no solo quien paga.
+			scoped.GET("/cxp/excepcion", P("cxp.ver"), cxpH.ReporteExcepcionHandler)
+			// El pago parcial (mig 0105, hallazgo 3.5). Registrarlo va con `cxp.tesoreria` —es la
+			// misma afirmación que conciliar, por un monto que no calza entero— y VOLVER A COBRAR
+			// el resto lleva permiso propio: si la diferencia era una nota de crédito, cobrarla
+			// otra vez le paga de más al proveedor.
+			scoped.GET("/cxp/documentos/:id/saldo", P("cxp.ver"), cxpH.SaldoDeFacturaHandler)
+			scoped.POST("/cxp/documentos/:id/pago-parcial", P("cxp.tesoreria"), cxpH.RegistrarPagoParcialHandler)
+			scoped.POST("/cxp/documentos/:id/cobrar-saldo", P("cxp.cobrar_saldo"), cxpH.CobrarSaldoHandler)
+			// La nota de crédito del proveedor (mig 0106, hallazgo 3.6). Va con `cxp.anticipos`,
+			// el mismo permiso del otro neteo: las dos acciones mueven el NETO antes de aprobar y
+			// separarlas obligaría a dar dos permisos para la misma facultad.
+			scoped.GET("/cxp/notas-credito", P("cxp.ver"), cxpH.NotasDeCreditoHandler)
+			scoped.GET("/cxp/documentos/:id/notas-credito", P("cxp.ver"), cxpH.NotasDeFacturaHandler)
+			scoped.POST("/cxp/documentos/:id/nota-credito", P("cxp.anticipos"), cxpH.AplicarNotaCreditoHandler)
+			scoped.DELETE("/cxp/notas-credito/aplicaciones/:id", P("cxp.anticipos"), cxpH.ReversarNotaCreditoHandler)
+			scoped.GET("/cxp/lotes/:id/respaldo", P("cxp.ver"), cxpH.RespaldoDelLoteHandler)
+			// CERRAR lo hace quien arma el lote y sube la macro: mismo permiso que crearlo.
+			// Pedirle uno extra a la acción ordenada es la forma segura de que nadie la use.
+			scoped.POST("/cxp/lotes/:id/cerrar", P("cxp.tesoreria"), cxpH.CerrarLoteHandler)
+			// REABRIR sí lleva permiso propio: es levantar un control, no ejercerlo. Mismo
+			// criterio que `cxp.liberar_pago`.
+			scoped.POST("/cxp/lotes/:id/reabrir", P("cxp.reabrir_lote"), cxpH.ReabrirLoteHandler)
 			scoped.GET("/cxp/lotes/:id/remesas", P("cxp.ver"), cxpH.RemesasLote)
 			scoped.GET("/cxp/remesas/:id/aviso", P("cxp.ver"), cxpH.AvisoRemesa)
 			// Nomenclatura interna del pago (A8, A9…). Se LEE con «ver» —cualquiera que lea el
@@ -395,6 +495,10 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.POST("/cxp/proveedores", P("cxp.proveedores"), cxpH.CrearProveedor)
 			scoped.PATCH("/cxp/proveedores/:id", P("cxp.proveedores"), cxpH.ActualizarProveedor)
 			scoped.POST("/cxp/proveedores/:id/liberar", P("cxp.liberar_pago"), cxpH.LiberarParaPago)
+			// Marcar el convenio NO libera nada: cambia lo que pasa con lo que entre de ahora en
+			// adelante. Liberar lo ya bloqueado es otra decisión, con su propio permiso.
+			scoped.POST("/cxp/proveedores/convenio-masivo", P("cxp.parametros"), cxpH.MarcarConvenioMasivoHandler)
+			scoped.POST("/cxp/proveedores/liberar-masivo", P("cxp.liberar_pago"), cxpH.LiberarDeProveedoresHandler)
 			scoped.POST("/cxp/proveedores/:id/desactivar", P("cxp.proveedores"), cxpH.DesactivarProveedor)
 			// Departamentos (catálogo administrable)
 			scoped.POST("/cxp/departamentos", P("cxp.departamentos"), cxpH.CrearDepartamento)
@@ -555,6 +659,89 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.POST("/correo-saliente/probar", P("admin.correo"), correoH.Probar)
 			scoped.GET("/rbac/mis-permisos", rbacH.MisPermisos)
 
+			// Los errores del sistema (mig 0107). Lo que el usuario dicta por teléfono —«me dio
+			// error, referencia 3F8A2C»— se canjea acá por la causa exacta. La empresa sale del
+			// token: no hay forma de preguntar por los errores de otra.
+			scoped.GET("/sistema/incidentes", P("admin.incidentes"), sistemaH.Incidentes)
+			scoped.GET("/sistema/incidentes/resumen", P("admin.incidentes"), sistemaH.ResumenIncidentes)
+			// Las consultas lentas del motor (mig 0120). Mismo nivel de reserva que los errores
+			// del sistema: muestra el SQL del ERP, no datos de las empresas.
+			scoped.GET("/sistema/rendimiento/consultas", P("admin.rendimiento"), rendimientoH.ConsultasLentas)
+			scoped.POST("/sistema/rendimiento/reiniciar", P("admin.rendimiento"), rendimientoH.ReiniciarContadores)
+
+			// ── Contabilidad · Fase 1: el plan de cuentas (mig 0109) ──────────────
+			//
+			// NINGÚN otro módulo lee estas tablas todavía. El plan de cuentas se carga y se
+			// mantiene acá; contabilizar es la Fase 3 y no existe. Permiso propio: una cuenta
+			// mal clasificada mueve el resultado del período, así que no se reparte con la
+			// operación diaria.
+			scoped.GET("/conta/cuentas", P("conta.plan_cuentas"), contaH.Plan)
+			scoped.POST("/conta/cuentas", P("conta.plan_cuentas"), contaH.CrearCuenta)
+			scoped.PATCH("/conta/cuentas/:id", P("conta.plan_cuentas"), contaH.ActualizarCuenta)
+			scoped.DELETE("/conta/cuentas/:id", P("conta.plan_cuentas"), contaH.BorrarCuenta)
+			// Previsualizar NO escribe: dice qué pasaría con ese archivo. Un plan mal cargado
+			// se arrastra a todos los asientos que vengan después.
+			scoped.POST("/conta/cuentas/previsualizar", P("conta.plan_cuentas"), contaH.PrevisualizarPlan)
+			scoped.POST("/conta/cuentas/importar", P("conta.plan_cuentas"), contaH.ImportarPlan)
+
+			// ── Contabilidad · Fase 2: el mapeo partida → cuenta (mig 0110) ───────
+			//
+			// SIGUE SIN CONTABILIZAR NADA: esto construye la equivalencia y mide cuánto
+			// falta. Permiso aparte del plan de cuentas porque son dos trabajos distintos:
+			// armar el catálogo lo hace el contador una vez; mapear las 332 partidas con
+			// movimiento lo hace quien conoce la operación.
+			scoped.GET("/conta/mapeo", P("conta.mapeo"), contaH.Mapeo)
+			scoped.POST("/conta/mapeo", P("conta.mapeo"), contaH.Decidir)
+			scoped.DELETE("/conta/mapeo/:id", P("conta.mapeo"), contaH.Deshacer)
+
+			// ── Contabilidad · Fase 3A: el asiento y la contrapartida bancaria (mig 0111) ──
+			//
+			// TAMPOCO GENERA ASIENTOS: crea el lugar donde van a vivir, con partida doble
+			// imposible de violar, y cierra el hueco que tenía el mapeo —la cuenta contable
+			// del banco, que es la otra mitad de todo asiento que toca el banco—. Quién
+			// genera cada asiento lo decide la matriz de reglas (A3), que no está tomada.
+			//
+			// Tres permisos y no uno porque son tres responsabilidades: enlazar bancos se
+			// hace una vez; leer los libros lo necesita hasta un auditor que no debe poder
+			// escribir; y escribir un asiento a mano permite mover plata sin documento que
+			// lo respalde.
+			scoped.GET("/conta/bancos", P("conta.bancos"), contaH.Bancos)
+			scoped.PUT("/conta/bancos/:id", P("conta.bancos"), contaH.EnlazarBanco)
+			scoped.DELETE("/conta/bancos/:id", P("conta.bancos"), contaH.DesenlazarBanco)
+			scoped.POST("/conta/bancos/aceptar-sugerencias", P("conta.bancos"), contaH.AceptarSugerencias)
+
+			scoped.GET("/conta/diario", P("conta.libros"), contaH.Diario)
+			scoped.GET("/conta/mayor", P("conta.libros"), contaH.MayorDeCuenta)
+			scoped.GET("/conta/asientos/:id", P("conta.libros"), contaH.VerAsiento)
+
+			scoped.POST("/conta/asientos", P("conta.asientos"), contaH.CrearAsiento)
+			scoped.POST("/conta/asientos/:id/anular", P("conta.asientos"), contaH.AnularAsiento)
+
+			// ── Contabilidad · Fase 3B: generar asientos desde el banco ────────────────
+			//
+			// POR CAJA, que es como opera la empresa: el gasto nace cuando sale la plata.
+			// No cumple NIIF y está dicho en la pantalla; el devengo es la migración
+			// siguiente y el modelo ya la admite sin rehacer nada.
+			//
+			// Permiso propio: generar toca miles de asientos de una vez, y es una
+			// facultad distinta de escribir uno a mano.
+			scoped.GET("/conta/generar", P("conta.generar"), contaH.PrevisualizarGeneracion)
+			scoped.POST("/conta/generar", P("conta.generar"), contaH.Generar)
+			scoped.POST("/conta/generar/revertir", P("conta.generar"), contaH.RevertirGeneracion)
+
+			// ── Contabilidad · Fase 4: apertura, balance y cierre (mig 0113) ───────────
+			//
+			// El balance y los períodos se LEEN con el permiso de libros —un auditor
+			// interno los necesita y no debe poder escribir—; cerrar, reabrir y cargar
+			// los saldos iniciales exigen `conta.periodos`, porque congelan o descongelan
+			// los estados financieros de un mes para toda la empresa.
+			scoped.GET("/conta/balance", P("conta.libros"), contaH.Balance)
+			scoped.GET("/conta/periodos", P("conta.libros"), contaH.Periodos)
+			scoped.POST("/conta/periodos/cerrar", P("conta.periodos"), contaH.CerrarPeriodo)
+			scoped.POST("/conta/periodos/reabrir", P("conta.periodos"), contaH.ReabrirPeriodo)
+			scoped.POST("/conta/apertura/previsualizar", P("conta.periodos"), contaH.PrevisualizarApertura)
+			scoped.POST("/conta/apertura", P("conta.periodos"), contaH.CargarApertura)
+
 			// ── Administración RBAC (permiso admin.roles) ──
 			scoped.GET("/rbac/permisos", P("admin.roles"), rbacH.Permisos)
 			// ── Inventario: cofres, urnas y suministros por sede ──────────────────
@@ -592,6 +779,42 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			// resuelve, desde las MEMBRESÍAS del usuario, cuáles otras puede sumar — y
 			// solo aquellas donde ya tiene bancos.ver. No hay parámetro que amplíe eso.
 			scoped.GET("/grupo/resumen", P("grupo.ver"), grupoH.Resumen)
+
+			// ── Flujo de caja a 13 semanas (mig 0114) ────────────────────────────
+			//
+			// VER y DECIDIR son permisos distintos, y acá la diferencia pesa: la
+			// política declara cuánto se destina por semana a pagar atrasos, y es
+			// ella la que produce la curva. Un gerente mira la proyección sin poder
+			// mover el supuesto que la genera.
+			scoped.GET("/flujo-caja", P("bancos.ver_proyecciones"), flujoCajaH.Flujo)
+			scoped.GET("/flujo-caja/politica", P("bancos.ver_proyecciones"), flujoCajaH.Politica)
+			scoped.PUT("/flujo-caja/politica", P("bancos.politica_caja"), flujoCajaH.GuardarPolitica)
+
+			// ── Ratios del ciclo de efectivo (mig 0115) ──────────────────────────
+			//
+			// Permiso propio: cruzan CxC y CxP, y los mira dirección. Colgarlos de
+			// `cxc.ver` o `cxp.ver` obligaría a dar el detalle de un módulo entero
+			// para ver tres números agregados.
+			scoped.GET("/ratios/ciclo", P("ratios.ver"), ratiosH.Ciclo)
+			// Los drivers: el negocio por lo que lo mueve (contratos, tipo de servicio,
+			// modalidad, sede) en vez de por partida contable.
+			scoped.GET("/ratios/drivers", P("ratios.ver"), ratiosH.Drivers)
+
+			// ── Presupuesto de INGRESO (mig 0116) ────────────────────────────────
+			//
+			// Mismos permisos que el presupuesto de gasto: son las dos mitades de
+			// una sola decisión —cuánto esperamos que entre y cuánto autorizamos
+			// gastar—, y partirla obligaría a mantener dos listas para un acto.
+			scoped.GET("/bancos/presupuesto-ingreso", P("bancos.ver_control"), bancosH.MetasDeIngreso)
+			scoped.PUT("/bancos/presupuesto-ingreso", P("bancos.ajustes"), bancosH.GuardarMetaIngreso)
+			scoped.DELETE("/bancos/presupuesto-ingreso", P("bancos.ajustes"), bancosH.BorrarMetaIngreso)
+			scoped.GET("/bancos/presupuesto-ingreso/propuesta", P("bancos.ver_control"), bancosH.PropuestaDeMeta)
+			scoped.GET("/bancos/control-ingreso", P("bancos.ver_control"), bancosH.ControlDeIngreso)
+			// El resultado presupuestado cruza las dos mitades: es lo que no se
+			// podía calcular mientras solo existía la meta de gasto.
+			scoped.GET("/bancos/resultado-presupuestado", P("bancos.ver_control"), bancosH.ResultadoPresupuestado)
+			// El outlook: la tercera columna. Misma pregunta a doce meses.
+			scoped.GET("/bancos/outlook", P("bancos.ver_control"), bancosH.Outlook)
 
 			// ── Calculadora de precios ───────────────────────────────────────────
 			//

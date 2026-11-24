@@ -34,6 +34,7 @@ import {
   formatFechaHora,
   toNumber,
 } from "@/lib/format";
+import { SaldoDeLaFactura } from "@/features/cxp/components/SaldoDeLaFactura";
 import { mensajeError } from "@/lib/apiError";
 import { useTienePermiso } from "@/features/auth/permisos";
 import {
@@ -285,6 +286,11 @@ export function DocumentoDetailPage() {
             <AnticiposCard doc={doc} />
           </div>
         )}
+
+      {/* Qué se le debe DE VERDAD: la resta completa (total − retención − anticipos − notas de
+          crédito − lo ya debitado) y las acciones que la mueven. Cierra la tanda B de la
+          auditoría. Se dibuja sola: si la factura no tiene nada que explicar, no aparece. */}
+      <SaldoDeLaFactura doc={doc} />
 
       {/* Qué se compró, línea por línea (del XML). Solo aparece si el detalle está cargado: la
           inmensa mayoría de las facturas entró por Excel y trae solo el encabezado. */}

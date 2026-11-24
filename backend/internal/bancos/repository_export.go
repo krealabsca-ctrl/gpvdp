@@ -44,7 +44,13 @@ func (r *pgRepository) MovimientosParaExport(ctx context.Context, empresaID stri
 		       -- El id de la clasificación no se muestra en ninguna hoja: sirve para nombrar el
 		       -- archivo respetando el ORDEN en que el usuario eligió las clasificaciones en el
 		       -- filtro. Por nombre no se puede: dos conceptos pueden tener la misma clasificación.
-		       COALESCE(m.clasificacion_id::text,'')
+		       COALESCE(m.clasificacion_id::text,''),
+		       -- EL REPARTO (mig 0094). Sin esto, dos caras del mismo movimiento salen con la
+		       -- misma fecha, el mismo consecutivo y la misma descripción, y contra el estado de
+		       -- cuenta se leen como un duplicado. El id del PRINCIPAL es lo que las agrupa: el
+		       -- mismo COALESCE sirve para el original y para sus partes.
+		       CASE WHEN m.dividido_de IS NOT NULL OR m.monto_antes_de_dividir IS NOT NULL
+		            THEN COALESCE(m.dividido_de::text, m.id::text) ELSE '' END
 		FROM movimiento_bancario m
 		LEFT JOIN concepto co ON co.id = m.concepto_id
 		LEFT JOIN clasificacion cl ON cl.id = m.clasificacion_id
@@ -66,11 +72,15 @@ func (r *pgRepository) MovimientosParaExport(ctx context.Context, empresaID stri
 			deb, cred decimal.Decimal
 			mcrc      decimal.Decimal
 		)
+		var principalDelReparto string
 		if err := rows.Scan(&fecha, &m.Documento, &m.Descripcion, &m.Banco, &m.Cuenta,
 			&deb, &cred, &m.Moneda, &mcrc, &m.Concepto, &m.Clasificacion, &m.Estado, &m.EsTraslado,
-			&m.ClasificacionID); err != nil {
+			&m.ClasificacionID, &principalDelReparto); err != nil {
 			return nil, fmt.Errorf("bancos: scan export: %w", err)
 		}
+		// El código se deriva acá con la MISMA función que usa la pantalla: el que alguien lee en
+		// la parrilla y el que sale en el .xlsx tienen que ser el mismo, o no sirven para cruzar.
+		m.Reparto = CodigoDeReparto(principalDelReparto)
 		m.Fecha = fecha.Format("2006-01-02")
 		m.Debito = deb.String()
 		m.Credito = cred.String()

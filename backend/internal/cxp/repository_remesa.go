@@ -237,3 +237,23 @@ func (r *pgRepository) lineasDeAviso(ctx context.Context, empresaID, cond, id st
 	}
 	return out, rows.Err()
 }
+
+// AbrirRemesa es el simétrico de CerrarRemesa: devuelve a PAGADO las facturas que había cerrado.
+//
+// Deshace SOLO el último paso (CONCILIADO → PAGADO) y no el anterior (PROGRAMADO → PAGADO), que
+// es lo correcto: lo que se retira es la confirmación del banco, no la declaración de que el pago
+// se hizo. Mandarlas de vuelta a PROGRAMADO las devolvería a la cola de pago y podrían pagarse dos
+// veces.
+//
+// Una sola consulta para todas, por la misma razón que al cerrarlas: abrir la mitad porque una
+// falló a medio camino dejaría la remesa en dos estados a la vez.
+func (r *pgRepository) AbrirRemesa(ctx context.Context, empresaID, remesaID string) (int, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE documento_cxp SET estado = 'PAGADO', actualizado_en = now()
+		 WHERE empresa_id = $1::uuid AND remesa_id = $2::uuid AND estado = 'CONCILIADO'`,
+		empresaID, remesaID)
+	if err != nil {
+		return 0, fmt.Errorf("cxp: abrir remesa: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}

@@ -209,8 +209,60 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 	case errors.Is(err, ErrFuenteNoEncontrada), errors.Is(err, ErrRecepcionNoEncontrada),
 		errors.Is(err, ErrRemesaNoEncontrada), errors.Is(err, ErrLoteNoEncontrado):
 		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, sinPrefijoCxP(err))
+	// El aviso de pago (mig 0117). El proveedor ajeno al corte es un NO ENCONTRADO dentro de ese
+	// corte —existe, pero no ahí—, y el texto largo una regla de negocio con su medida adentro.
+	// El catálogo de prioridades (mig 0121). «No encontrada» es 404 y el resto son reglas: el
+	// pedido está bien escrito y lo que no se cumple es una condición que la pantalla puede
+	// explicar. `ErrPrioridadNoEncontrada` llega envuelto con la lista de códigos válidos cuando
+	// alguien marca una factura con uno que no existe, así que su frase entera importa.
+	case errors.Is(err, ErrPrioridadNoEncontrada):
+		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, sinPrefijoCxP(err))
+	case errors.Is(err, ErrCodigoPrioridadRepetido), errors.Is(err, ErrPrioridadEnUso):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoCxP(err))
+	case errors.Is(err, ErrCodigoPrioridadRequerido), errors.Is(err, ErrNombrePrioridadRequerido),
+		errors.Is(err, ErrTonoPrioridadInvalido):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
+	// El tipo de cambio del cronograma (mig 0122). Los dos son 422 y su frase entera importa: una
+	// dice que hay dólares sin colonizar y la otra que el número no sirve, y el arreglo es
+	// distinto —escribirlo, o escribirlo bien—.
+	case errors.Is(err, ErrTCCronogramaRequerido), errors.Is(err, ErrTCCronogramaInvalido):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
+	case errors.Is(err, ErrProveedorNoEstaEnElCorte):
+		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, sinPrefijoCxP(err))
+	case errors.Is(err, ErrTextoDeAvisoLargo):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
 	case errors.Is(err, ErrFuenteDuplicada), errors.Is(err, ErrCodigoPagoDuplicado):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoCxP(err))
+	// El corte del lote (mig 0104). Son conflictos de ESTADO, no errores de datos: el lote existe
+	// y la petición está bien escrita; lo que pasa es que el lote ya está como se pedía, o al
+	// revés. 409 y el texto del centinela, que dice qué hacer.
+	case errors.Is(err, ErrLoteYaCerrado), errors.Is(err, ErrLoteNoEstaCerrado),
+		errors.Is(err, ErrLoteCerradoNoSeToca):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoCxP(err))
+	// El pago parcial (mig 0105). CONFLICTO los dos que son de estado —el movimiento ya está
+	// aplicado, la factura no está en el punto del flujo donde un débito tiene sentido— y REGLA DE
+	// NEGOCIO los de monto, que llevan su frase entera porque cada uno tiene un arreglo distinto.
+	case errors.Is(err, ErrMovimientoYaAplicado), errors.Is(err, ErrParcialFacturaNoPagable),
+		errors.Is(err, ErrSinSaldoQueCobrar):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoCxP(err))
+	case errors.Is(err, ErrParcialMontoInvalido), errors.Is(err, ErrParcialExcedeFactura),
+		errors.Is(err, ErrParcialExcedeMovimiento):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
+	// La nota de crédito (mig 0106). Todas son REGLA DE NEGOCIO salvo la ventana del flujo, que es
+	// un conflicto de estado: el documento está bien, lo que no corresponde es el momento. Cada una
+	// lleva su frase entera porque cada una tiene un arreglo distinto, y la de la factura ya
+	// aprobada nombra el camino que sí queda (registrar el pago parcial).
+	case errors.Is(err, ErrNotaFacturaNoNeteable):
+		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoCxP(err))
+	case errors.Is(err, ErrNoEsNotaCredito), errors.Is(err, ErrNotaSobreNota),
+		errors.Is(err, ErrNotaProveedorDistinto), errors.Is(err, ErrNotaMonedaDistinta),
+		errors.Is(err, ErrNotaMontoInvalido), errors.Is(err, ErrNotaExcedeFactura),
+		errors.Is(err, ErrNotaExcedeSuSaldo):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
+	case errors.Is(err, ErrMotivoReaperturaRequerido), errors.Is(err, ErrEnlaceMotivoRequerido),
+		errors.Is(err, ErrMotivoDesenlaceRequerido), errors.Is(err, ErrParcialMotivoRequerido),
+		errors.Is(err, ErrMotivoCobroRequerido):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
 	case errors.Is(err, ErrRecepcionNoReintentable):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
 	case errors.Is(err, ErrTokenRecepcionInvalido):
@@ -295,6 +347,12 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 	// pantalla: salir como «error interno» es justo lo que esta semana obligó a adivinar.
 	case errors.Is(err, ErrMotivoLiberacionRequerido):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
+	case errors.Is(err, ErrSinProveedores), errors.Is(err, ErrDemasiadosProveedores),
+		errors.Is(err, ErrConvenioInvalido):
+		// El convenio marcado en lote (21-oct-2026). Los tres son 400 y no 422: lo que está mal es el
+		// pedido mismo —venir sin proveedores, traer más de los que se aceptan de una vez, o un
+		// convenio que no es ninguno de los dos valores—, no una regla que el pedido no cumple.
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, sinPrefijoCxP(err))
 	case errors.Is(err, ErrNoEstaBloqueada):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoCxP(err))
 	// «Ya se pagó por otro medio» (mig 0102). Mismo criterio: lo que le falta al pedido es 422; el

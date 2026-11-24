@@ -18,7 +18,8 @@ func (r *pgRepository) ListarCuentas(ctx context.Context, empresaID string, incl
 	// El catálogo necesita ver las desactivadas para poder reactivarlas; el importador y los
 	// filtros, no: una cuenta desactivada no debe poder recibir movimientos nuevos.
 	const q = `
-		SELECT c.id::text, COALESCE(c.alias, ''), b.nombre, COALESCE(c.iban, ''), c.moneda, c.activo
+		SELECT c.id::text, COALESCE(c.alias, ''), b.nombre, COALESCE(c.iban, ''), c.moneda, c.activo,
+		       c.es_reserva
 		FROM cuenta_bancaria c
 		JOIN banco b ON b.id = c.banco_id
 		WHERE c.empresa_id = $1::uuid AND (c.activo = true OR $2)
@@ -31,7 +32,7 @@ func (r *pgRepository) ListarCuentas(ctx context.Context, empresaID string, incl
 	var out []CuentaListItem
 	for rows.Next() {
 		var c CuentaListItem
-		if err := rows.Scan(&c.ID, &c.Alias, &c.Banco, &c.IBAN, &c.Moneda, &c.Activo); err != nil {
+		if err := rows.Scan(&c.ID, &c.Alias, &c.Banco, &c.IBAN, &c.Moneda, &c.Activo, &c.EsReserva); err != nil {
 			return nil, fmt.Errorf("bancos: scan cuenta: %w", err)
 		}
 		out = append(out, c)
