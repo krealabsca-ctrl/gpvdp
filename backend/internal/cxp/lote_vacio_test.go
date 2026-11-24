@@ -28,6 +28,8 @@ import (
 var tablasDelLote = []string{
 	"empresa", "usuario", "proveedor", "lote_pago", "concepto", "clasificacion",
 	"subclasificacion", "departamento", "documento_cxp", "anticipo_aplicacion",
+	// El catálogo de prioridades (mig 0121): el listado lo cruza para ordenar por prioridad.
+	"prioridad_cxp",
 	"comprobante_pago", "cxp_recepcion",
 	// El listado de documentos muestra el MOVIMIENTO BANCARIO con el que se pagó cada factura
 	// (ver PagoBanco en Documento), así que la consulta toca estas tres. Sin ellas el esquema
@@ -45,6 +47,10 @@ var tablasDelLote = []string{
 	// columna con esa fecha —`actualizado_en` se reescribe con cualquier edición— así que el dato
 	// sale del evento, y sin esta tabla el esquema temporal falla al listar.
 	"auditoria_evento",
+	// El pago parcial (mig 0105): `netoAPagarSQL` lo resta, así que toda consulta del neto la toca.
+	"pago_parcial",
+	// La nota de crédito del proveedor (mig 0106): el neto la resta, igual que los parciales.
+	"cxp_nota_credito_aplicacion",
 }
 
 const (

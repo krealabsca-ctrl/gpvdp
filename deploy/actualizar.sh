@@ -50,7 +50,10 @@ verde "  Contenedores actualizados."
 titulo "5. Comprobando"
 OK=0
 for i in $(seq 1 45); do
-	if $COMPOSE exec -T backend wget -qO- http://127.0.0.1:8080/v1/healthz 2>/dev/null | grep -q ok; then OK=1; break; fi
+	# Se espera a READYZ, no a healthz: el proceso puede estar arriba y el sistema no servir —base
+	# caída, esquema a medias, o sin empresas porque la siembra falló—. Esperar al chequeo débil es
+	# declarar listo lo que no lo está.
+	if $COMPOSE exec -T backend wget -qO- http://127.0.0.1:8080/v1/readyz 2>/dev/null | grep -q '"listo":true'; then OK=1; break; fi
 	sleep 2
 done
 if (( ! OK )); then

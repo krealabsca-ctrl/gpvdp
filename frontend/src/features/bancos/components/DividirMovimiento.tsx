@@ -19,11 +19,20 @@ import { ClasifCombobox, type ClasifElegida } from "@/features/bancos/components
 import { useEmpresaId } from "@/features/bancos/useEmpresaId";
 import { mensajeError } from "@/lib/apiError";
 import { formatMonto } from "@/lib/format";
+import { copiarAlPortapapeles } from "@/lib/portapapeles";
 
 export function DividirMovimiento(props: {
   movimientoId: string;
   /** Signo del movimiento: lo usa el buscador de partidas para proponer el concepto correcto. */
   esDebito?: boolean;
+  /**
+   * La factura que este débito pagó, si está enlazado a CxP.
+   *
+   * Dividir uno enlazado SÍ se puede —el enlace dice qué factura se pagó y el reparto a qué
+   * partida va el gasto, que son cosas distintas— pero hay que decirlo: quien reparte tiene que
+   * saber que no está cambiando lo que se le pagó al proveedor.
+   */
+  pagoCxP?: { proveedor: string; consecutivo: string; facturas: number };
   onCerrar?: () => void;
 }) {
   const empresaId = useEmpresaId();
@@ -91,11 +100,32 @@ export function DividirMovimiento(props: {
   return (
     <div className="space-y-4 rounded-lg border p-4">
       {/* El hecho bancario, que es UNO y no se reparte. */}
-      <div>
-        <div className="text-sm font-medium">{d.descripcion}</div>
-        <div className="text-xs text-content-muted">
-          {d.fecha} · consecutivo {d.documento}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium">{d.descripcion}</div>
+          <div className="text-xs text-content-muted">
+            {d.fecha} · consecutivo {d.documento}
+          </div>
         </div>
+        {/* EL CÓDIGO DEL REPARTO, copiable. Es lo que nombra al grupo: sin él, las caras de un
+            reparto solo se pueden señalar diciendo «las dos filas del 12 de agosto», y en el
+            .xlsx no hay forma de agruparlas. Se copia con el botón y no a ojo: un código
+            transcrito mal devuelve CERO resultados, igual que uno inexistente. */}
+        {dividido && (
+          <button
+            type="button"
+            className="rounded-md border border-brand-gold/40 bg-brand-gold/10 px-2 py-1 font-mono text-xs text-brand-gold hover:bg-brand-gold/20"
+            title="Copiar el código del reparto. Es el mismo que sale en la columna «Reparto» del .xlsx."
+            onClick={async () => {
+              const ok = await copiarAlPortapapeles(d.codigo);
+              toast[ok ? "success" : "error"](
+                ok ? "Código del reparto copiado." : "No se pudo copiar; seleccionalo a mano.",
+              );
+            }}
+          >
+            {d.codigo} ⧉
+          </button>
+        )}
       </div>
 
       {dividido && <Invariante d={d} />}
@@ -138,6 +168,21 @@ export function DividirMovimiento(props: {
         }}
       >
         <div className="text-sm font-medium">Separar una parte</div>
+        {/* EL AVISO DEL PAGO ENLAZADO. Repartir un débito que pagó una factura es legítimo —el
+            gasto puede corresponder a otra empresa del grupo— pero hay que decir con todas las
+            letras qué se mueve y qué no: lo que se le pagó al proveedor no cambia, y la factura
+            sigue viéndose pagada por el total porque el expediente suma las caras. */}
+        {props.pagoCxP && (
+          <div className="rounded-lg border border-pendiente/40 bg-pendiente/10 px-3 py-2 text-xs text-content-muted">
+            Este débito pagó{" "}
+            {props.pagoCxP.facturas > 1
+              ? `${props.pagoCxP.facturas} facturas de ${props.pagoCxP.proveedor || "un proveedor"}`
+              : `la factura ${props.pagoCxP.consecutivo || "de CxP"} de ${props.pagoCxP.proveedor || "un proveedor"}`}
+            . Repartirlo cambia <b className="text-content">a qué partida va el gasto</b>, no lo
+            que se le pagó: la factura sigue figurando pagada por el total, porque su expediente
+            suma todas las partes.
+          </div>
+        )}
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-sm">
             <span className="mb-1 block text-content-muted">Monto a separar</span>

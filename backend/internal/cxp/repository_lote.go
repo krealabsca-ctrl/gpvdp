@@ -189,11 +189,17 @@ func (r *pgRepository) ListarLotes(ctx context.Context, empresaID string) ([]Lot
 		       to_char(l.creado_en, 'YYYY-MM-DD"T"HH24:MI:SSOF'),
 		       COUNT(d.id) FILTER (WHERE d.estado IN ('PAGADO', 'CONCILIADO'))::int,
 		       COUNT(d.id) FILTER (WHERE d.estado = 'REBOTADA')::int,
-		       COUNT(d.id) FILTER (WHERE d.estado = 'PROGRAMADO')::int
+		       COUNT(d.id) FILTER (WHERE d.estado = 'PROGRAMADO')::int,
+		       -- El corte (mig 0104). Van como texto vacío y no como NULL para que el cliente no
+		       -- tenga que distinguir dos formas de «no está cerrado».
+		       COALESCE(to_char(l.cerrado_en,   'YYYY-MM-DD"T"HH24:MI:SSOF'), ''),
+		       COALESCE(to_char(l.reabierto_en, 'YYYY-MM-DD"T"HH24:MI:SSOF'), ''),
+		       COALESCE(l.reapertura_motivo, '')
 		FROM lote_pago l
 		LEFT JOIN documento_cxp d ON d.lote_id = l.id
 		WHERE l.empresa_id = $1::uuid
-		GROUP BY l.id, l.numero, l.fecha_corte, l.estado, l.creado_en
+		GROUP BY l.id, l.numero, l.fecha_corte, l.estado, l.creado_en,
+		         l.cerrado_en, l.reabierto_en, l.reapertura_motivo
 		ORDER BY l.creado_en DESC`
 	rows, err := r.pool.Query(ctx, q, empresaID)
 	if err != nil {
@@ -204,7 +210,8 @@ func (r *pgRepository) ListarLotes(ctx context.Context, empresaID string) ([]Lot
 	for rows.Next() {
 		var l LotePago
 		if err := rows.Scan(&l.ID, &l.Numero, &l.FechaCorte, &l.Estado, &l.Cantidad, &l.TotalCRC, &l.CreadoEn,
-			&l.Pagadas, &l.Rebotadas, &l.Pendientes); err != nil {
+			&l.Pagadas, &l.Rebotadas, &l.Pendientes,
+			&l.CerradoEn, &l.ReabiertoEn, &l.ReaperturaMotivo); err != nil {
 			return nil, fmt.Errorf("cxp: scan lote: %w", err)
 		}
 		out = append(out, l)
@@ -232,7 +239,8 @@ func (r *pgRepository) DocumentosParaPagoPorLote(ctx context.Context, empresaID,
 		       GREATEST(d.total - d.retencion - COALESCE((SELECT SUM(aa.monto_crc) FROM anticipo_aplicacion aa WHERE aa.factura_id = d.id AND aa.activo), 0), 0)::text,
 		       COALESCE(d.huella, ''), COALESCE(d.consecutivo, ''), d.id::text,
 		       -- La nomenclatura interna («A8», «A9»): sale del catálogo de gasto de la factura.
-		       ` + codigoPagoSQL + `
+		       ` + codigoPagoSQL + `,
+		       p.id::text
 		FROM documento_cxp d
 		JOIN proveedor p ON p.id = d.proveedor_id
 		LEFT JOIN concepto c ON c.id = d.concepto_id
@@ -249,7 +257,7 @@ func (r *pgRepository) DocumentosParaPagoPorLote(ctx context.Context, empresaID,
 	for rows.Next() {
 		var pr PagoRow
 		if err := rows.Scan(&pr.Cedula, &pr.Nombre, &pr.IBAN, &pr.Moneda, &pr.MontoNeto,
-			&pr.Descripcion, &pr.Consecutivo, &pr.DocumentoID, &pr.CodigoPago); err != nil {
+			&pr.Descripcion, &pr.Consecutivo, &pr.DocumentoID, &pr.CodigoPago, &pr.ProveedorID); err != nil {
 			return nil, fmt.Errorf("cxp: scan pago lote: %w", err)
 		}
 		out = append(out, pr)
@@ -289,14 +297,15 @@ func (r *pgRepository) pagosPorRemesa(ctx context.Context, empresaID, loteID str
 		       -- otra y va sin código: etiquetarlo con el de la primera diría que ese débito es
 		       -- todo comisiones cuando la mitad es planilla, que es justo lo que se quiere evitar.
 		       CASE WHEN COUNT(DISTINCT ` + codigoPagoSQL + `) = 1
-		            THEN MIN(` + codigoPagoSQL + `) ELSE '' END
+		            THEN MIN(` + codigoPagoSQL + `) ELSE '' END,
+		       p.id::text
 		FROM remesa_pago r
 		JOIN proveedor p ON p.id = r.proveedor_id
 		JOIN documento_cxp d ON d.remesa_id = r.id AND NOT d.bloqueado_para_pago
 		LEFT JOIN concepto c ON c.id = d.concepto_id
 		LEFT JOIN clasificacion cl ON cl.id = d.clasificacion_id
 		WHERE r.empresa_id = $1::uuid AND r.lote_id = $2::uuid
-		GROUP BY r.id, r.numero, r.huella, r.monto_crc, p.identificacion, p.nombre, p.iban
+		GROUP BY r.id, r.numero, r.huella, r.monto_crc, p.id, p.identificacion, p.nombre, p.iban
 		HAVING COUNT(d.id) > 0
 		ORDER BY r.numero`
 	rows, err := r.pool.Query(ctx, q, empresaID, loteID)
@@ -309,7 +318,7 @@ func (r *pgRepository) pagosPorRemesa(ctx context.Context, empresaID, loteID str
 		var pr PagoRow
 		var numero int
 		if err := rows.Scan(&pr.Cedula, &pr.Nombre, &pr.IBAN, &pr.Moneda, &pr.MontoNeto,
-			&pr.Descripcion, &numero, &pr.CodigoPago); err != nil {
+			&pr.Descripcion, &numero, &pr.CodigoPago, &pr.ProveedorID); err != nil {
 			return nil, fmt.Errorf("cxp: scan pago por remesa: %w", err)
 		}
 		// La referencia legible reemplaza al «FC 000487» de una factura suelta: acá no hay UNA
@@ -337,12 +346,87 @@ func (r *pgRepository) ProgramarAprobados(ctx context.Context, empresaID string,
 }
 
 // Reintentar saca una factura REBOTADA de su lote y la vuelve a PROGRAMADO (para un nuevo corte).
+//
+// LA GUARDA DEL LOTE CERRADO VA EN EL WHERE, no en una lectura previa (mig 0104). Leer el estado
+// del lote y después actualizar deja una ventana entre las dos consultas: si alguien cierra el
+// lote justo ahí, la factura sale igual de un lote cerrado y el corte deja de cuadrar con la
+// macro que se subió al banco. Es la misma razón por la que la guarda de excluir un movimiento
+// vive en su WHERE.
 func (r *pgRepository) Reintentar(ctx context.Context, empresaID, id string) (int64, error) {
-	const q = `UPDATE documento_cxp SET estado = 'PROGRAMADO', lote_id = NULL, actualizado_en = now()
-	           WHERE empresa_id = $1::uuid AND id = $2::uuid AND estado = 'REBOTADA'`
+	const q = `UPDATE documento_cxp d SET estado = 'PROGRAMADO', lote_id = NULL, actualizado_en = now()
+	           WHERE d.empresa_id = $1::uuid AND d.id = $2::uuid AND d.estado = 'REBOTADA'
+	             AND NOT EXISTS (SELECT 1 FROM lote_pago l
+	                             WHERE l.id = d.lote_id AND l.estado = 'CERRADO')`
 	tag, err := r.pool.Exec(ctx, q, empresaID, id)
 	if err != nil {
 		return 0, fmt.Errorf("cxp: reintentar: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// LoteDeDocumentoEstaCerrado dice si la factura cuelga de un lote cerrado.
+//
+// Existe solo para EXPLICAR un reintento que no movió nada. La decisión ya la tomó el WHERE de
+// arriba; esto contesta «¿por qué no se movió?», porque «0 filas» se ve igual cuando la factura no
+// está rebotada que cuando su lote está cerrado, y son dos arreglos distintos.
+func (r *pgRepository) LoteDeDocumentoEstaCerrado(ctx context.Context, empresaID, id string) (bool, error) {
+	var cerrado bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM documento_cxp d
+		               JOIN lote_pago l ON l.id = d.lote_id
+		               WHERE d.empresa_id = $1::uuid AND d.id = $2::uuid AND l.estado = 'CERRADO')`,
+		empresaID, id).Scan(&cerrado)
+	if err != nil {
+		return false, fmt.Errorf("cxp: lote del documento cerrado: %w", err)
+	}
+	return cerrado, nil
+}
+
+// CerrarLote da el corte: ABIERTO → CERRADO.
+//
+// El estado va en el WHERE para que cerrar dos veces no pise la fecha ni el autor del cierre
+// bueno. Devuelve 0 filas si el lote ya estaba cerrado o no existe, y el servicio distingue cuál
+// de las dos cosas fue.
+func (r *pgRepository) CerrarLote(ctx context.Context, empresaID, loteID, usuarioID string) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE lote_pago SET estado = 'CERRADO', cerrado_por = $3::uuid, cerrado_en = now()
+		WHERE empresa_id = $1::uuid AND id = $2::uuid AND estado = 'ABIERTO'`,
+		empresaID, loteID, usuarioID)
+	if err != nil {
+		return 0, fmt.Errorf("cxp: cerrar lote: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// ReabrirLote vuelve CERRADO → ABIERTO dejando el motivo.
+//
+// NO se borra `cerrado_en` ni `cerrado_por`: que el lote estuvo cerrado alguna vez es parte de lo
+// que hay que poder reconstruir. Lo que el lote informa después de esto es «se cerró el día X y se
+// reabrió el día Y porque Z».
+func (r *pgRepository) ReabrirLote(ctx context.Context, empresaID, loteID, usuarioID, motivo string) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE lote_pago
+		SET estado = 'ABIERTO', reabierto_por = $3::uuid, reabierto_en = now(), reapertura_motivo = $4
+		WHERE empresa_id = $1::uuid AND id = $2::uuid AND estado = 'CERRADO'`,
+		empresaID, loteID, usuarioID, motivo)
+	if err != nil {
+		return 0, fmt.Errorf("cxp: reabrir lote: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// LoteEstaCerrado explica un cierre/reapertura que no movió nada: distingue «no existe» de «ya
+// estaba en ese estado».
+func (r *pgRepository) LoteEstaCerrado(ctx context.Context, empresaID, loteID string) (existe, cerrado bool, err error) {
+	var estado string
+	err = r.pool.QueryRow(ctx,
+		`SELECT estado FROM lote_pago WHERE empresa_id = $1::uuid AND id = $2::uuid`,
+		empresaID, loteID).Scan(&estado)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("cxp: estado del lote: %w", err)
+	}
+	return true, estado == "CERRADO", nil
 }

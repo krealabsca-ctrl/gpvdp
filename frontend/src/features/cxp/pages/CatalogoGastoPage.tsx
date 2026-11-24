@@ -33,6 +33,7 @@ import {
   PageHeader,
   useToast,
 } from "@/components/ui";
+import { PrioridadesPanel } from "@/features/cxp/components/PrioridadesPanel";
 import { mensajeError } from "@/lib/apiError";
 import { useClasificaciones, useConceptos } from "@/features/bancos/hooks";
 import {
@@ -130,6 +131,10 @@ export function CatalogoGastoPage() {
           clasificación bancaria de años anteriores.
         </span>
       </div>
+
+      {/* Las prioridades de pago (mig 0121) viven acá y no en una pantalla propia: son catálogo de
+          CxP, se configuran con el mismo permiso y quien abre esta pantalla es quien las decide. */}
+      <PrioridadesPanel />
 
       {mostrarForm && (
         <Card>

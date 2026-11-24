@@ -52,6 +52,39 @@ func (r *pgRepository) LiberarParaPago(ctx context.Context, empresaID, proveedor
 	return out, rows.Err()
 }
 
+// ConfigurarProveedorSinCandado deja la ficha lista para que las PRÓXIMAS facturas de ese
+// proveedor no nazcan bloqueadas aunque el comprobante diga contado.
+//
+// ── PONE LAS DOS CONDICIONES, NO UNA ────────────────────────────────────────────────────────
+//
+// La regla de la migración 0097 exige `convenio_manda = 'PROVEEDOR'` Y `condicion_pago =
+// 'CREDITO'` a la vez. Marcar solo la primera —que es lo que aconsejaba el aviso— no desactiva
+// nada, y 573 de 649 proveedores están en CONTADO: para el caso dominante el consejo no hacía
+// absolutamente nada y la factura siguiente volvía a nacer trancada.
+//
+// `plazo_credito_dias` NO se toca: elegir un plazo por el usuario sería inventar una condición
+// comercial que nadie pactó. Para que eso no cambie el vencimiento, la regla del INSERT solo deja
+// mandar al convenio cuando hay un plazo de verdad (`> 0`, ver `CrearDocumento`); si no, lo sigue
+// tomando del comprobante. Sin ese cuidado, quitar el candado metía la factura en la rama del
+// convenio con plazo 0 y la hacía nacer vencida el día de la emisión.
+//
+// Devuelve si de verdad cambió algo: si la ficha ya estaba así, el llamador no debe anunciar un
+// cambio que no ocurrió.
+func (r *pgRepository) ConfigurarProveedorSinCandado(ctx context.Context, empresaID, proveedorID string) (bool, error) {
+	const q = `
+		UPDATE proveedor
+		   SET convenio_manda  = 'PROVEEDOR',
+		       condicion_pago  = 'CREDITO',
+		       actualizado_en  = now()
+		 WHERE empresa_id = $1::uuid AND id = $2::uuid
+		   AND (convenio_manda IS DISTINCT FROM 'PROVEEDOR' OR condicion_pago IS DISTINCT FROM 'CREDITO')`
+	tag, err := r.pool.Exec(ctx, q, empresaID, proveedorID)
+	if err != nil {
+		return false, fmt.Errorf("cxp: configurar proveedor sin candado: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // FacturasDeContado lista las facturas de un proveedor que quedaron trancadas por el candado.
 //
 // Es lo que se muestra al marcar «manda el convenio» en su ficha: cuántas son, cuáles y por

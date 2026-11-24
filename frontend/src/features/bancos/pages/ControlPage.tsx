@@ -77,6 +77,7 @@ import {
 } from "@/features/bancos/hooks";
 import { PeriodoSelector } from "@/features/bancos/components/PeriodoSelector";
 import { AdminDepartamentos } from "@/features/bancos/components/AdminDepartamentos";
+import { PresupuestoIngresoPanel } from "@/features/bancos/components/PresupuestoIngresoPanel";
 import type {
   EstadoControl,
   FilaControl,
@@ -200,6 +201,12 @@ export function ControlPage() {
           </div>
         }
       />
+
+      {/* LAS DOS MITADES DE LA META, arriba del control de gasto. Es la pregunta de la que
+          cuelga todo lo demás —«¿vamos a cerrar como dijimos?»— y el gasto solo contesta la
+          mitad. Va fuera del `q` del gasto: cada una carga por su cuenta, así que un error en
+          una no deja la otra en blanco. */}
+      <PresupuestoIngresoPanel desde={desde} hasta={hasta} />
 
       {q.isLoading && <LoadingState label="Cruzando el gasto con el presupuesto…" />}
       {q.isError && <ErrorState message={mensajeError(q.error)} onRetry={() => q.refetch()} />}

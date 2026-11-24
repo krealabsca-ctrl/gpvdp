@@ -25,7 +25,29 @@ const PLAIN = new Intl.NumberFormat("es-CR", {
   maximumFractionDigits: 2,
 });
 
+/**
+ * El tipo de cambio: al menos 2 decimales, hasta 6.
+ *
+ * Los dos extremos importan. El TC del mes es el PROMEDIO de tres cotizaciones y casi nunca es
+ * exacto —456,673333—, así que recortarlo a dos o cuatro decimales descuadra cada monto en dólares
+ * del mes: por eso el máximo es 6 (mig 0119). Y el mínimo es 2 porque el backend manda el valor sin
+ * ceros de relleno, así que un TC de 452,60 llega como «452.6» y un tipo de cambio con un solo
+ * decimal se lee como un error de carga.
+ */
+const TIPO_CAMBIO = new Intl.NumberFormat("es-CR", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 6,
+});
+
 export type Moneda = "CRC" | "USD";
+
+/** Formatea un tipo de cambio conservando sus decimales significativos (2 a 6). */
+export function formatTipoCambio(value: string | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "—";
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return TIPO_CAMBIO.format(n);
+}
 
 /** Convierte un decimal-string del backend a número; "" / null -> 0. */
 export function toNumber(value: string | null | undefined): number {

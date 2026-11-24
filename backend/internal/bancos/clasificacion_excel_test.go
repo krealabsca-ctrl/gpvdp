@@ -6,6 +6,7 @@ package bancos
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -61,8 +62,16 @@ func TestLeerClasifExcelExigeEncabezadoReconocible(t *testing.T) {
 	// Solo «Fecha» no alcanza: cualquier tabla tiene una columna Fecha y leerla como si fuera esta
 	// hoja desalinea todo el archivo en silencio.
 	g := grilla([]string{"Fecha", "Monto", "Saldo"}, []string{"03/07/2026", "100", "900"})
-	if _, err := LeerClasifExcel(g); err != ErrClasifExcelSinEncabezado {
-		t.Fatalf("err = %v, se esperaba ErrClasifExcelSinEncabezado", err)
+	_, err := LeerClasifExcel(g)
+	// El rechazo es un DIAGNÓSTICO tipado desde el 21-oct-2026 (ver encabezado_diagnostico.go).
+	// Y este caso es el que mejor lo muestra: el archivo SÍ trae «Fecha», así que el mensaje puede
+	// decir «entendí la fecha, me faltó la partida» en vez de un «no se reconoció» que no orienta.
+	var enc *ErrorDeEncabezado
+	if !errors.As(err, &enc) {
+		t.Fatalf("err = %v (%T), se esperaba un diagnóstico de encabezado", err, err)
+	}
+	if !strings.Contains(err.Error(), "se entendió fecha") {
+		t.Errorf("no dice que la fecha SÍ se entendió, que es lo que orienta a quien corrige el archivo: %q", err.Error())
 	}
 }
 
@@ -72,7 +81,7 @@ func escenario(t *testing.T, movs []MovimientoCalzado) (*Service, *fakeRepo) {
 	repo := &fakeRepo{
 		cuentasLista: []CuentaListItem{
 			{ID: "cta-1", Alias: "BN Valle de Paz Colones", Banco: "BN", Moneda: "CRC"},
-			{ID: "cta-2", Alias: "Davivienda Colones", IBAN: "CR76010409142215626710", Moneda: "CRC"},
+			{ID: "cta-2", Alias: "Davivienda Colones", IBAN: "CR76010400010000000008", Moneda: "CRC"},
 		},
 		clasifsCat: []ClasificacionItem{
 			{ID: "cl-comb", ConceptoID: "co-gas", Concepto: "Gastos", Nombre: "Combustible"},
@@ -305,7 +314,7 @@ func TestClasifExcelResuelveLaCuentaPorIBAN(t *testing.T) {
 		calzado("cta-2|2026-07-03|100.00|0.00|ABC1", "mov-9", "X", "", "", ""),
 	})
 	filas := []FilaClasifExcel{
-		filaClasif(2, "CR76 0104 0914 2215 6267 10", "03/07/2026", "ABC1", "100", "", "Gastos", "Combustible"),
+		filaClasif(2, "CR76 0104 0001 0000 0000 08", "03/07/2026", "ABC1", "100", "", "Gastos", "Combustible"),
 	}
 	plan, err := svc.planClasifExcel(context.Background(), "emp", filas, "", false, true, "u1")
 	if err != nil {

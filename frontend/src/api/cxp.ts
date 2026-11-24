@@ -35,7 +35,12 @@ export type EstadoDocumento =
   | "LIQUIDADA"
   | "REBOTADA";
 
-export type TipoFactura = "CXP" | "ANTICIPO" | "VIATICOS" | "REINTEGRO" | "INTERNO";
+/**
+ * NOTA_CREDITO (mig 0106) es el documento que RESTA: lo emite el proveedor para rebajar lo que le
+ * debemos. Vive acá y no en una tabla aparte porque llega con su clave de Hacienda, igual que una
+ * factura, y así hereda el anti-duplicado por clave.
+ */
+export type TipoFactura = "CXP" | "ANTICIPO" | "VIATICOS" | "REINTEGRO" | "INTERNO" | "NOTA_CREDITO";
 
 export interface Proveedor {
   id: string;
@@ -86,6 +91,143 @@ export interface ProveedorInput {
 }
 
 /** Departamento (centro de costo) de la empresa — catálogo administrable. */
+// --- El cronograma de pago (mig 0122) ---
+
+/** Un proveedor con lo que se le va a pagar, y de qué cuenta sale. */
+export interface LineaCronograma {
+  proveedor_id: string;
+  proveedor: string;
+  moneda: string;
+  monto: string;
+  /** El monto llevado a colones con el tipo de cambio del cuadro. */
+  monto_colonizado: string;
+  cuenta: string;
+  banco: string;
+  /** Sale de una cuenta marcada como reserva: no es flujo normal. */
+  es_reserva: boolean;
+  /** Se paga igual, pero no entra en el cronograma que se comunica. */
+  por_fuera: boolean;
+}
+
+/**
+ * Las cuatro restas, en el orden en que las lee quien recibe el cuadro.
+ *
+ * Son el documento: lo que se comunica es el último número, y cada escalón cuadra con el anterior.
+ * Van como texto porque es dinero.
+ */
+export interface TotalesCronograma {
+  total_colones: string;
+  total_dolares: string;
+  dolares_colonizados: string;
+  total_colonizado: string;
+  reserva: string;
+  flujo_normal: string;
+  por_fuera: string;
+  cronograma_total: string;
+  cronograma_en_colones: string;
+  tipo_cambio: string;
+}
+
+export interface Cronograma {
+  lote_id: string;
+  lote_numero: number;
+  fecha_corte: string;
+  lineas: LineaCronograma[];
+  totales: TotalesCronograma;
+  /** Cuántas líneas no tienen cuenta asignada. Van al flujo normal, y conviene decirlo. */
+  sin_cuenta: number;
+}
+
+// --- El papel de respaldo del pago (mig 0117 + firmas) ---
+
+/** Una línea del cuadro: un proveedor en una moneda. */
+export interface FilaAvisoCorte {
+  proveedor_id: string;
+  proveedor: string;
+  identificacion: string;
+  moneda: string;
+  /** Se propone del catálogo y se puede corregir. Vacío si el proveedor mezcla rubros. */
+  concepto: string;
+  /** Los consecutivos de las facturas, o lo que alguien haya escrito. */
+  documentos: string;
+  monto: string;
+  cuenta: string;
+  /** Si alguien corrigió el texto de esta fila. */
+  editado: boolean;
+  /** Cuántas transferencias cubre la fila (en el corte por factura puede ser más de una). */
+  transferencias: number;
+  /** El banco rechazaría esta línea: hay que arreglarlo ANTES de mandar el papel. */
+  sin_cuenta: boolean;
+}
+
+export interface AvisoDeMonedaCorte {
+  moneda: string;
+  filas: FilaAvisoCorte[];
+  /** La suma EN SU MONEDA. No hay total general: sumar colones con dólares no significa nada. */
+  total: string;
+  transferencias: number;
+  sin_cuenta: number;
+}
+
+/**
+ * Quién hizo cada paso del corte, según lo que registró el sistema.
+ *
+ * `nombre` vacío = ese paso NO se hizo en el sistema, y se muestra en blanco. Es la diferencia con
+ * el Excel que este papel reemplaza, donde los cuatro nombres se tecleaban.
+ */
+export interface FirmaCorte {
+  rol: string;
+  nombre: string;
+  fecha: string;
+}
+
+export interface AvisoDeCorte {
+  lote_id: string;
+  lote_numero: number;
+  fecha_corte: string;
+  monedas: AvisoDeMonedaCorte[];
+  /** Las cuatro, siempre y en orden, aunque alguna esté vacía. */
+  firmas: FirmaCorte[];
+  /** Cuándo salió el dinero. Vacía mientras el corte no se cierre. */
+  fecha_pago: string;
+}
+
+// --- Catálogo de prioridades de pago (mig 0121) ---
+
+/** El tono de la insignia, de la paleta del sistema. No es un color libre: así sigue el tema. */
+export type TonoPrioridad = "neutral" | "accent" | "positivo" | "negativo" | "pendiente";
+
+/**
+ * Una prioridad de pago del catálogo de la empresa.
+ *
+ * `orden` y `urgente` son cosas distintas a propósito: el primero manda en cómo se ordenan las
+ * listas, el segundo en si cuenta como «se paga sí o sí». Derivar la segunda de la primera haría
+ * que crear una prioridad nueva por encima dejara de contar la anterior en silencio.
+ */
+export interface Prioridad {
+  id: string;
+  /** Lo que queda escrito en la factura. Va en mayúsculas. */
+  codigo: string;
+  nombre: string;
+  /** Mayor = más arriba en las listas. */
+  orden: number;
+  /** Cuenta en el tablero, el filtro de urgentes y la premarca del corte. */
+  urgente: boolean;
+  tono: TonoPrioridad;
+  activa: boolean;
+  /** En cuántas facturas está puesta. Si es > 0 no se puede eliminar, solo desactivar. */
+  en_uso: number;
+}
+
+export interface PrioridadInput {
+  codigo: string;
+  nombre: string;
+  orden: number;
+  urgente: boolean;
+  tono: TonoPrioridad;
+  activa: boolean;
+}
+
 export interface Departamento {
   id: string;
   nombre: string;
@@ -179,8 +321,14 @@ export interface Documento {
   comprobante_enviado_en: string | null;
   /** La clasificación vino de la memoria del proveedor (pendiente de confirmar). */
   clasif_auto: boolean;
-  /** Prioridad interna de pago: "AA" (sí o sí) · "A" (puede esperar) · "" (normal). */
-  prioridad: "" | "A" | "AA";
+  /**
+   * Prioridad interna de pago: el CÓDIGO del catálogo de la empresa, o "" si nadie la priorizó.
+   *
+   * Es `string` y no una lista cerrada desde la mig 0121: los códigos los crea el usuario, así que
+   * enumerarlos acá volvería a necesitar un despliegue para agregar uno. Cómo se ve cada código
+   * —nombre y color— lo dice el catálogo (`usePrioridades`).
+   */
+  prioridad: string;
   /** Motivo registrado al denegar/anular/liquidar/rebotar. */
   nota_revision: string;
   /** Validación por departamento (control operativo de área). */
@@ -521,6 +669,173 @@ export interface FaseBandeja {
   monto: string;
 }
 
+/** Un débito del banco que PODRÍA ser el pago de una factura (mismo monto, fecha cercana). */
+export interface MovimientoCandidato {
+  movimiento_id: string;
+  fecha: string;
+  descripcion: string;
+  monto_crc: string;
+  cuenta: string;
+  /** Días entre el débito y la fecha de pago. Negativo = el banco debitó antes. */
+  dias_de_diferencia: number;
+  /**
+   * El débito calza ENTERO con el neto. Los que no, son el caso del pago parcial: el banco debitó
+   * menos y la factura sigue debiendo el resto. Es un sí o un no, nunca un «parecido».
+   */
+  exacto: boolean;
+}
+
+/** Una factura declarada pagada que el banco nunca debitó. */
+export interface FacturaSinRespaldo {
+  documento_id: string;
+  clave: string;
+  consecutivo: string;
+  proveedor: string;
+  /** El código que debería venir en la descripción del débito, para buscarlo a mano. */
+  huella: string;
+  estado: string;
+  moneda: string;
+  neto_crc: string;
+  fecha_pago: string;
+  dias_sin_respaldo: number;
+  lote_id?: string;
+  lote_numero?: number;
+  /** El pago salió agrupado: el código a buscar en el banco es el de la remesa, no el de la factura. */
+  pagada_por_remesa: boolean;
+  referencia_remesa?: string;
+  candidatos: MovimientoCandidato[];
+}
+
+/** Plata que salió del banco y no está aplicada a ninguna factura ni remesa. */
+export interface DebitoSinFactura {
+  movimiento_id: string;
+  fecha: string;
+  descripcion: string;
+  monto_crc: string;
+  cuenta: string;
+  clasificacion?: string;
+}
+
+/**
+ * Un proveedor que declara «contado» en sus comprobantes, con lo necesario para decidir.
+ *
+ * La regla que levanta el candado pide DOS cosas: `convenio_manda = PROVEEDOR` y
+ * `condicion_pago = CREDITO`. Las dos banderas vienen calculadas del servidor y no se derivan acá:
+ * la regla vive en el INSERT del documento, y tenerla escrita en dos lenguajes es la forma de que
+ * una de las dos se quede atrás.
+ */
+export interface CandidatoConvenio {
+  proveedor_id: string;
+  nombre: string;
+  /** Lo que dice la FICHA. Si es CONTADO, marcar el convenio no levanta el candado. */
+  condicion_pago: string;
+  convenio_manda: string;
+  /** Cuántas de sus facturas declararon contado: la medida de cuánto trabajo ahorra marcarlo. */
+  facturas_contado: number;
+  bloqueadas: number;
+  monto_bloqueado: string;
+  /** Tiene las dos condiciones: sus facturas nuevas ya no se bloquean. */
+  ya_listo: boolean;
+  /** Convenio marcado pero ficha en CONTADO: la regla NO se activa. */
+  falta_credito: boolean;
+}
+
+export interface ResultadoConvenioMasivo {
+  actualizados: number;
+  /**
+   * Quedaron con el convenio y la ficha en CONTADO: la regla no se les activa. Solo se llena
+   * cuando se pidió NO pasarlos a crédito; si no, no queda nadie a medias.
+   */
+  sin_credito: string[];
+  /**
+   * Estaban en CONTADO y la ficha quedó en CRÉDITO para que la regla se active. Es un cambio en
+   * la condición comercial del proveedor, así que se nombran en vez de contarlos.
+   */
+  pasados_a_credito: string[];
+}
+
+/** Un débito del banco aplicado a una factura por menos del neto (mig 0105). */
+export interface PagoParcial {
+  id: string;
+  documento_id: string;
+  movimiento_id: string;
+  monto: string;
+  moneda: string;
+  motivo: string;
+  aplicado_en: string;
+  fecha: string;
+  descripcion: string;
+  cuenta: string;
+}
+
+/**
+ * Cuánto lleva pagada una factura y cuánto le falta.
+ *
+ * Los tres números viajan juntos a propósito: mostrar solo el saldo no deja verificar la resta.
+ */
+export interface SaldoDeFactura {
+  documento_id: string;
+  /** Lo que se debía ANTES de los parciales. */
+  neto: string;
+  pagado: string;
+  saldo: string;
+  moneda: string;
+  parciales: PagoParcial[];
+}
+
+/** Una nota de crédito del proveedor con lo que le queda sin aplicar (mig 0106). */
+export interface NotaCreditoSaldo {
+  id: string;
+  clave: string;
+  consecutivo: string;
+  proveedor: string;
+  proveedor_id: string;
+  fecha_emision: string;
+  moneda: string;
+  total: string;
+  aplicado: string;
+  saldo: string;
+}
+
+/** Una rebaja viva de nota de crédito sobre una factura. */
+export interface AplicacionNotaCredito {
+  id: string;
+  nota_id: string;
+  factura_id: string;
+  monto: string;
+  consecutivo: string;
+  clave: string;
+  aplicado_en: string;
+}
+
+/** El arqueo de dos columnas (hallazgo 3.1 de la auditoría Bancos↔CxP). */
+export interface ReporteExcepcion {
+  /** Hasta qué fecha llega el estado de cuenta cargado. TODO el reporte se lee contra esto. */
+  corte_banco: string;
+  desde: string;
+  hasta: string;
+  sin_respaldo: FacturaSinRespaldo[];
+  total_sin_respaldo: string;
+  debitos_sin_factura: DebitoSinFactura[];
+  total_debitos: string;
+  /** Cuántos débitos hay DE VERDAD en el rango; la lista trae como mucho 500. */
+  debitos_encontrados: number;
+  /**
+   * Declaradas pagadas cuya fecha el banco todavía no alcanzó. NO son excepciones: se cuentan
+   * aparte para que «0 excepciones» no se lea como «todo cuadra» cuando falta cargar el banco.
+   */
+  aun_no_vencidas: number;
+}
+
+/** El mismo cálculo acotado a un lote: lo que se informa al cerrarlo. */
+export interface RespaldoDelLote {
+  lote_id: string;
+  lote_numero: number;
+  corte_banco: string;
+  facturas: number;
+  sin_respaldo: FacturaSinRespaldo[];
+}
+
 /** Lote/corte de pago. */
 export interface LotePago {
   id: string;
@@ -533,6 +848,10 @@ export interface LotePago {
   pagadas: number;
   rebotadas: number;
   pendientes: number;
+  /** El corte (mig 0104). Vacíos mientras el lote siga ABIERTO. */
+  cerrado_en?: string;
+  reabierto_en?: string;
+  reapertura_motivo?: string;
   /**
    * Cómo se armó el corte: una transferencia por FACTURA (el de siempre) o una por PROVEEDOR,
    * cubriendo todas sus facturas del lote. Decide cuántas líneas tiene la macro.
@@ -721,13 +1040,20 @@ export interface FiltrosDocumentos {
    */
   contabilidad?: "si" | "no";
   /**
-   * Prioridad de pago: "AA" (sí o sí) · "A" (puede esperar) · "AA_A" (las dos) · "sin" (sin
-   * priorizar) · ausente = todas.
+   * Prioridad de pago: un CÓDIGO del catálogo de la empresa, o uno de los tres valores especiales
+   * —"urgentes" (las marcadas así en el catálogo), "con" (cualquiera priorizada), "sin" (ninguna)—.
+   * Ausente = todas.
    *
-   * Es lo que permite armar el corte «solo las AA». La prioridad se veía y ordenaba desde siempre,
-   * pero no se podía filtrar: con miles de facturas abiertas, lo urgente había que buscarlo a ojo.
+   * Dejó de ser una lista cerrada con la mig 0121: antes eran "AA" · "A" · "AA_A", y un código
+   * nuevo no habría estado ahí. "urgentes" reemplaza al viejo "AA" donde lo que se quería decir era
+   * «lo que se paga sí o sí»: eso ahora lo declara el catálogo, así que sigue sirviendo aunque
+   * mañana haya tres prioridades urgentes.
+   *
+   * Es lo que permite armar el corte «solo lo urgente». La prioridad se veía y ordenaba desde
+   * siempre, pero no se podía filtrar: con miles de facturas abiertas, lo urgente había que
+   * buscarlo a ojo.
    */
-  prioridad?: "AA" | "A" | "AA_A" | "sin";
+  prioridad?: string;
   /**
    * Validación por riesgo: "si" = solo las que esperan la conformidad del área, "no" = las que
    * fluyen derecho a aprobación. Es lo que separa la cola del validador del resto del ciclo.
@@ -1530,12 +1856,38 @@ export const cxpApi = {
       json: { accion, ids, fecha_pago_programada: fecha || undefined, nota: nota || undefined },
     });
   },
-  /** Fija la prioridad interna de pago (AA / A / "" normal) de un lote de facturas. */
-  prioridadMasiva(ids: string[], prioridad: "" | "A" | "AA"): Promise<ResultadoMasivo> {
+  /**
+   * Fija la prioridad interna de pago de un lote de facturas. `prioridad` es un CÓDIGO del
+   * catálogo de la empresa, o "" para quitarla.
+   *
+   * El servidor valida el código contra ese catálogo (mig 0121) y, si no existe, responde
+   * nombrando los que sí: es lo que el CHECK de la base nunca pudo decir.
+   */
+  prioridadMasiva(ids: string[], prioridad: string): Promise<ResultadoMasivo> {
     return apiFetch<ResultadoMasivo>("/cxp/documentos/prioridad-masiva", {
       method: "POST",
       json: { ids, prioridad: prioridad || undefined },
     });
+  },
+
+  // --- Catálogo de prioridades (mig 0121) ---
+
+  /** Las prioridades de la empresa, de la más alta a la más baja. `activas` = solo las usables. */
+  prioridades(activas = false): Promise<{ items: Prioridad[]; total: number }> {
+    return apiFetch<{ items: Prioridad[]; total: number }>("/cxp/prioridades", {
+      method: "GET",
+      query: { activas: activas ? "1" : undefined },
+    });
+  },
+  crearPrioridad(input: PrioridadInput): Promise<Prioridad> {
+    return apiFetch<Prioridad>("/cxp/prioridades", { method: "POST", json: input });
+  },
+  actualizarPrioridad(id: string, input: PrioridadInput): Promise<Prioridad> {
+    return apiFetch<Prioridad>(`/cxp/prioridades/${id}`, { method: "PATCH", json: input });
+  },
+  /** Solo borra si no cuelga ninguna factura; si cuelga, el servidor dice que se desactive. */
+  eliminarPrioridad(id: string): Promise<void> {
+    return apiFetch<void>(`/cxp/prioridades/${id}`, { method: "DELETE" });
   },
   /** Categorías frecuentes del proveedor (para clasificar rápido). */
   gastosProveedor(proveedorId: string): Promise<GastoFrecuente[]> {
@@ -1564,6 +1916,120 @@ export const cxpApi = {
   lotes(): Promise<LotePago[]> {
     return apiFetch<LotePago[]>("/cxp/lotes", { method: "GET" });
   },
+
+  // --- El arqueo de excepción y el corte del lote (mig 0104) ---
+
+  /**
+   * El arqueo: lo que declaramos pagado y el banco nunca debitó, contra los débitos que no están
+   * aplicados a ninguna factura.
+   *
+   * `desde`/`hasta` acotan SOLO la columna de débitos. Las facturas sin respaldo nunca se acotan:
+   * la más vieja es la más grave, y filtrarla por mes la escondería justo cuando más importa.
+   */
+  excepcion(desde?: string, hasta?: string): Promise<ReporteExcepcion> {
+    return apiFetch<ReporteExcepcion>("/cxp/excepcion", {
+      method: "GET",
+      query: { desde: desde || undefined, hasta: hasta || undefined },
+    });
+  },
+  // --- El convenio del proveedor, en lote (21-oct-2026) ---
+
+  /**
+   * Proveedores que declaran «contado» en sus comprobantes, con cuántas facturas traen así.
+   *
+   * `pendientes` deja fuera a los que ya tienen las dos condiciones puestas: son los que no tienen
+   * nada que hacer, y mezclarlos obliga a buscar los que sí entre los que no.
+   */
+  candidatosConvenio(soloPendientes = true): Promise<CandidatoConvenio[]> {
+    return apiFetch<CandidatoConvenio[]>("/cxp/proveedores/candidatos-convenio", {
+      method: "GET",
+      query: { pendientes: soloPendientes ? "1" : undefined },
+    });
+  },
+  /** Pone el convenio a varios proveedores. NO libera nada: eso es una decisión aparte. */
+  marcarConvenioMasivo(
+    proveedorIds: string[],
+    convenio: "XML" | "PROVEEDOR",
+    pasarACredito = true,
+  ) {
+    return apiFetch<ResultadoConvenioMasivo>("/cxp/proveedores/convenio-masivo", {
+      method: "POST",
+      json: { proveedor_ids: proveedorIds, convenio, pasar_a_credito: pasarACredito },
+    });
+  },
+  /** Cuántas facturas y por cuánto se liberarían: se ve ANTES de decidir. */
+  bloqueadasDeProveedores(proveedorIds: string[]) {
+    return apiFetch<{ bloqueadas: number; monto_crc: string }>("/cxp/proveedores/bloqueadas", {
+      method: "POST",
+      json: { proveedor_ids: proveedorIds },
+    });
+  },
+  /** Levanta el candado de todo lo bloqueado de esos proveedores. Exige motivo. */
+  liberarDeProveedores(proveedorIds: string[], motivo: string) {
+    return apiFetch<{ liberadas: number }>("/cxp/proveedores/liberar-masivo", {
+      method: "POST",
+      json: { proveedor_ids: proveedorIds, motivo },
+    });
+  },
+
+  // --- Lo que baja el neto: notas de crédito y pagos parciales (migs 0105-0106) ---
+
+  /** Cuánto lleva pagada una factura y cuánto le falta, con el detalle de cada débito. */
+  saldoDeFactura(id: string): Promise<SaldoDeFactura> {
+    return apiFetch<SaldoDeFactura>(`/cxp/documentos/${id}/saldo`, { method: "GET" });
+  },
+  /**
+   * Registra lo que el banco debitó cuando no alcanzó el neto.
+   *
+   * No afloja la conciliación: el neto se encoge, así que el próximo débito por el resto calza
+   * exacto. El saldo NO vuelve solo a la cola de pago.
+   */
+  registrarPagoParcial(id: string, movimientoId: string, monto: string, motivo: string): Promise<SaldoDeFactura> {
+    return apiFetch<SaldoDeFactura>(`/cxp/documentos/${id}/pago-parcial`, {
+      method: "POST",
+      json: { movimiento_id: movimientoId, monto, motivo },
+    });
+  },
+  /** Devuelve al circuito de pago lo que la factura quedó debiendo. Exige motivo. */
+  cobrarSaldo(id: string, motivo: string): Promise<Documento> {
+    return apiFetch<Documento>(`/cxp/documentos/${id}/cobrar-saldo`, { method: "POST", json: { motivo } });
+  },
+
+  /** Notas de crédito del proveedor que todavía tienen saldo sin aplicar. */
+  notasDeCredito(proveedorId?: string): Promise<NotaCreditoSaldo[]> {
+    return apiFetch<NotaCreditoSaldo[]>("/cxp/notas-credito", {
+      method: "GET",
+      query: { proveedor_id: proveedorId || undefined },
+    });
+  },
+  /** Las rebajas vivas sobre una factura. */
+  notasDeFactura(id: string): Promise<AplicacionNotaCredito[]> {
+    return apiFetch<AplicacionNotaCredito[]>(`/cxp/documentos/${id}/notas-credito`, { method: "GET" });
+  },
+  /** Aplica una nota de crédito a la factura. Solo antes de aprobar: lo que se aprueba es el neto. */
+  aplicarNotaCredito(id: string, notaId: string, monto: string): Promise<Documento> {
+    return apiFetch<Documento>(`/cxp/documentos/${id}/nota-credito`, {
+      method: "POST",
+      json: { nota_id: notaId, monto },
+    });
+  },
+  /** Deshace una aplicación: la factura vuelve a deber lo que la nota rebajaba. */
+  reversarNotaCredito(aplicacionId: string): Promise<void> {
+    return apiFetch<void>(`/cxp/notas-credito/aplicaciones/${aplicacionId}`, { method: "DELETE" });
+  },
+
+  /** El respaldo bancario de UN lote, para mirarlo antes de cerrarlo. */
+  respaldoDelLote(loteId: string): Promise<RespaldoDelLote> {
+    return apiFetch<RespaldoDelLote>(`/cxp/lotes/${loteId}/respaldo`, { method: "GET" });
+  },
+  /** Da el corte: congela el contenido del lote y devuelve qué le falta ver en el banco. */
+  cerrarLote(loteId: string): Promise<{ lote: LotePago; respaldo: RespaldoDelLote }> {
+    return apiFetch(`/cxp/lotes/${loteId}/cerrar`, { method: "POST" });
+  },
+  /** Reabre un corte cerrado. El motivo es obligatorio: es la única huella de que se volvió a mover. */
+  reabrirLote(loteId: string, motivo: string): Promise<LotePago> {
+    return apiFetch<LotePago>(`/cxp/lotes/${loteId}/reabrir`, { method: "POST", json: { motivo } });
+  },
   /** Descarga la macro (.txt) de un lote. */
   /**
    * La macro del lote. `moneda` baja SOLO las líneas de esa moneda.
@@ -1589,6 +2055,69 @@ export const cxpApi = {
       method: "GET",
       query: { formato: "csv" },
       blob: true,
+    });
+  },
+
+  // --- El papel de respaldo del pago (mig 0117 + firmas) ---
+
+  // --- El cronograma de pago (mig 0122) ---
+
+  /** El cuadro que se manda ANTES de pagar, con los bancos de donde salen los fondos. */
+  cronograma(loteId: string): Promise<Cronograma> {
+    return apiFetch<Cronograma>(`/cxp/lotes/${loteId}/cronograma`, { method: "GET" });
+  },
+  /** El tipo de cambio con el que se colonizan los dólares de ESTE cuadro. Lo escribe tesorería. */
+  guardarTCCronograma(loteId: string, tipoCambio: string): Promise<void> {
+    return apiFetch<void>(`/cxp/lotes/${loteId}/cronograma/tipo-cambio`, {
+      method: "PUT",
+      json: { tipo_cambio: tipoCambio },
+    });
+  },
+  /** De qué cuenta sale lo que se le paga a un proveedor. Vacío quita la asignación. */
+  asignarCuentaDePago(loteId: string, proveedorId: string, cuentaId: string): Promise<void> {
+    return apiFetch<void>(`/cxp/lotes/${loteId}/cronograma/${proveedorId}/cuenta`, {
+      method: "PUT",
+      json: { cuenta_id: cuentaId },
+    });
+  },
+  /** Saca (o devuelve) del cronograma lo que se le paga a un proveedor. */
+  marcarPorFuera(loteId: string, proveedorId: string, porFuera: boolean): Promise<void> {
+    return apiFetch<void>(`/cxp/lotes/${loteId}/cronograma/${proveedorId}/por-fuera`, {
+      method: "PUT",
+      json: { por_fuera: porFuera },
+    });
+  },
+
+  /** El cuadro del corte, partido por moneda, con las firmas de quién hizo cada paso. */
+  avisoDeCorte(loteId: string): Promise<AvisoDeCorte> {
+    return apiFetch<AvisoDeCorte>(`/cxp/lotes/${loteId}/aviso`, { method: "GET" });
+  },
+  /** El .xlsx del cronograma: lo que se manda por correo ANTES de pagar, con la cascada adentro. */
+  descargarCronogramaXLSX(loteId: string): Promise<Blob> {
+    return apiFetch<Blob>(`/cxp/lotes/${loteId}/cronograma.xlsx`, { method: "GET", blob: true });
+  },
+  /** El .xlsx de UNA moneda: cada archivo corresponde a una, igual que la macro del banco. */
+  descargarAvisoXLSX(loteId: string, moneda: string): Promise<Blob> {
+    return apiFetch<Blob>(`/cxp/lotes/${loteId}/aviso.xlsx`, {
+      method: "GET",
+      query: { moneda },
+      blob: true,
+    });
+  },
+  /**
+   * Corrige el concepto o la glosa de un proveedor en ese corte.
+   *
+   * Los campos que no se mandan NO se tocan: mandar solo el concepto no borra la glosa. Es lo que
+   * deja guardar campo por campo al salir de cada casilla.
+   */
+  guardarTextoAviso(
+    loteId: string,
+    proveedorId: string,
+    texto: { concepto?: string; documentos?: string },
+  ): Promise<void> {
+    return apiFetch<void>(`/cxp/lotes/${loteId}/aviso/${proveedorId}`, {
+      method: "PUT",
+      json: texto,
     });
   },
 
@@ -2366,6 +2895,15 @@ export interface ResultadoLiberacion {
   liberadas: FacturaLiberada[];
   /** id → por qué no se pudo. Vacío si entraron todas. */
   no_se_pudo: Record<string, string>;
+  /**
+   * La ficha quedó lista para que las PRÓXIMAS facturas de ese proveedor no nazcan bloqueadas.
+   *
+   * Se informa siempre que se haya pedido, porque gobierna todas sus facturas futuras y no solo
+   * las que se acaban de liberar.
+   */
+  proveedor_configurado: boolean;
+  /** Qué quedó configurado, en palabras, para el mensaje de confirmación. */
+  que_se_configuro?: string;
 }
 
 export const candadoApi = {
@@ -2380,10 +2918,24 @@ export const candadoApi = {
    * cada una: es lo único que permite reconstruir, meses después, quién autorizó pagarlas por
    * banco y con qué argumento.
    */
-  liberar(proveedorId: string, documentoIds: string[], motivo: string): Promise<ResultadoLiberacion> {
+  liberar(
+    proveedorId: string,
+    documentoIds: string[],
+    motivo: string,
+    /**
+     * Dejar la ficha lista para que las PRÓXIMAS no nazcan bloqueadas. Va en true por defecto:
+     * si se llegó a liberar facturas de un proveedor es porque su condición declarada está mal,
+     * y eso no cambia de una factura a otra.
+     */
+    configurarProveedor = true,
+  ): Promise<ResultadoLiberacion> {
     return apiFetch<ResultadoLiberacion>(`/cxp/proveedores/${proveedorId}/liberar`, {
       method: "POST",
-      json: { documento_ids: documentoIds, motivo },
+      json: {
+        documento_ids: documentoIds,
+        motivo,
+        configurar_proveedor: configurarProveedor,
+      },
     });
   },
 };

@@ -9,6 +9,9 @@
 
 import type { LucideIcon } from "lucide-react";
 import {
+  AlertTriangle,
+  TableProperties,
+  Scale as ScaleIcon,
   Banknote,
   BarChart3,
   BellRing,
@@ -41,6 +44,8 @@ import {
   ShoppingBag,
   ShoppingCart,
   Tags,
+  CalendarRange,
+  Timer,
   TrendingUp,
   CopyX,
   FileCheck,
@@ -113,6 +118,9 @@ export const MODULES: NavModule[] = [
       // El Importador no tiene nada que LEER: es el formulario de carga. Su permiso de lectura es
       // el mismo de la acción, porque verlo sin poder subir nada no sirve de nada.
       { label: "Importador", descripcion: "Subir estados de cuenta", to: "/importador", icon: Upload, permiso: "bancos.importar" },
+      // Va pegado al Importador porque es la respuesta a «mi banco no se reconoce», que es
+      // donde aparece el problema. Permiso propio: define CÓMO se leen las columnas de dinero.
+      { label: "Formatos de banco", descripcion: "Agregar un banco que no se reconoce", to: "/formatos", icon: TableProperties, permiso: "bancos.formatos" },
       // Va PEGADO al importador y no en Conciliación: es una carga de archivo, el mismo gesto y el
       // mismo permiso. Quien sube estados de cuenta es quien tiene el reporte del sistema viejo.
       { label: "Pagos del sistema anterior", descripcion: "Qué salidas ya estaban aplicadas", to: "/pagos-externos", icon: FileCheck, permiso: "bancos.importar" },
@@ -142,7 +150,43 @@ export const MODULES: NavModule[] = [
         icon: PiggyBank,
         permiso: "bancos.ver_control",
       },
+      // Pegada al control y con su mismo permiso: es la misma pregunta vista a doce meses en vez
+      // de a un rango. «¿Cómo cerramos el año?» no cabe en una pantalla de rango mensual.
+      {
+        label: "Cómo cierra el año",
+        descripcion: "Presupuesto, lo que va y el cierre proyectado",
+        to: "/outlook",
+        icon: CalendarRange,
+        permiso: "bancos.ver_control",
+      },
       { label: "Proyecciones", descripcion: "Cierre de mes", to: "/proyecciones", icon: TrendingUp, permiso: "bancos.ver_proyecciones" },
+      // Va pegada a Proyecciones y con el mismo permiso de lectura: las dos proyectan, pero esta
+      // proyecta el SALDO del banco por semana, no el cierre de ingresos del mes.
+      {
+        label: "Flujo de caja",
+        descripcion: "Saldo del banco a 13 semanas",
+        to: "/flujo-caja",
+        icon: Wallet,
+        permiso: "bancos.ver_proyecciones",
+      },
+      // Los ratios van acá aunque cruzan CxC y CxP: es donde alguien mira la salud financiera.
+      // Permiso PROPIO, no el de Bancos — quien ve el banco no necesariamente ve la cartera.
+      {
+        label: "Ciclo de efectivo",
+        descripcion: "DSO, DPO y cuánto financiás vos",
+        to: "/ratios",
+        icon: Timer,
+        permiso: "ratios.ver",
+      },
+      // Mismo permiso que el ciclo: los dos son indicadores de dirección, agregados, sin
+      // detalle de ningún contrato ni factura.
+      {
+        label: "Drivers del negocio",
+        descripcion: "Contratos, mix y ticket recurrente",
+        to: "/drivers",
+        icon: Users,
+        permiso: "ratios.ver",
+      },
       { label: "Ajustes", descripcion: "Parámetros de la empresa", to: "/ajustes", icon: Settings, permiso: "bancos.ajustes" },
     ],
   },
@@ -156,6 +200,11 @@ export const MODULES: NavModule[] = [
     pages: [
       { label: "Bandeja", descripcion: "El trabajo, por fases", to: "/cxp/bandeja", icon: Inbox, anchoCompleto: true },
       { label: "Dashboard", descripcion: "Cartera, vencimientos y cola", to: "/cxp/dashboard", icon: LayoutDashboard, permiso: "cxp.dashboard" },
+      // El nombre ES parte de la función: «Arqueo» es la palabra que usa quien lo necesita, y la
+      // descripción nombra la pregunta exacta —no «conciliación», que acá ya significa otra cosa
+      // (el acta mensual de Bancos)—. Va con `cxp.ver` y no con un permiso de tesorería: es una
+      // cifra de cuadre y tiene que alcanzarla quien audita, no solo quien paga.
+      { label: "Arqueo de pagos", descripcion: "Lo que dice que se pagó y el banco no debitó", to: "/cxp/arqueo", icon: ScaleIcon },
       // Va PEGADO al Dashboard porque son las dos preguntas grandes y se confunden: el Dashboard
       // mira cómo va el PROCESO (qué debemos, qué vence, qué está trabado) y esto mira EN QUÉ SE
       // VA LA PLATA. El subtítulo nombra el ítem y el precio, que es lo que no está en ningún otro
@@ -316,6 +365,71 @@ export const MODULES: NavModule[] = [
     ],
   },
   {
+    // Contabilidad · Fase 1 (mig 0109). Sale de la lista de módulos futuros y pasa a disponible
+    // con UNA sola página: el plan de cuentas. Todavía no se contabiliza nada, y la pantalla lo
+    // dice al entrar — dejarlo en gris sería mentir en el otro sentido, porque ya se puede usar.
+    id: "contabilidad",
+    label: "Contabilidad",
+    icon: Calculator,
+    to: "/conta/plan",
+    disponible: true,
+    permiso: "conta.plan_cuentas",
+    pages: [
+      {
+        label: "Plan de cuentas",
+        descripcion: "El catálogo contable del grupo",
+        to: "/conta/plan",
+        icon: Calculator,
+        permiso: "conta.plan_cuentas",
+      },
+      {
+        // Fase 2 (mig 0110). Permiso propio: armar el plan lo hace el contador una vez, y mapear
+        // las 332 partidas con movimiento lo hace quien conoce la operación.
+        label: "Mapeo contable",
+        descripcion: "A qué cuenta va cada partida del sistema",
+        to: "/conta/mapeo",
+        icon: Calculator,
+        permiso: "conta.mapeo",
+      },
+      {
+        // Fase 3A (mig 0111). Es la otra mitad del asiento: el mapeo dice a qué cuenta va la
+        // partida y esto dice cuál es la cuenta del banco.
+        label: "Cuentas bancarias",
+        descripcion: "Qué cuenta contable es cada cuenta del banco",
+        to: "/conta/bancos",
+        icon: Calculator,
+        permiso: "conta.bancos",
+      },
+      {
+        // Fase 3B (mig 0112). Va ANTES de Libros porque es lo que los llena: entrar a un diario
+        // vacío sin saber que hay que generarlo es el camino a creer que el módulo no sirve.
+        label: "Generar asientos",
+        descripcion: "Convertir los movimientos del banco en asientos",
+        to: "/conta/generar",
+        icon: Calculator,
+        permiso: "conta.generar",
+      },
+      {
+        // `conta.libros` es el único permiso NO crítico del módulo: un auditor interno necesita
+        // leer el diario y no debe poder escribir nada.
+        // Fase 4 (mig 0113). Va DESPUÉS de Libros: primero se mira lo que hay, después se
+        // comprueba que cuadre y se cierra.
+        label: "Balance y cierre",
+        descripcion: "La prueba de que el libro cuadra, y el candado del mes",
+        to: "/conta/cierre",
+        icon: Calculator,
+        permiso: "conta.libros",
+      },
+      {
+        label: "Libros",
+        descripcion: "El diario y el mayor por cuenta",
+        to: "/conta/libros",
+        icon: Calculator,
+        permiso: "conta.libros",
+      },
+    ],
+  },
+  {
     // Administración: usuarios y roles. Solo para quien administra (admin.roles).
     id: "config",
     label: "Configuración",
@@ -344,6 +458,26 @@ export const MODULES: NavModule[] = [
         icon: Send,
         permiso: "admin.correo",
       },
+      // Donde se canjea la referencia que el usuario vio en el mensaje de error por la causa
+      // exacta (mig 0107). Permiso propio y crítico: muestra rutas internas, nombres de tablas y
+      // fragmentos de SQL, que es justo lo que el mensaje de error le oculta al usuario.
+      {
+        label: "Errores del sistema",
+        descripcion: "Canjear la referencia de un error por su causa",
+        to: "/incidentes",
+        icon: AlertTriangle,
+        permiso: "admin.incidentes",
+      },
+      // La otra mitad de «el sistema anda mal»: no un error, sino lentitud (mig 0120). Va al lado
+      // de los errores porque se abren por el mismo motivo —alguien reporta que algo no va— y
+      // lleva su propio permiso crítico por lo mismo: muestra el SQL del sistema por dentro.
+      {
+        label: "Consultas lentas",
+        descripcion: "Ver qué se lleva el tiempo del servidor",
+        to: "/consultas-lentas",
+        icon: Gauge,
+        permiso: "admin.rendimiento",
+      },
     ],
   },
   // ── Roadmap: módulos aún sin construir. Se muestran atenuados y DESPUÉS de todo lo
@@ -351,7 +485,6 @@ export const MODULES: NavModule[] = [
   //    como si tampoco funcionara (le pasó a Cuentas por cobrar).
   { id: "tesoreria", label: "Tesorería", icon: Banknote, to: "#", disponible: false, pages: [] },
   { id: "conciliacion", label: "Conciliación bancaria", icon: GitCompare, to: "#", disponible: false, pages: [] },
-  { id: "contabilidad", label: "Contabilidad", icon: Calculator, to: "#", disponible: false, pages: [] },
   { id: "presupuestos", label: "Presupuestos", icon: PiggyBank, to: "#", disponible: false, pages: [] },
   { id: "flujo", label: "Flujo de caja", icon: Waves, to: "#", disponible: false, pages: [] },
   { id: "compras", label: "Compras", icon: ShoppingCart, to: "#", disponible: false, pages: [] },

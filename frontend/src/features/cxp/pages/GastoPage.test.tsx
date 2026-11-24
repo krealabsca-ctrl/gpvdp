@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 
 /**
  * La pantalla de gasto, dibujada con datos.
@@ -28,12 +29,15 @@ vi.mock("@/api/cxp", async (original) => {
 
 function pintar() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // MemoryRouter: el encabezado de toda pantalla lleva el botón de ayuda, que lee la ruta.
   return render(
-    <QueryClientProvider client={qc}>
-      <ToastProvider>
-        <GastoPage />
-      </ToastProvider>
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={qc}>
+        <ToastProvider>
+          <GastoPage />
+        </ToastProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 

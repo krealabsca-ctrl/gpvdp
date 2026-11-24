@@ -29,6 +29,27 @@ import (
 	"go.uber.org/zap"
 )
 
+// Claves con las que AbortInterno deja el incidente en el contexto de Gin.
+//
+// Son el puente entre el paquete de abajo —que sabe del error pero no puede escribir en la base—
+// y el middleware que lo guarda. Viven acá y no en `server` porque quien las ESCRIBE es este
+// archivo: una clave declarada lejos de donde se pone es una que un día se renombra de un lado.
+const (
+	ClaveRef     = "incidente_ref"
+	ClaveOp      = "incidente_op"
+	ClaveDetalle = "incidente_detalle"
+)
+
+// DelContexto devuelve un valor de texto que AbortInterno haya dejado, o "".
+func DelContexto(c *gin.Context, clave string) string {
+	v, ok := c.Get(clave)
+	if !ok {
+		return ""
+	}
+	s, _ := v.(string)
+	return s
+}
+
 // NuevaReferencia devuelve un identificador corto de incidente, en mayúsculas.
 //
 // Seis hex (16,7 millones de combinaciones) alcanzan de sobra: no es un identificador único
@@ -72,6 +93,16 @@ func AbortInterno(c *gin.Context, log *zap.Logger, op string, err error) {
 			zap.String("metodo", c.Request.Method),
 			zap.String("ruta", c.FullPath()),
 		)
+	}
+	// Y se dejan en el contexto para quien los quiera guardar (mig 0107). Acá NO se escribe en
+	// ninguna base: `httpx` es el paquete de abajo y no puede depender de un repositorio. Quien
+	// registra es un middleware, que los lee de acá.
+	//
+	// Esto es lo que evitó tocar las 19 llamadas a AbortInterno repartidas por todos los módulos.
+	c.Set(ClaveRef, ref)
+	c.Set(ClaveOp, op)
+	if err != nil {
+		c.Set(ClaveDetalle, err.Error())
 	}
 	// El mensaje dice qué hacer con la referencia. «error interno · ref 3F8A2C» a secas se lee
 	// como ruido técnico y se cierra sin copiarlo, que es justo lo que no puede pasar.

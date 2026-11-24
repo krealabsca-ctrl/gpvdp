@@ -55,6 +55,7 @@ import {
   useEnviarComprobante,
   useLotes,
   usePrioridadMasiva,
+  usePrioridades,
   useTipoMasivo,
   useTodosProveedores,
   useTransicionMasiva,
@@ -488,6 +489,8 @@ export function BandejaPage() {
   const clasifMasiva = useClasificarMasivo();
   const tipoM = useTipoMasivo();
   const prioM = usePrioridadMasiva();
+  // El catálogo de prioridades (mig 0121): alimenta el filtro de arriba y el ciclo del chip.
+  const prioridadesQ = usePrioridades();
   const crearLote = useCrearLote();
   const adjuntar = useAdjuntarComprobante();
   const enviar = useEnviarComprobante();
@@ -587,13 +590,31 @@ export function BandejaPage() {
     setMotivo({ accion: accionArc, ids, titulo, ok });
   }
 
+  /**
+   * Hace rotar la prioridad de una factura con un clic: sin prioridad → la más baja → … → la más
+   * alta → sin prioridad.
+   *
+   * EL CICLO SALE DEL CATÁLOGO (mig 0121), no de una lista escrita acá. Con los códigos fijos, una
+   * prioridad creada después no entraba en la rotación: existía en el catálogo y era imposible
+   * ponérsela a una factura desde la lista, que es donde se prioriza.
+   *
+   * De menor a mayor orden para que el clic repetido vaya «subiendo» la urgencia, que es como se
+   * lee el gesto.
+   */
   function cambiarPrioridad(doc: Documento) {
-    const orden: ("" | "A" | "AA")[] = ["", "A", "AA"];
-    const sig = orden[(orden.indexOf(doc.prioridad) + 1) % orden.length]!;
+    const activas = [...(prioridadesQ.data?.items ?? [])]
+      .filter((p) => p.activa)
+      .sort((a, b) => a.orden - b.orden);
+    const ciclo = ["", ...activas.map((p) => p.codigo)];
+    const sig = ciclo[(ciclo.indexOf(doc.prioridad) + 1) % ciclo.length]!;
+    const elegida = activas.find((p) => p.codigo === sig);
     prioM.mutate(
       { ids: [doc.id], prioridad: sig },
       {
-        onSuccess: () => toast.success(sig ? `Prioridad ${sig}${sig === "AA" ? " — se paga sí o sí" : ""}` : "Prioridad normal"),
+        // El nombre del catálogo explica qué significa el código: «AA» solo no dice si se paga ya
+        // o si puede esperar.
+        onSuccess: () =>
+          toast.success(elegida ? `Prioridad ${elegida.codigo} — ${elegida.nombre}` : "Prioridad normal"),
         onError: (err) => toast.error(mensajeError(err)),
       },
     );
@@ -787,11 +808,17 @@ export function BandejaPage() {
           label="Prioridad"
           value={prioFiltro}
           onChange={(e) => setPrioFiltro(e.target.value)}
+          // Las opciones salen del CATÁLOGO (mig 0121): con la lista escrita a mano, una prioridad
+          // nueva no se podía filtrar aunque existiera. «Urgentes» reemplaza al viejo «AA» porque
+          // lo que se quiere decir es «lo que se paga sí o sí», y eso ahora lo declara el catálogo
+          // —sigue sirviendo aunque mañana haya tres prioridades urgentes—.
           options={[
             { value: "", label: "Todas" },
-            { value: "AA", label: "AA — sí o sí" },
-            { value: "A", label: "A — puede esperar" },
-            { value: "AA_A", label: "AA y A" },
+            { value: "urgentes", label: "Urgentes — se pagan sí o sí" },
+            ...(prioridadesQ.data?.items ?? [])
+              .filter((p) => p.activa)
+              .map((p) => ({ value: p.codigo, label: `${p.codigo} — ${p.nombre}` })),
+            { value: "con", label: "Cualquiera priorizada" },
             { value: "sin", label: "Sin prioridad" },
           ]}
           className="min-w-44"
@@ -829,6 +856,44 @@ export function BandejaPage() {
             className="min-w-40"
           />
         )}
+        {/*
+          ORDENAR, EN LA BARRA Y NO EN LOS ENCABEZADOS.
+
+          Los encabezados ordenables (`THOrden`) existen desde hace rato, pero solo en UNA de las
+          nueve pestañas: `onOrden` se le pasaba únicamente a «Por pagar». En las otras ocho
+          —Recibidas, Por validar, Por aprobar, De Contabilidad, En banco, Pagadas, Cartera
+          abierta, Archivo— el servidor ya sabía ordenar por proveedor o por vencimiento y la
+          pantalla no tenía por dónde pedírselo.
+
+          Se resuelve acá y no copiando los encabezados a ocho tablas distintas: cada una tiene sus
+          propias columnas, así que serían ocho cambios con ocho formas de equivocarse. Un solo
+          control en la barra sirve a todas, y los encabezados de «Por pagar» siguen funcionando
+          porque escriben el MISMO estado.
+
+          El orden lo resuelve el SERVIDOR. Con 4.542 facturas y 100 por página, reordenar las
+          filas visibles entre ellas no es ordenar la lista: es reacomodar una muestra.
+        */}
+        <Select
+          label="Ordenar por"
+          value={orden}
+          onChange={(e) => setOrden(e.target.value)}
+          options={[
+            // El default de la Bandeja: la política del corte (AA primero, después lo que vence
+            // antes). Se nombra para que se entienda por qué la lista empieza así.
+            { value: "vencimiento", label: "Prioridad y vencimiento" },
+            { value: "proveedor", label: "Proveedor (A→Z)" },
+            { value: "proveedor_desc", label: "Proveedor (Z→A)" },
+            { value: "vence", label: "Vencimiento (lo que vence antes)" },
+            { value: "vence_desc", label: "Vencimiento (lo que vence después)" },
+            { value: "monto_desc", label: "Monto (mayor primero)" },
+            { value: "monto", label: "Monto (menor primero)" },
+            { value: "emision_desc", label: "Emisión (lo más nuevo)" },
+            { value: "emision", label: "Emisión (lo más viejo)" },
+            { value: "departamento", label: "Departamento" },
+            { value: "gasto", label: "Tipo de gasto" },
+          ]}
+          className="min-w-48"
+        />
         {vencFiltro && (
           <button
             type="button"
@@ -1469,14 +1534,25 @@ function TotalEnSuMoneda({ docs }: { docs: { moneda?: string; total?: string; to
   );
 }
 
-// Chip de prioridad interna: clic cicla normal → A → AA.
+// Chip de prioridad interna: un clic la hace subir por el catálogo y vuelve a «sin prioridad».
 function PrioChip({ doc, onCiclar }: { doc: Documento; onCiclar?: (d: Documento) => void }) {
-  const estilo =
-    doc.prioridad === "AA"
-      ? "bg-negativo/15 text-negativo"
-      : doc.prioridad === "A"
-        ? "bg-pendiente/15 text-pendiente"
-        : "bg-surface-muted text-content-muted";
+  // El catálogo se pide con el hook y no por prop: ya está en caché —lo pide la página— así que
+  // las cientos de filas de la tabla lo leen de ahí sin un solo viaje de más, y el componente no
+  // obliga a enhebrar la misma lista por tres niveles de props.
+  const prioridades = usePrioridades(true).data?.items ?? [];
+  // El color sale del CATÁLOGO (mig 0121): con los dos códigos escritos acá, una prioridad nueva
+  // salía siempre gris, indistinguible de «sin prioridad» en la columna que dice qué se paga antes.
+  const estilos: Record<string, string> = {
+    negativo: "bg-negativo/15 text-negativo",
+    pendiente: "bg-pendiente/15 text-pendiente",
+    positivo: "bg-positivo/15 text-positivo",
+    accent: "bg-accent/15 text-accent",
+    neutral: "bg-surface-muted text-content-muted",
+  };
+  const delCatalogo = prioridades.find((p) => p.codigo === doc.prioridad);
+  const estilo = delCatalogo
+    ? (estilos[delCatalogo.tono] ?? estilos.neutral!)
+    : "bg-surface-muted text-content-muted";
   const label = doc.prioridad || "—";
   if (!onCiclar) return <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold", estilo)}>{label}</span>;
   return (
@@ -3197,7 +3273,7 @@ function TabCarteraAbierta({
                 </TD>
                 <TD className="text-xs">
                   {d.prioridad ? (
-                    <Badge tone={d.prioridad === "AA" ? "negativo" : "pendiente"}>{d.prioridad}</Badge>
+                    <PrioChip doc={d} />
                   ) : (
                     <span className="text-content-muted">—</span>
                   )}

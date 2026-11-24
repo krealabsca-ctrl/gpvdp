@@ -456,9 +456,23 @@ func (s *Service) CerrarPorOtroMedio(ctx context.Context, empresaID, id string, 
 	return doc, salioDeUnLote, err
 }
 
-// Rebotar: PROGRAMADO → REBOTADA (el banco rechazó el pago dentro de un lote).
+// Rebotar: PROGRAMADO o PAGADO → REBOTADA (el banco rechazó el pago dentro de un lote).
+//
+// ACEPTA PAGADO DESDE EL 20-OCT-2026, y no es un detalle: el arqueo de excepción (hallazgo 3.1)
+// encuentra 62 facturas declaradas pagadas que el banco nunca debitó, y marcarlas como rebotadas
+// es una de las dos salidas que ofrece. Las 62 están en PAGADO. Con la lista anterior —solo
+// PROGRAMADO— la acción habría fallado en las 62, o sea en todas.
+//
+// Es la MISMA asimetría que la migración 0102 encontró entre anular y liquidar: la transición
+// existía pero no alcanzaba al estado donde la factura realmente está cuando alguien descubre el
+// problema. Marcar PAGADO → REBOTADA es correcto en el dominio: «pagado» acá siempre significó
+// «lo declaramos pagado», no «el banco lo confirmó» — para eso está CONCILIADO.
+//
+// CONCILIADO no entra: ahí hay un débito real enlazado. Si ese pago hubiera rebotado, el banco lo
+// habría devuelto con su propio movimiento, y lo que corresponde es registrar la devolución, no
+// borrar el pago que sí salió.
 func (s *Service) Rebotar(ctx context.Context, empresaID, id, usuarioID string) (Documento, error) {
-	return s.transicionarMulti(ctx, empresaID, id, []string{EstProgramado}, EstRebotada, "REBOTAR_DOCUMENTO", usuarioID)
+	return s.transicionarMulti(ctx, empresaID, id, []string{EstProgramado, EstPagado}, EstRebotada, "REBOTAR_DOCUMENTO", usuarioID)
 }
 
 // Reintentar: REBOTADA → PROGRAMADO (la saca del lote para reincluirla en un nuevo corte).
@@ -468,6 +482,16 @@ func (s *Service) Reintentar(ctx context.Context, empresaID, id, usuarioID strin
 		return Documento{}, err
 	}
 	if n == 0 {
+		// «0 filas» tiene ahora DOS causas y llevan a arreglos distintos: la factura no está
+		// rebotada, o su lote está cerrado (mig 0104). Decir siempre lo primero mandaría a buscar
+		// el problema donde no está.
+		cerrado, errL := s.repo.LoteDeDocumentoEstaCerrado(ctx, empresaID, id)
+		if errL != nil {
+			return Documento{}, errL
+		}
+		if cerrado {
+			return Documento{}, ErrLoteCerradoNoSeToca
+		}
 		return s.conflictoOTransicion(ctx, empresaID, id)
 	}
 	s.auditarDoc(ctx, empresaID, id, "REINTENTAR_DOCUMENTO", usuarioID)

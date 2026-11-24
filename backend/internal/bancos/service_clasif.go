@@ -50,6 +50,14 @@ type FiltrosMovimientos struct {
 	// Por eso viven separados y se suman con AND: dentro de su alcance el usuario puede afinar,
 	// pero no puede ensancharlo pidiendo otra clasificación. Ver `condicionesMovimientos`.
 	Alcance []string
+	// SoloIncluidos deja fuera lo que no suma: lo revertido y lo excluido a mano.
+	//
+	// Lo pone el SERVIDOR por pantalla, nunca el cliente (ver MiSegmento). La hoja de trabajo lo
+	// deja en false a propósito —quien acaba de marcar un duplicado tiene que seguir viéndolo— y
+	// la consulta por segmento lo pone en true: ahí mirar no lleva a ninguna acción, y una fila
+	// que se cuenta en el paginador pero no en la suma de dinero solo deja dos números que se
+	// contradicen (decisión del Director Financiero, 22-oct-2026).
+	SoloIncluidos bool
 }
 
 // ordenSQL traduce el orden pedido a un ORDER BY seguro (whitelist, sin inyección).
@@ -146,6 +154,15 @@ type MovimientoRow struct {
 	// El movimiento sigue visible: decisión del Director Financiero (6-oct-2026). La plata salió
 	// del banco igual, y lo que desaparece de la lista no se revisa más.
 	SelloExterno *SelloVisible `json:"sello_externo,omitempty"`
+	// Division: este movimiento participa de un reparto (mig 0094) — o es el original al que se
+	// le apartó algo, o es una de las partes apartadas.
+	//
+	// Ausente en casi todos. Existía la relación desde la 0094 y NINGUNA lista la mostraba: una
+	// parte se veía idéntica a un movimiento normal, y la única forma de enterarse era abrir el
+	// panel de división de esa fila. Mirar la parrilla no alcanzaba para responder «¿por qué hay
+	// dos filas con el mismo consecutivo?», que es la pregunta de cualquiera que cruce contra el
+	// estado de cuenta.
+	Division *DivisionDeMovimiento `json:"division,omitempty"`
 }
 
 // PagoCxPDeMovimiento es la factura que un movimiento bancario pagó, con lo mínimo para

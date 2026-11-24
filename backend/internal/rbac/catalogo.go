@@ -72,6 +72,11 @@ var Catalogo = []PermisoDef{
 	{"bancos.exportar", "Bancos", "Exportar reportes", "Descargar .xlsx de movimientos y cuadre", false},
 	{"bancos.cerrar_periodo", "Bancos", "Cerrar período", "Cierra el mes contable", true},
 	{"bancos.ajustes", "Bancos", "Editar ajustes de la empresa", "Tolerancia de traslado y parámetros", false},
+	// La política de caja es DECISIÓN, no lectura: declara cuánto se destina por semana a pagar
+	// cartera atrasada, y es lo que produce la curva del flujo a 13 semanas. Ver esa curva cuesta
+	// `bancos.ver_proyecciones`; mover el supuesto que la genera cuesta este, y por eso no entra
+	// en LecturaBancosCompleta.
+	{"bancos.politica_caja", "Bancos", "Definir la política de caja", "Cuánto se destina por semana a pagar cartera atrasada y cuál es el saldo mínimo operativo", true},
 	// Cuentas por pagar
 	{"cxp.ver", "Cuentas por pagar", "Ver CxP", "Bandeja y proveedores (lectura)", false},
 	{"cxp.ver_todo", "Cuentas por pagar", "Ver todas las áreas", "Ve las facturas de TODOS los departamentos; sin este permiso el usuario solo ve las de su(s) área(s) asignada(s)", false},
@@ -89,6 +94,8 @@ var Catalogo = []PermisoDef{
 	// CRÍTICO: levanta la única barrera que queda contra el doble pago de una factura que pudo
 	// haberse pagado ya por caja chica. Exige motivo y queda registrado quién lo hizo.
 	{"cxp.liberar_pago", "Cuentas por pagar", "Liberar una factura de contado para pagarla por banco", "El emisor la declaró de contado y nació bloqueada. Liberarla afirma que NO se pagó por caja chica ni tarjeta.", true},
+	{"cxp.reabrir_lote", "Cuentas por pagar", "Reabrir un lote de pago ya cerrado", "El corte congela el contenido del lote. Reabrirlo afirma que ese corte no estaba terminado; exige motivo y queda registrado.", true},
+	{"cxp.cobrar_saldo", "Cuentas por pagar", "Mandar a cobrar el saldo de una factura pagada en parte", "Devuelve al circuito de pago lo que quedó debiendo. Si la diferencia era una nota de crédito o una retención, volver a cobrarla le paga de más al proveedor.", true},
 	{"cxp.tesoreria", "Cuentas por pagar", "Programar y pagar", "Programar, generar lote/macro, pagar y conciliar", true},
 	{"cxp.comprobante", "Cuentas por pagar", "Gestionar comprobantes", "Adjuntar y enviar el comprobante al proveedor", false},
 	{"cxp.proveedores", "Cuentas por pagar", "Gestionar proveedores", "Crear, editar y desactivar proveedores", false},
@@ -185,6 +192,42 @@ var Catalogo = []PermisoDef{
 	// junto, y eso es una decisión del Director Financiero, no un default. Nace sin nadie más que
 	// DIRECTOR_FINANCIERO (que tiene todos por `codigos()`): se asigna desde Configuración.
 	{"grupo.ver", "Grupo", "Ver el consolidado del grupo", "Ver ingresos, gastos y EBITDA de las tres empresas en una sola pantalla (solo las empresas a las que ya tiene acceso)", true},
+	// Los ratios del ciclo de efectivo. Permiso propio porque cruzan CxC y CxP y los mira
+	// dirección, no quien opera esos módulos: colgarlos de `cxc.ver` o `cxp.ver` obligaría a dar
+	// el detalle de un módulo entero para ver tres números agregados.
+	{"ratios.ver", "Análisis financiero", "Ver los ratios del ciclo de efectivo", "DSO (días para cobrar), DPO (días para pagar) y el ciclo de conversión. Son agregados: no muestran el detalle de ninguna factura ni contrato", true},
+	// Formatos de banco configurables (mig 0108). `critico`: define en qué columna del Excel viene
+	// cada dato, y un formato con el débito y el crédito cambiados lee todos los archivos que
+	// vengan después al revés —sin que nadie lo note hasta el cierre—. Va aparte de
+	// `bancos.importar` porque importar es la tarea diaria y esto decide CÓMO se lee.
+	{"bancos.formatos", "Bancos", "Configurar formatos de banco", "Enseñarle al sistema a leer el estado de cuenta de un banco que no viene de fábrica: en qué columna viene cada dato y cómo se reconoce el archivo", true},
+	// Contabilidad · Fase 1 (mig 0109). `critico`: el plan de cuentas define dónde se registra
+	// cada colón, y una cuenta mal clasificada mueve el resultado del período. No es un catálogo
+	// de análisis como el de Bancos —ese se corrige y se vuelve a clasificar—: acá el error viaja
+	// a todos los asientos que vengan después.
+	{"conta.plan_cuentas", "Contabilidad", "Plan de cuentas", "Ver y mantener el catálogo contable: crear cuentas, moverlas en el árbol e importarlo desde Excel", true},
+	// Contabilidad · Fase 2 (mig 0110). Va aparte del plan de cuentas porque son dos trabajos y
+	// dos personas: armar el catálogo lo hace el contador una vez; decir a qué cuenta va cada
+	// partida del ERP lo hace quien conoce la operación. `critico`: una partida mapeada a la
+	// cuenta equivocada manda la plata a la línea equivocada de los estados financieros.
+	{"conta.mapeo", "Contabilidad", "Mapeo contable", "Decir a qué cuenta contable corresponde cada clasificación del ERP, o declararla no contabilizable con su motivo", true},
+	// Contabilidad · Fase 3A (mig 0111). Tres permisos porque son tres responsabilidades que no
+	// tiene por qué juntar la misma persona: enlazar los bancos es configuración de una vez;
+	// LEER los libros lo necesita hasta un auditor interno que no debe poder escribir nada; y
+	// escribir un asiento a mano es la facultad más delicada del módulo, porque mueve plata entre
+	// cuentas sin que ningún documento lo respalde. Por eso `conta.libros` NO es `critico` y los
+	// otros dos sí.
+	{"conta.bancos", "Contabilidad", "Cuentas bancarias contables", "Decir qué cuenta contable representa cada cuenta bancaria del ERP: es la contrapartida de todo asiento que toca el banco", true},
+	{"conta.libros", "Contabilidad", "Libro diario y mayor", "Consultar los asientos y el movimiento de cada cuenta. Solo lectura", false},
+	{"conta.asientos", "Contabilidad", "Asientos manuales", "Escribir y anular asientos a mano, sin documento que los respalde", true},
+	// Contabilidad · Fase 3B (mig 0112). Aparte de `conta.asientos` porque son facultades de
+	// distinto tamaño: una escribe UN asiento, esta escribe los de un mes entero y los revierte.
+	{"conta.generar", "Contabilidad", "Generar asientos desde el banco", "Convertir los movimientos bancarios de un período en asientos, y revertir esa generación", true},
+	// Contabilidad · Fase 4 (mig 0113). `critico`: cerrar un período congela los estados
+	// financieros de un mes para toda la empresa y reabrirlo los descongela. No es tarea de
+	// quien registra, sino de quien responde por el número. Incluye la carga de saldos iniciales
+	// porque es la otra decisión que define desde dónde vale la contabilidad.
+	{"conta.periodos", "Contabilidad", "Cerrar y reabrir períodos", "Cerrar el libro de un mes para que no entren más asientos, reabrirlo con un motivo registrado y cargar los saldos iniciales", true},
 	// Administración
 	{"admin.roles", "Administración", "Roles y permisos", "Configurar esta matriz y asignar roles a usuarios", true},
 	{"admin.plantillas", "Administración", "Plantillas de notificaciones", "Editar el texto de los correos que el sistema envía (comprobante al proveedor, boleta de pago, vacaciones)", false},
@@ -198,6 +241,19 @@ var Catalogo = []PermisoDef{
 	// este catálogo es lo que hace que una empresa NUEVA nazca con él (DIRECTOR_FINANCIERO lo hereda
 	// porque su matriz es `codigos()`).
 	{"admin.correo", "Administración", "Correo saliente", "Configurar el servidor de correo desde el que cada empresa envía (servidor, remitente y contraseña) y probar la conexión", true},
+	// Los errores del sistema (mig 0107). `critico`: lo que muestra son rutas internas, nombres de
+	// tablas y fragmentos de SQL —el sistema descrito por dentro, que es lo que sirve para
+	// atacarlo—. Por eso el mensaje de error nunca le llega crudo al usuario, y por eso esta
+	// pantalla no se reparte con la operación.
+	//
+	// Va acá y no solo en la migración por lo mismo que `admin.correo`: la migración lo da a las
+	// empresas que YA existen, y este catálogo es lo que hace que una empresa NUEVA nazca con él.
+	{"admin.incidentes", "Administración", "Errores del sistema", "Ver los errores internos registrados y canjear la referencia que un usuario dicta por la causa exacta", true},
+	// Las consultas lentas (mig 0120). `critico` por lo mismo que los incidentes: muestra el SQL
+	// del sistema —nombres de tablas, columnas y cómo se cruzan—, que es el mapa de por dónde
+	// atacarlo. NO muestra datos de ninguna empresa: PostgreSQL ya reemplazó los valores por $1,
+	// $2 antes de contarlos, así que no hay montos ni cédulas ahí, pero la estructura sí está.
+	{"admin.rendimiento", "Administración", "Consultas lentas", "Ver qué consultas se llevan el tiempo del servidor. Muestra la forma de las consultas; la normalización que oculta los valores no está garantizada al 100 %", true},
 }
 
 // codigos devuelve todos los códigos de permiso del catálogo.
@@ -291,7 +347,7 @@ var MatrizDefault = map[string][]string{
 		"inventario.ver", "inventario.entrada", "inventario.servicio", "inventario.traslado", "inventario.conteo",
 	),
 	// Gerencia General: lectura + validación de área + escalamiento + aprobación (firma mancomunada).
-	"GERENCIA_GENERAL": conLecturaBancos("cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.gasto", "cxp.validar_depto", "cxp.validar_escalado", "cxp.aprobar", "cxp.liberar_pago", "cxp.aprobar_contabilidad", "cxp.parametros", "cxp.fuentes", "cxp.caja_ver", "cxc.ver", "cxc.ver_todas_sedes", "inventario.ver", "precios.ver", "precios.editar"),
+	"GERENCIA_GENERAL": conLecturaBancos("cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.gasto", "cxp.validar_depto", "cxp.validar_escalado", "cxp.aprobar", "cxp.liberar_pago", "cxp.reabrir_lote", "cxp.cobrar_saldo", "cxp.aprobar_contabilidad", "cxp.parametros", "cxp.fuentes", "cxp.caja_ver", "cxc.ver", "cxc.ver_todas_sedes", "inventario.ver", "precios.ver", "precios.editar"),
 	// Auditor Interno: solo lectura.
 	"AUDITOR_INTERNO": conLecturaBancos("cxp.ver", "cxp.ver_todo", "cxp.dashboard", "cxp.gasto", "cxp.caja_ver", "cxc.ver", "cxc.ver_todas_sedes", "inventario.ver", "precios.ver"),
 	// Supervisor de Piso: la autoridad de la operación de cobro. Es un cargo real que el

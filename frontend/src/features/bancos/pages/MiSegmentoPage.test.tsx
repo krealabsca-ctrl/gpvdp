@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 
 /**
  * «MI PARTIDA EN BANCOS» dibujada con datos.
@@ -217,10 +218,14 @@ function montar(opciones: { partida?: MiSegmento } = {}) {
     mutate: reportar,
     isPending: false,
   })) as unknown as typeof useReportarSegmentacion);
+  // MemoryRouter: desde el 22-oct el encabezado de toda pantalla lleva el botón de ayuda, que
+  // lee la ruta actual para saber qué explicar (ver features/ayuda).
   return render(
-    <ToastProvider>
-      <MiSegmentoPage />
-    </ToastProvider>,
+    <MemoryRouter>
+      <ToastProvider>
+        <MiSegmentoPage />
+      </ToastProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -467,13 +472,19 @@ describe("MiSegmentoPage", () => {
     );
   });
 
-  // Un movimiento que salió de los libros —la reversa de una carga duplicada— SE SIGUE VIENDO,
-  // porque lo que desaparece de la pantalla no se revisa más. Pero tiene que decir que no suma:
-  // sin la marca, su monto se lee como plata que entró y el total de arriba parece estar mal.
+  // LO REVERTIDO NO SE LE CUENTA A LA OPERATIVA (22-oct-2026).
   //
-  // La etiqueta va DEBAJO del monto, no al lado: con el badge en la misma línea el número se
-  // corre a la izquierda y deja de alinearse con las demás filas (16-oct-2026).
-  it("un movimiento fuera de los libros se muestra tachado y dice que no suma", () => {
+  // El pedido del Director Financiero: «lo que se invierte es un tema interno del admin o los que
+  // tengan permisos para manipularlo, pero esto no puede quedar visible a la operativa, genera
+  // demasiada confusión». Antes la fila se mostraba tachada con un «no suma» y al pie había una
+  // leyenda contando cuántas eran.
+  //
+  // El servidor ya no manda esas filas (ver TestLoRevertidoNoSaleDeMiPartida), pero esta prueba
+  // monta el payload COMO SI todavía las mandara —un backend sin actualizar, que es el estado
+  // normal mientras un kit viaja— y exige que la pantalla no diga nada igual. Afirmar lo que pasa
+  // cuando el dato SÍ llega es lo único que prueba que la superficie se fue de la pantalla; con un
+  // payload ya limpio, la prueba pasaría aunque el código siguiera ahí.
+  it("no le muestra nada de lo revertido a quien consulta su partida", () => {
     montar({
       partida: {
         ...PARTIDA,
@@ -508,13 +519,14 @@ describe("MiSegmentoPage", () => {
       },
     });
 
-    const revertido = screen.getByText("TEF DE:ELSA MARTINEZ DELGADO").closest("tr") as HTMLElement;
-    // Lo dice con palabras, no solo con un estilo: un tachado sin texto no se lee en diagonal.
-    expect(within(revertido).getByText("no suma")).toBeInTheDocument();
+    // La leyenda al pie del paginador: era lo que el Director marcó en rojo.
+    expect(screen.queryByText(/importación revertida/i)).toBeNull();
+    expect(screen.queryByText(/no suman/i)).toBeNull();
 
-    // Y la fila viva NO lleva la marca: si la llevaran todas, no distinguiría nada.
-    const vivo = screen.getByText("DEPOSITO VENTANILLA").closest("tr") as HTMLElement;
-    expect(within(vivo).queryByText("no suma")).toBeNull();
+    // Y la fila no se dibuja distinta: ni etiqueta, ni tachado.
+    const revertido = screen.getByText("TEF DE:ELSA MARTINEZ DELGADO").closest("tr") as HTMLElement;
+    expect(within(revertido).queryByText("no suma")).toBeNull();
+    expect(revertido.querySelector(".line-through")).toBeNull();
   });
 
   it("la partida vacía lo explica, no queda en blanco", () => {

@@ -12,6 +12,40 @@ import (
 func dec(s string) decimal.Decimal { return decimal.RequireFromString(s) }
 
 type fakeRepo struct {
+	// Prioridades configurables (mig 0121). `codigosPrioridad` es lo que el servicio consulta para
+	// no dejar marcar una factura con un código que no existe en el catálogo: esa validación
+	// reemplazó al CHECK que la migración quitó de la base.
+	// Las firmas del corte, para el papel de respaldo del pago.
+	// El cronograma de pago (mig 0122).
+	lineasCronograma []FilaCronogramaCruda
+	tcCronograma     decimal.Decimal
+	cuentaAsignada   string
+	marcoPorFuera    bool
+	firmasDelLote    []Firma
+	fechaPagoDelLote string
+	prioridades      []Prioridad
+	codigosPrioridad []string
+	// Liberar el candado del contado, y dejar la ficha para que las próximas no nazcan trancadas
+	// (4-nov-2026). `seConfiguroProveedor` deja ver si se tocó la ficha: no debe tocarse cuando
+	// no se liberó nada.
+	liberadas            []FacturaLiberada
+	estadoBloqueo        map[string]bool
+	configuroProveedor   bool
+	seConfiguroProveedor bool
+	// Marcado del convenio en lote: qué se le pidió al repositorio y qué devuelve.
+	convenioPasarACredito bool
+	convenioRecibido      string
+	convenioIDs           []string
+	resultadoConvenio     ResultadoConvenioMasivo
+	// El aviso de pago: lo que el repositorio devuelve y con qué se lo llamó.
+	datosAviso            map[string]DatosDelAviso
+	textosAviso           map[string]TextoAviso
+	textoAvisoGuardado    *TextoAviso
+	proveedorDelTexto     string
+	avisoProveedorEnCorte bool
+	empresaDelAviso       string
+	usuarioDelAviso       string
+	errEncabezadoAviso    error
 	// Remesas (pagos agrupados). `capRemesaCerrada` deja ver si se intentó cerrar y cuál.
 	remesaPorHuella  Remesa
 	errRemesa        error
@@ -489,6 +523,30 @@ func (f *fakeRepo) AvisoDeFactura(context.Context, string, string) (AvisoDePago,
 func (f *fakeRepo) ListarLotes(context.Context, string) ([]LotePago, error) {
 	return nil, nil
 }
+
+// El corte del lote y el arqueo de excepción (mig 0104). Dobles inertes: lo que estas funciones
+// hacen se prueba contra PostgreSQL de verdad —son consultas, y un doble solo repetiría lo que yo
+// creo que hacen—; acá existen para que el fake siga cumpliendo la interfaz.
+func (f *fakeRepo) CerrarLote(context.Context, string, string, string) (int64, error) { return 1, nil }
+func (f *fakeRepo) ReabrirLote(context.Context, string, string, string, string) (int64, error) {
+	return 1, nil
+}
+func (f *fakeRepo) LoteEstaCerrado(context.Context, string, string) (bool, bool, error) {
+	return true, false, nil
+}
+func (f *fakeRepo) LoteDeDocumentoEstaCerrado(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+func (f *fakeRepo) FacturasSinRespaldo(context.Context, string, string, string) ([]FacturaSinRespaldo, error) {
+	return nil, nil
+}
+func (f *fakeRepo) ContarAunNoVencidas(context.Context, string, string) (int, error) { return 0, nil }
+func (f *fakeRepo) CandidatosPara(context.Context, string, string, int) ([]MovimientoCandidato, error) {
+	return nil, nil
+}
+func (f *fakeRepo) DebitosSinFactura(context.Context, string, string, string) ([]DebitoSinFactura, int, error) {
+	return nil, 0, nil
+}
 func (f *fakeRepo) DocumentosParaPagoPorLote(context.Context, string, string) ([]PagoRow, error) {
 	return nil, nil
 }
@@ -531,12 +589,22 @@ func (f *fakeRepo) PagosSinComprobante(context.Context, string, string, bool) ([
 // es que el UPDATE lleve la condición adentro y que la huella quede escrita, y eso no se ve
 // detrás de un doble. Se prueba en `liberar_pg_test.go` contra Postgres de verdad.
 func (f *fakeRepo) LiberarParaPago(context.Context, string, string, []string, string, string) ([]FacturaLiberada, error) {
-	return nil, nil
+	return f.liberadas, nil
+}
+
+// Devuelve lo que el test siembre en `configuroProveedor`, y anota que se llamó: liberar no
+// debería tocar la ficha cuando no se liberó nada.
+func (f *fakeRepo) ConfigurarProveedorSinCandado(context.Context, string, string) (bool, error) {
+	f.seConfiguroProveedor = true
+	return f.configuroProveedor, nil
 }
 func (f *fakeRepo) FacturasDeContado(context.Context, string, string) ([]FacturaDeContado, error) {
 	return nil, nil
 }
 func (f *fakeRepo) EstadoDeBloqueo(context.Context, string, []string) (map[string]bool, error) {
+	if f.estadoBloqueo != nil {
+		return f.estadoBloqueo, nil
+	}
 	return map[string]bool{}, nil
 }
 
@@ -1042,4 +1110,72 @@ func TestProveedorRequestAInput(t *testing.T) {
 	if _, err := (proveedorRequest{Nombre: "X", RetencionRentaPct: "abc"}).aInput(); err == nil {
 		t.Error("retención inválida debería dar error")
 	}
+}
+
+func (f *fakeRepo) AbrirRemesa(context.Context, string, string) (int, error) { return 0, nil }
+
+// El pago parcial (mig 0105). Dobles inertes: las tres invariantes se verifican dentro de una
+// transacción con el movimiento bloqueado, y eso solo se puede probar contra PostgreSQL de verdad.
+func (f *fakeRepo) RegistrarPagoParcial(context.Context, string, string, string, decimal.Decimal, string, string, string) (string, error) {
+	return "", nil
+}
+func (f *fakeRepo) SaldoDeFactura(context.Context, string, string) (SaldoDeFactura, error) {
+	return SaldoDeFactura{Saldo: "0", Pagado: "0", Neto: "0"}, nil
+}
+func (f *fakeRepo) MandarACobrarElSaldo(context.Context, string, string) (int64, error) {
+	return 0, nil
+}
+
+// La nota de crédito (mig 0106). Dobles inertes: las dos sumas se verifican dentro de una
+// transacción con la nota bloqueada, y eso solo se prueba contra PostgreSQL de verdad.
+func (f *fakeRepo) AplicarNotaCredito(context.Context, string, string, string, decimal.Decimal, string) (string, error) {
+	return "", nil
+}
+func (f *fakeRepo) NotasDeCreditoDisponibles(context.Context, string, string) ([]NotaCreditoSaldo, error) {
+	return nil, nil
+}
+func (f *fakeRepo) NotasAplicadasAFactura(context.Context, string, string) ([]AplicacionNotaCredito, error) {
+	return nil, nil
+}
+func (f *fakeRepo) ReversarNotaCredito(context.Context, string, string, string) (int64, error) {
+	return 1, nil
+}
+
+// Marcado masivo del convenio (21-oct-2026). Dobles inertes: son consultas y se prueban contra
+// PostgreSQL de verdad.
+func (f *fakeRepo) CandidatosConvenio(context.Context, string, bool) ([]CandidatoConvenio, error) {
+	return nil, nil
+}
+
+// ── El aviso de pago (mig 0117) ────────────────────────────────────────────────────────────
+//
+// `textoAvisoGuardado` deja ver con QUÉ se llamó al repositorio: lo que importa de guardar el
+// texto es que no pise con NULL el campo que el pedido no traía.
+
+func (f *fakeRepo) EncabezadoDelAviso(context.Context, string, string) (string, string, error) {
+	return f.empresaDelAviso, f.usuarioDelAviso, f.errEncabezadoAviso
+}
+func (f *fakeRepo) DatosDeAvisoDelLote(context.Context, string, string) (map[string]DatosDelAviso, error) {
+	return f.datosAviso, nil
+}
+func (f *fakeRepo) TextosDeAvisoDelLote(context.Context, string, string) (map[string]TextoAviso, error) {
+	return f.textosAviso, nil
+}
+func (f *fakeRepo) GuardarTextoDeAviso(_ context.Context, _, _, proveedorID string, t TextoAviso, _ string) (bool, error) {
+	f.textoAvisoGuardado = &t
+	f.proveedorDelTexto = proveedorID
+	return f.avisoProveedorEnCorte, nil
+}
+
+func (f *fakeRepo) MarcarConvenioMasivo(_ context.Context, _ string, ids []string, convenio string, pasarACredito bool) (ResultadoConvenioMasivo, error) {
+	f.convenioPasarACredito = pasarACredito
+	f.convenioRecibido = convenio
+	f.convenioIDs = ids
+	return f.resultadoConvenio, nil
+}
+func (f *fakeRepo) BloqueadasDeProveedores(context.Context, string, []string) (int, string, error) {
+	return 0, "0", nil
+}
+func (f *fakeRepo) LiberarDeProveedores(context.Context, string, []string, string, string) (int64, error) {
+	return 0, nil
 }

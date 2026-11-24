@@ -208,3 +208,28 @@ func (r *pgRepository) SerieDiariaPorPartida(ctx context.Context, empresaID, des
 	}
 	return out, nil
 }
+
+// CarteraPendiente devuelve lo que se debe a proveedores, partido en vencido y por vencer.
+//
+// LOS ESTADOS CERRADOS VAN EN MASCULINO —'PAGADO', no 'PAGADA'—: escribirlos mal no da error,
+// simplemente no excluye nada, y la cartera sale inflada con todo lo que ya se pagó. Es la misma
+// lista que usa el tablero de CxP.
+//
+// Lo «sin fecha de vencimiento» cuenta como vencido: una factura sin plazo es exigible, y
+// dejarla fuera escondería deuda.
+func (r *pgRepository) CarteraPendiente(ctx context.Context, empresaID string) (decimal.Decimal, decimal.Decimal, error) {
+	const q = `
+		SELECT
+			COALESCE(sum(total_crc) FILTER (
+				WHERE fecha_vencimiento IS NULL OR fecha_vencimiento < current_date), 0),
+			COALESCE(sum(total_crc) FILTER (
+				WHERE fecha_vencimiento >= current_date), 0)
+		FROM documento_cxp
+		WHERE empresa_id = $1::uuid
+		  AND estado NOT IN ('PAGADO', 'CONCILIADO', 'DENEGADO', 'ANULADO', 'LIQUIDADA')`
+	var vencido, porVencer decimal.Decimal
+	if err := r.pool.QueryRow(ctx, q, empresaID).Scan(&vencido, &porVencer); err != nil {
+		return decimal.Zero, decimal.Zero, fmt.Errorf("bancos: cartera pendiente: %w", err)
+	}
+	return vencido, porVencer, nil
+}

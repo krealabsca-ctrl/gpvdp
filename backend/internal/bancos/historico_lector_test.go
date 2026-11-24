@@ -9,6 +9,7 @@ package bancos
 // y lo vuelven a abrir por el mismo camino que usa el servicio.
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -346,8 +347,16 @@ func TestUnArchivoSinEncabezadoSeRechaza(t *testing.T) {
 	if err != nil {
 		t.Fatalf("abrir: %v", err)
 	}
-	if _, err := LeerHistorico(formateada, cruda, date1904); err != ErrHistoricoSinEncabezado {
-		t.Fatalf("error = %v, se esperaba ErrHistoricoSinEncabezado", err)
+	// Desde el 21-oct-2026 el rechazo es un DIAGNÓSTICO tipado, no un centinela: el texto cambia
+	// con cada archivo porque lleva adentro lo que encontró. Lo que esta prueba protege sigue
+	// siendo lo mismo —un archivo ilegible no se lee— y además comprueba que el motivo viaje.
+	_, err = LeerHistorico(formateada, cruda, date1904)
+	var enc *ErrorDeEncabezado
+	if !errors.As(err, &enc) {
+		t.Fatalf("error = %v (%T), se esperaba un diagnóstico de encabezado", err, err)
+	}
+	if !strings.Contains(err.Error(), "cualquier cosa") {
+		t.Errorf("el rechazo no muestra lo que traía el archivo: %q", err.Error())
 	}
 }
 

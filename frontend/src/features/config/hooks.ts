@@ -9,6 +9,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/api/queryKeys";
 import { correoApi, type CorreoSalienteInput } from "@/api/correo";
+import { sistemaApi, type FiltrosIncidentes } from "@/api/sistema";
 import { useEmpresaId } from "@/features/bancos/useEmpresaId";
 
 /** Desde qué buzón manda la empresa activa. Nunca trae la contraseña: solo `tiene_password`. */
@@ -43,5 +44,35 @@ export function useProbarCorreoSaliente() {
     mutationFn: () => correoApi.probar(),
     onSettled: () =>
       void qc.invalidateQueries({ queryKey: queryKeys.config.correoSaliente(empresaId) }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Los errores del sistema (mig 0107)
+// ---------------------------------------------------------------------------
+
+/**
+ * Los errores internos registrados.
+ *
+ * `staleTime` en cero y sin refresco automático: esta pantalla se abre cuando alguien llama
+ * diciendo «me dio error», y lo que busca acaba de pasar hace treinta segundos. Un dato cacheado
+ * acá haría que la referencia recién emitida «no exista».
+ */
+export function useIncidentes(filtros: FiltrosIncidentes = {}) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.config.incidentes(empresaId, filtros),
+    queryFn: () => sistemaApi.incidentes(filtros),
+    staleTime: 0,
+  });
+}
+
+/** Cuántos van y cuándo fue el último. Contesta «¿esto está pasando ahora?». */
+export function useResumenIncidentes() {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.config.resumenIncidentes(empresaId),
+    queryFn: () => sistemaApi.resumen(),
+    staleTime: 0,
   });
 }

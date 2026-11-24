@@ -53,6 +53,14 @@ type Repository interface {
 	CrearSubclasificacion(ctx context.Context, empresaID, clasificacionID, nombre string) (Subclasificacion, error)
 
 	// Catálogo de departamentos (centros de costo) por empresa.
+	// Prioridades de pago configurables (mig 0121). `CodigosDePrioridadValidos` reemplaza al CHECK
+	// que la migración quitó: es lo que impide marcar una factura con un código inventado.
+	Prioridades(ctx context.Context, empresaID string, soloActivas bool) ([]Prioridad, error)
+	CrearPrioridad(ctx context.Context, empresaID string, in PrioridadInput) (Prioridad, error)
+	ActualizarPrioridad(ctx context.Context, empresaID, id string, in PrioridadInput) (Prioridad, error)
+	EliminarPrioridad(ctx context.Context, empresaID, id string) error
+	CodigosDePrioridadValidos(ctx context.Context, empresaID string) ([]string, error)
+
 	ListarDepartamentos(ctx context.Context, empresaID string, soloActivos bool) ([]Departamento, error)
 	CrearDepartamento(ctx context.Context, empresaID string, in DepartamentoInput) (Departamento, error)
 	ActualizarDepartamento(ctx context.Context, empresaID, id string, in DepartamentoInput) (Departamento, error)
@@ -149,6 +157,62 @@ type Repository interface {
 	DocumentosParaPagoPorLote(ctx context.Context, empresaID, loteID string) ([]PagoRow, error)
 	Reintentar(ctx context.Context, empresaID, id string) (int64, error)
 
+	// El corte del lote (mig 0104). Cerrar y reabrir devuelven cuántas filas movieron: 0 significa
+	// «no existe» o «ya estaba así», y los dos `...EstaCerrado` existen para distinguirlas y poder
+	// decir cuál de las dos fue.
+	CerrarLote(ctx context.Context, empresaID, loteID, usuarioID string) (int64, error)
+	ReabrirLote(ctx context.Context, empresaID, loteID, usuarioID, motivo string) (int64, error)
+	LoteEstaCerrado(ctx context.Context, empresaID, loteID string) (existe, cerrado bool, err error)
+	LoteDeDocumentoEstaCerrado(ctx context.Context, empresaID, id string) (bool, error)
+
+	// El arqueo de excepción (hallazgo 3.1): lo declarado pagado que el banco nunca debitó, y la
+	// columna inversa. `soloLote` vacío = todas.
+	// AbrirRemesa deshace lo que hizo CerrarRemesa: las facturas de un pago agrupado vuelven de
+	// CONCILIADO a PAGADO cuando se desenlaza el débito que las cerró.
+	AbrirRemesa(ctx context.Context, empresaID, remesaID string) (int, error)
+
+	// Marcado masivo del convenio del proveedor (21-oct-2026): la regla que levanta el candado del
+	// contado ya existía en el INSERT del documento y NADIE la tenía puesta (0 de 649).
+	CandidatosConvenio(ctx context.Context, empresaID string, soloPendientes bool) ([]CandidatoConvenio, error)
+	MarcarConvenioMasivo(ctx context.Context, empresaID string, ids []string, convenio string, pasarACredito bool) (ResultadoConvenioMasivo, error)
+
+	// El aviso de pago (mig 0117).
+	EncabezadoDelAviso(ctx context.Context, empresaID, usuarioID string) (string, string, error)
+	DatosDeAvisoDelLote(ctx context.Context, empresaID, loteID string) (map[string]DatosDelAviso, error)
+	// El cronograma de pago (mig 0122): las líneas con su cuenta de origen, el tipo de cambio que
+	// escribió tesorería, y las dos decisiones que se toman al armarlo.
+	LineasDelCronograma(ctx context.Context, empresaID, loteID string) ([]FilaCronogramaCruda, error)
+	TCDelCronograma(ctx context.Context, empresaID, loteID string) (decimal.Decimal, error)
+	GuardarTCDelCronograma(ctx context.Context, empresaID, loteID string, tc decimal.Decimal) error
+	AsignarCuentaDePago(ctx context.Context, empresaID, loteID, proveedorID, cuentaID string) (int, error)
+	MarcarPorFuera(ctx context.Context, empresaID, loteID, proveedorID string, porFuera bool, usuarioID string) (int, error)
+
+	TextosDeAvisoDelLote(ctx context.Context, empresaID, loteID string) (map[string]TextoAviso, error)
+	// FirmasDelLote deriva de la AUDITORÍA quién hizo cada paso del corte, para que el papel de
+	// respaldo no dependa de nombres tecleados. Devuelve también la fecha de pago (el cierre).
+	FirmasDelLote(ctx context.Context, empresaID, loteID string) ([]Firma, string, error)
+	GuardarTextoDeAviso(ctx context.Context, empresaID, loteID, proveedorID string, t TextoAviso, usuarioID string) (bool, error)
+	BloqueadasDeProveedores(ctx context.Context, empresaID string, ids []string) (int, string, error)
+	LiberarDeProveedores(ctx context.Context, empresaID string, ids []string, motivo, usuarioID string) (int64, error)
+
+	// El pago parcial (mig 0105): lo que el banco debitó cuando no alcanzó el neto. Las tres
+	// invariantes se verifican dentro de la transacción, con el movimiento bloqueado.
+	RegistrarPagoParcial(ctx context.Context, empresaID, documentoID, movimientoID string, monto decimal.Decimal, moneda, motivo, usuarioID string) (string, error)
+	SaldoDeFactura(ctx context.Context, empresaID, documentoID string) (SaldoDeFactura, error)
+	MandarACobrarElSaldo(ctx context.Context, empresaID, documentoID string) (int64, error)
+
+	// La nota de crédito del proveedor (mig 0106): el documento que RESTA. Las dos sumas se
+	// verifican dentro de la transacción, con la nota bloqueada.
+	AplicarNotaCredito(ctx context.Context, empresaID, notaID, facturaID string, monto decimal.Decimal, usuarioID string) (string, error)
+	NotasDeCreditoDisponibles(ctx context.Context, empresaID, proveedorID string) ([]NotaCreditoSaldo, error)
+	NotasAplicadasAFactura(ctx context.Context, empresaID, facturaID string) ([]AplicacionNotaCredito, error)
+	ReversarNotaCredito(ctx context.Context, empresaID, aplicacionID, usuarioID string) (int64, error)
+
+	FacturasSinRespaldo(ctx context.Context, empresaID, hastaFecha, soloLote string) ([]FacturaSinRespaldo, error)
+	ContarAunNoVencidas(ctx context.Context, empresaID, hastaFecha string) (int, error)
+	CandidatosPara(ctx context.Context, empresaID, docID string, dias int) ([]MovimientoCandidato, error)
+	DebitosSinFactura(ctx context.Context, empresaID, desde, hasta string) ([]DebitoSinFactura, int, error)
+
 	// GuardarTelefonoProveedorDeDocumento deja el número de WhatsApp en la ficha del proveedor de
 	// esa factura: se escribe al momento la primera vez y queda para la próxima.
 	GuardarTelefonoProveedorDeDocumento(ctx context.Context, empresaID, docID, telefono string) error
@@ -185,6 +249,9 @@ type Repository interface {
 
 	// Liberar el candado del contado (mig 0097), con su huella: quién, cuándo y por qué.
 	LiberarParaPago(ctx context.Context, empresaID, proveedorID string, ids []string, motivo, usuarioID string) ([]FacturaLiberada, error)
+	// ConfigurarProveedorSinCandado deja la ficha lista para que las PRÓXIMAS no nazcan
+	// bloqueadas. Pone las DOS condiciones que exige la regla de la 0097; devuelve si cambió algo.
+	ConfigurarProveedorSinCandado(ctx context.Context, empresaID, proveedorID string) (bool, error)
 	FacturasDeContado(ctx context.Context, empresaID, proveedorID string) ([]FacturaDeContado, error)
 	EstadoDeBloqueo(ctx context.Context, empresaID string, ids []string) (map[string]bool, error)
 

@@ -21,8 +21,12 @@ func (r *pgRepository) UpsertCotizacion(ctx context.Context, empresaID, fecha st
 }
 
 func (r *pgRepository) CotizacionesMes(ctx context.Context, empresaID string, anio, mes int) ([]Cotizacion, error) {
+	// `trim_scale` quita los ceros de relleno: la columna guarda seis decimales (mig 0119) y sin
+	// esto una cotización de 460,73 llegaba a la pantalla como «460.730000». El valor es el mismo,
+	// pero leer seis decimales donde el banco dio dos hace dudar de la cifra. Los decimales que SÍ
+	// existen se conservan enteros: 456,673333 sigue siendo 456,673333.
 	const q = `
-		SELECT to_char(fecha, 'YYYY-MM-DD'), valor::text, fuente
+		SELECT to_char(fecha, 'YYYY-MM-DD'), trim_scale(valor)::text, fuente
 		FROM tipo_cambio_cotizacion
 		WHERE empresa_id = $1::uuid AND extract(year from fecha) = $2 AND extract(month from fecha) = $3
 		ORDER BY fecha`
@@ -43,7 +47,10 @@ func (r *pgRepository) CotizacionesMes(ctx context.Context, empresaID string, an
 }
 
 func (r *pgRepository) EstadoTCMes(ctx context.Context, empresaID string, anio, mes int) (string, *string, error) {
-	const q = `SELECT estado, valor_congelado::text FROM tipo_cambio_mes WHERE empresa_id = $1::uuid AND anio = $2 AND mes = $3`
+	// Mismo `trim_scale` que las cotizaciones: un TC congelado en 452,60 se lee «452.6», no
+	// «452.600000», y uno con decimales de verdad los muestra todos.
+	const q = `SELECT estado, trim_scale(valor_congelado)::text FROM tipo_cambio_mes
+	            WHERE empresa_id = $1::uuid AND anio = $2 AND mes = $3`
 	var estado string
 	var valor *string
 	err := r.pool.QueryRow(ctx, q, empresaID, anio, mes).Scan(&estado, &valor)

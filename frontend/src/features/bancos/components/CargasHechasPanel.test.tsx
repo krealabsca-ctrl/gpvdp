@@ -97,18 +97,39 @@ const LA_BUENA = carga({
 });
 
 const CUENTAS: CuentaBancaria[] = [
-  { id: "cta-colinas", alias: "Promerica Colinas", banco: "Promerica", iban: "CR1", moneda: "CRC", activo: true },
-  { id: "cta-vdp", alias: "Promerica VDP", banco: "Promerica", iban: "CR2", moneda: "CRC", activo: true },
+  {
+    id: "cta-colinas",
+    alias: "Promerica Colinas",
+    banco: "Promerica",
+    iban: "CR1",
+    moneda: "CRC",
+    activo: true,
+    es_reserva: false,
+  },
+  {
+    id: "cta-vdp",
+    alias: "Promerica VDP",
+    banco: "Promerica",
+    iban: "CR2",
+    moneda: "CRC",
+    activo: true,
+    es_reserva: false,
+  },
 ];
 
 const revertir = vi.fn();
 const deshacer = vi.fn();
 
-function lista(items: ImportacionItem[], total = items.length): ListaImportaciones {
+function lista(
+  items: ImportacionItem[],
+  total = items.length,
+): ListaImportaciones {
   return { items, total, page: 1, page_size: 50 };
 }
 
-function montar(opciones: { datos?: ListaImportaciones; permiso?: boolean } = {}) {
+function montar(
+  opciones: { datos?: ListaImportaciones; permiso?: boolean } = {},
+) {
   vi.mocked(useTienePermiso).mockReturnValue(() => opciones.permiso ?? true);
   vi.mocked(useImportaciones).mockImplementation((() => ({
     data: opciones.datos ?? lista([LA_MALA, LA_BUENA]),
@@ -169,7 +190,10 @@ describe("CargasHechasPanel", () => {
   it("filtrar por cuenta vuelve a pedir la lista de esa cuenta, desde la página 1", async () => {
     const user = userEvent.setup();
     montar();
-    await user.selectOptions(screen.getByLabelText("Ver las cargas de"), "cta-vdp");
+    await user.selectOptions(
+      screen.getByLabelText("Ver las cargas de"),
+      "cta-vdp",
+    );
     const llamadas = vi.mocked(useImportaciones).mock.calls;
     expect(llamadas[llamadas.length - 1]?.[0]).toEqual({
       cuenta_bancaria_id: "cta-vdp",
@@ -180,9 +204,15 @@ describe("CargasHechasPanel", () => {
 
   it("sin el permiso no se ve el botón, pero el historial sí", () => {
     montar({ permiso: false });
-    expect(screen.getByText("VALLE DE PAZ PROMERICA COLONES.xlsx")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Revertir esta carga" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Deshacer la reversa" })).toBeNull();
+    expect(
+      screen.getByText("VALLE DE PAZ PROMERICA COLONES.xlsx"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Revertir esta carga" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Deshacer la reversa" }),
+    ).toBeNull();
   });
 
   it("con bloqueos el botón está apagado y la razón se lee en la fila", () => {
@@ -191,7 +221,11 @@ describe("CargasHechasPanel", () => {
       puede_revertir: false,
       razon_no_revertir:
         "3 cobro(s) de CxC identificados contra estos movimientos; el período 2026-09 ya está cerrado",
-      bloqueos: { ...SIN_BLOQUEOS, cobros_cxc: 3, periodos_cerrados: ["2026-09"] },
+      bloqueos: {
+        ...SIN_BLOQUEOS,
+        cobros_cxc: 3,
+        periodos_cerrados: ["2026-09"],
+      },
     });
     montar({ datos: lista([bloqueada]) });
 
@@ -209,17 +243,25 @@ describe("CargasHechasPanel", () => {
   it("la confirmación dice los números exactos, promete que lo otro no se toca y exige motivo", async () => {
     const user = userEvent.setup();
     montar();
-    await user.click(screen.getAllByRole("button", { name: "Revertir esta carga" })[0]!);
+    await user.click(
+      screen.getAllByRole("button", { name: "Revertir esta carga" })[0]!,
+    );
 
-    expect(screen.getByRole("heading", { name: "Revertir esta carga" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Revertir esta carga" }),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(
         /Vas a excluir 7 movimientos por ₡10\s?000\s?000,00 en débitos y ₡7\s?042\s?727,09 en créditos, del 02\/09\/2026 al 14\/09\/2026 en Promerica · Promerica Colinas/,
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("Las otras cargas de esa cuenta no se tocan.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Las otras cargas de esa cuenta no se tocan."),
+    ).toBeInTheDocument();
     // Y que NO se borra: la reversa es «dejan de sumar», no un DELETE.
-    expect(screen.getByText(/Los movimientos no se borran/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Los movimientos no se borran/),
+    ).toBeInTheDocument();
 
     const enviar = screen.getByRole("button", { name: "Revertir la carga" });
     expect(enviar).toBeDisabled(); // sin motivo no se manda: el 400 no debería llegar a pasar nunca
@@ -232,7 +274,8 @@ describe("CargasHechasPanel", () => {
     expect(revertir).toHaveBeenCalledWith(
       {
         importacionId: "imp-mala",
-        motivo: "el archivo era de Promerica VDP y se importó en Promerica Colinas",
+        motivo:
+          "el archivo era de Promerica VDP y se importó en Promerica Colinas",
       },
       expect.anything(),
     );
@@ -260,18 +303,30 @@ describe("CargasHechasPanel", () => {
     expect(fila.getByText("Revertida")).toBeInTheDocument();
     expect(fila.getByText("7 no suman")).toBeInTheDocument();
     expect(fila.getByText(/por Administrador GPVDP/)).toBeInTheDocument();
-    expect(fila.getByText(/«se importó en la cuenta equivocada»/)).toBeInTheDocument();
-    expect(fila.getByText(/24\/09\/2026/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Revertir esta carga" })).toBeNull();
-
-    await user.click(screen.getByRole("button", { name: "Deshacer la reversa" }));
-    const dialogo = within(screen.getByRole("dialog"));
-    expect(dialogo.getByRole("heading", { name: "Deshacer la reversa" })).toBeInTheDocument();
     expect(
-      dialogo.getByText(/Vuelven a los libros los movimientos que esta reversa excluyó/),
+      fila.getByText(/«se importó en la cuenta equivocada»/),
+    ).toBeInTheDocument();
+    expect(fila.getByText(/24\/09\/2026/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Revertir esta carga" }),
+    ).toBeNull();
+
+    await user.click(
+      screen.getByRole("button", { name: "Deshacer la reversa" }),
+    );
+    const dialogo = within(screen.getByRole("dialog"));
+    expect(
+      dialogo.getByRole("heading", { name: "Deshacer la reversa" }),
+    ).toBeInTheDocument();
+    expect(
+      dialogo.getByText(
+        /Vuelven a los libros los movimientos que esta reversa excluyó/,
+      ),
     ).toBeInTheDocument();
     // El motivo acá es opcional (así lo definió el backend): se manda vacío sin trabar nada.
-    await user.click(dialogo.getByRole("button", { name: "Deshacer la reversa" }));
+    await user.click(
+      dialogo.getByRole("button", { name: "Deshacer la reversa" }),
+    );
     expect(deshacer).toHaveBeenCalledWith(
       { importacionId: "imp-revertida", motivo: "" },
       expect.anything(),
@@ -290,20 +345,27 @@ describe("CargasHechasPanel", () => {
       bloqueos: { ...SIN_BLOQUEOS, periodos_cerrados: ["2026-09"] },
       puede_revertir: false,
       puede_deshacer_reversa: false,
-      razon_no_revertir: "no se puede deshacer la reversa porque hay el período 2026-09 ya está cerrado",
+      razon_no_revertir:
+        "no se puede deshacer la reversa porque hay el período 2026-09 ya está cerrado",
     });
     montar({ datos: lista([revertidaYCerrada]) });
 
-    expect(screen.getByRole("button", { name: "Deshacer la reversa" })).toBeDisabled();
     expect(
-      screen.getByText(/no se puede deshacer la reversa porque hay el período 2026-09 ya está cerrado/),
+      screen.getByRole("button", { name: "Deshacer la reversa" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText(
+        /no se puede deshacer la reversa porque hay el período 2026-09 ya está cerrado/,
+      ),
     ).toBeInTheDocument();
   });
 
   it("sin cargas lo dice, no queda en blanco", () => {
     montar({ datos: lista([], 0) });
     expect(
-      screen.getByText("Todavía no se subió ningún archivo de banco en esta empresa."),
+      screen.getByText(
+        "Todavía no se subió ningún archivo de banco en esta empresa.",
+      ),
     ).toBeInTheDocument();
   });
 });

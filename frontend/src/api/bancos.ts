@@ -33,6 +33,8 @@ export interface CuentaBancaria {
   moneda: Moneda;
   /** Una cuenta desactivada conserva su historia pero no aparece en el importador. */
   activo: boolean;
+  /** Cuenta de fondos reservados: lo que se paga desde acá no entra en el flujo normal del cronograma. */
+  es_reserva: boolean;
 }
 
 export interface BancoItem {
@@ -56,6 +58,8 @@ export interface CambioDeCuenta {
   iban?: string;
   moneda?: Moneda;
   banco_id?: string;
+  /** La cuenta guarda fondos reservados: lo que sale de acá no entra en el flujo normal del cronograma. */
+  es_reserva?: boolean;
 }
 
 /** Qué arrastró una fusión del catálogo. Se muestra al usuario: es irreversible. */
@@ -395,6 +399,56 @@ export interface RespuestaDuplicados {
   con_las_tres: number;
 }
 
+// --- Reemisiones del banco (mig 0118) ---
+//
+// El banco manda OTRA VEZ el mismo hecho, otro día y con otra descripción, conservando el
+// consecutivo. No lo agarra el detector de duplicados —ese busca el mismo día con consecutivos
+// distintos, lo contrario— y los dos no pueden quedarse: el monto estaría dos veces en los libros.
+
+/** Un lado del par, con lo que hace falta para decidir cuál dejar vigente. */
+export interface LadoReemision {
+  id: string;
+  fecha: string;
+  documento: string;
+  descripcion: string;
+  /** «Concepto › Clasificación» ya armado por el servidor, o vacío si no está clasificado. */
+  clasificacion: string;
+  estado_clasificacion: string;
+  incluido: boolean;
+}
+
+/**
+ * Un par que PODRÍA ser el mismo hecho reemitido.
+ *
+ * `dias_entre` es la señal que más separa el grano de la paja y por eso se muestra: las
+ * recurrencias legítimas con el mismo consecutivo caen a 7, 14, 28 o 30 días; una reemisión del
+ * banco cae al día siguiente.
+ */
+export interface CandidatoReemision {
+  monto: string;
+  es_debito: boolean;
+  cuenta: string;
+  banco: string;
+  dias_entre: number;
+  anterior: LadoReemision;
+  posterior: LadoReemision;
+}
+
+/** Un enlace ya hecho: cuál cuenta y cuál salió de los libros. */
+export interface Reemision {
+  monto: string;
+  es_debito: boolean;
+  cuenta: string;
+  banco: string;
+  vigente: LadoReemision;
+  reemplazado: LadoReemision;
+  motivo: string;
+  enlazado_por: string;
+  enlazado_en: string;
+  /** Los dos terminaron con la misma partida. NO dice que la heredó: también es cierto cuando ya venían iguales. */
+  misma_clasificacion: boolean;
+}
+
 // --- Dividir un movimiento entre partidas (mig 0094) ---
 
 /** Una de las caras de un movimiento repartido. */
@@ -418,6 +472,11 @@ export interface ParteMovimiento {
  */
 export interface DivisionMovimiento {
   movimiento_id: string;
+  /**
+   * «DIV-A3F2B1C4»: nombra al reparto. Es el MISMO que sale en la parrilla y en la columna
+   * «Reparto» del .xlsx, y lo manda el servidor justamente para que no haya dos formatos.
+   */
+  codigo: string;
   /** El hecho bancario no se reparte: misma fecha, consecutivo y descripción en todas las partes. */
   fecha: string;
   documento: string;
@@ -517,6 +576,29 @@ export interface MovimientoRow {
    * nadie verificó. El movimiento sigue visible: la plata salió del banco igual.
    */
   sello_externo?: SelloExterno;
+  /**
+   * Este movimiento participa de un REPARTO: o es el original al que se le apartó algo, o es una
+   * de las partes apartadas.
+   *
+   * Ausente en casi todos. La relación existía desde la migración 0094 y ninguna lista la mostraba:
+   * una parte se veía idéntica a un movimiento normal, y la única forma de enterarse era abrir el
+   * panel de división de esa fila.
+   */
+  division?: DivisionDeMovimiento;
+}
+
+/** La huella de un reparto en una fila. Todas sus caras comparten `codigo`. */
+export interface DivisionDeMovimiento {
+  /** «DIV-A3F2B1C4». Lo comparten todas las caras del mismo reparto. */
+  codigo: string;
+  /** El movimiento original, para poder ir a él desde cualquier parte. */
+  principal_id: string;
+  /** true = a esta fila la apartaron de otra; false = a esta le apartaron algo. */
+  es_parte: boolean;
+  /** Cuántas caras vivas tiene el reparto, contando el principal. */
+  partes: number;
+  /** Lo que trajo el banco antes de repartirlo. */
+  monto_original: string;
 }
 
 /** El sello «aplicado en el sistema anterior», con el renglón del reporte que lo explica. */
@@ -1409,6 +1491,85 @@ export interface TendenciaPartida {
   meses_con_dato: number;
   /** false = no hay historia suficiente y el desvío no significa nada. */
   confiable: boolean;
+
+  /**
+   * La MEDIANA de los mismos meses que el promedio, y el desvío contra ella.
+   *
+   * Un pago grande infla el promedio para siempre: medido en Memorial Pets, está entre 90 % y
+   * 126 % por encima de la mediana en varias partidas, y a partir de ese mes cada mes normal
+   * marca una caída que no ocurrió. No reemplaza al promedio: la pantalla deja elegir.
+   */
+  mediana: string;
+  desvio_mediana_pct: string;
+
+  /** En cuántos meses comparables esta partida tuvo movimiento. */
+  meses_con_gasto: number;
+  /**
+   * FIJO · INTERMITENTE · ESPORADICO. Para una esporádica, «promedio mensual» no significa nada:
+   * no hay ritmo del que apartarse. Son 72 de 96 en Memorial, y el 19,6 % del dinero.
+   */
+  recurrencia: string;
+
+  /**
+   * Total del MISMO rango del año anterior, solo si se pidió comparar.
+   *
+   * Contesta otra pregunta que el desvío: el desvío dice «se salió de su cauce» y esto dice
+   * «cómo venimos contra el año pasado». Las dos pueden dar lecturas opuestas, y las dos son
+   * ciertas.
+   */
+  total_anterior?: string;
+  variacion_anual_pct?: string;
+  /** La partida no existía el año pasado: no «creció infinito», no había con qué comparar. */
+  sin_base_anterior?: boolean;
+}
+
+/** Lo que se espera de un mes que todavía no ocurrió. */
+export interface MesProyectado {
+  periodo: string;
+  ingresos: string;
+  gastos: string;
+  neto: string;
+  /** El índice estacional aplicado, o vacío si el mes no tenía respaldo para corregir. */
+  indice_estacional?: string;
+}
+
+/**
+ * Flujo de caja proyectado por PATRÓN histórico.
+ *
+ * No se proyecta por vencimientos porque no funcionaría: medido el 28-oct-2026, de la cartera
+ * pendiente de Valle de Paz **₡936,9 M ya venció y solo ₡61,6 M vence a futuro**. Una proyección
+ * por vencimiento pondría casi todo en «este mes» y nada después.
+ */
+export interface FlujoProyectado {
+  desde_base: string;
+  hasta_base: string;
+  meses: MesProyectado[];
+  partidas_proyectadas: number;
+  /** Las que no tienen ritmo propio: entran como un bloque mensual, no partida por partida. */
+  partidas_esporadicas: number;
+  aporte_esporadicas: string;
+  meses_comparables: number;
+  con_estacionalidad: boolean;
+  /** Lo que YA se debe. Se informa aparte: es un stock que se arrastra, no un flujo futuro. */
+  cxp_vencido: string;
+  cxp_por_vencer: string;
+  aviso: string;
+}
+
+/** El peso de un mes del calendario frente a un mes cualquiera. */
+export interface MesEstacional {
+  /** 1 a 12. */
+  mes: number;
+  /**
+   * Sobre cuántas observaciones. CON UNA SOLA NO HAY ESTACIONALIDAD: es el dato de ese mes.
+   * Medido en Memorial el 28-oct-2026, solo 5 de los 12 meses tienen dos años cargados.
+   */
+  anios: number;
+  /** 100 = un mes promedio. 141 = gasta un 41 % más que un mes cualquiera. */
+  indice: string;
+  promedio: string;
+  /** false con menos de dos años: la pantalla lo muestra en gris y no opina. */
+  confiable: boolean;
 }
 
 /** Análisis de partidas en el tiempo: la tendencia de cada gasto y qué se salió de su cauce. */
@@ -1420,6 +1581,32 @@ export interface AnalisisPartidas {
   meses_comparables: number;
   /** Por qué el análisis puede no ser confiable (vacío si está bien). */
   aviso: string;
+
+  /** Cuánto pesa cada mes del calendario frente a un mes cualquiera. */
+  estacionalidad?: MesEstacional[];
+  /** Cuántos meses del calendario tienen al menos dos años. Con pocos, no hay patrón. */
+  meses_con_dos_anios?: number;
+
+  /** Comparación contra el mismo rango del año anterior, si se pidió. */
+  compara_anual?: boolean;
+  desde_ant?: string;
+  hasta_ant?: string;
+  meses_comparables_ant?: number;
+  /** Por qué la comparación anual puede mentir. Junta todos los reparos que apliquen. */
+  aviso_anual?: string;
+
+  /**
+   * Los dos agujeros de la comparación, porque la lista de partidas sale del rango ACTUAL:
+   *
+   *  · `sin_base`: están este año y no el pasado. Parte del crecimiento puede ser que el mismo
+   *    gasto antes se clasificaba con otro nombre.
+   *  · `solo_ant`: estaban el año pasado y ya no. NO TIENEN FILA en la tabla, así que sumar la
+   *    columna «año anterior» da menos que el año anterior de verdad.
+   */
+  partidas_sin_base?: number;
+  monto_sin_base?: string;
+  partidas_solo_ant?: number;
+  monto_solo_ant?: string;
 }
 
 /** Un día del calendario de flujo (Fase B). */
@@ -1767,6 +1954,54 @@ export const bancosApi = {
     });
   },
 
+  // --- Reemisiones del banco (mig 0118) ---
+
+  /**
+   * Pares que PODRÍAN ser el mismo hecho reemitido. No enlaza nada: propone.
+   *
+   * `dias_max` dice con qué ventana se buscó, para que la pantalla pueda explicarlo sin repetir el
+   * número del servidor.
+   */
+  candidatosReemision(): Promise<{
+    items: CandidatoReemision[];
+    total: number;
+    dias_max: number;
+  }> {
+    return apiFetch<{ items: CandidatoReemision[]; total: number; dias_max: number }>(
+      "/bancos/movimientos/reemisiones/candidatos",
+      { method: "GET" },
+    );
+  },
+  /** Los enlaces ya hechos, el más reciente primero. */
+  reemisiones(): Promise<{ items: Reemision[]; total: number }> {
+    return apiFetch<{ items: Reemision[]; total: number }>("/bancos/movimientos/reemisiones", {
+      method: "GET",
+    });
+  },
+  /**
+   * Declara que dos movimientos son el mismo hecho.
+   *
+   * `vigenteId` es el que SE QUEDA en los libros; `reemplazaA` el que sale. El orden importa y lo
+   * decide quien llama: lo normal es dejar el más reciente —es el que el banco va a reportar— pero
+   * no siempre.
+   */
+  enlazarReemision(
+    vigenteId: string,
+    reemplazaA: string,
+    motivo: string,
+  ): Promise<{ ok: boolean }> {
+    return apiFetch<{ ok: boolean }>(`/bancos/movimientos/${vigenteId}/reemplaza`, {
+      method: "POST",
+      json: { reemplaza_a: reemplazaA, motivo },
+    });
+  },
+  /** Rompe el enlace y devuelve a los libros el que había salido. */
+  deshacerReemision(vigenteId: string): Promise<{ ok: boolean }> {
+    return apiFetch<{ ok: boolean }>(`/bancos/movimientos/${vigenteId}/deshacer-reemplazo`, {
+      method: "POST",
+    });
+  },
+
   // --- Dividir un movimiento entre partidas (mig 0094) ---
 
   /**
@@ -2031,6 +2266,24 @@ export const bancosApi = {
       blob: true,
     });
   },
+  /**
+   * El análisis de partidas en .xlsx, con el MISMO rango y filtro que la pantalla.
+   *
+   * El nombre lo pone el servidor, igual que en el detalle de movimientos: ahí vive el nombre de
+   * la empresa y el rango efectivo.
+   */
+  exportarAnalisisXLSX(
+    desde: string,
+    hasta: string,
+    grupo: string,
+    comparar: boolean,
+  ): Promise<DescargaArchivo> {
+    return apiFetch<DescargaArchivo>("/bancos/analisis/partidas/export", {
+      method: "GET",
+      query: { desde, hasta, grupo, comparar: comparar ? "1" : undefined },
+      blobConNombre: true,
+    });
+  },
 
   // --- Cuadre / dashboard ---
   cuadre(periodo: string): Promise<CuadreConcepto[]> {
@@ -2064,10 +2317,20 @@ export const bancosApi = {
       query: { desde, hasta, clasificaciones: clasificaciones.join(",") },
     });
   },
-  analisisPartidas(desde: string, hasta: string): Promise<AnalisisPartidas> {
+  /**
+   * El flujo esperado de los próximos meses. `desde`/`hasta` acotan el HISTÓRICO del que sale el
+   * patrón; `meses` cuántos se proyectan hacia adelante.
+   */
+  flujoProyectado(desde: string, hasta: string, meses: number): Promise<FlujoProyectado> {
+    return apiFetch<FlujoProyectado>("/bancos/analisis/flujo", {
+      method: "GET",
+      query: { desde, hasta, meses: String(meses) },
+    });
+  },
+  analisisPartidas(desde: string, hasta: string, comparar = false): Promise<AnalisisPartidas> {
     return apiFetch<AnalisisPartidas>("/bancos/analisis/partidas", {
       method: "GET",
-      query: { desde, hasta },
+      query: { desde, hasta, comparar: comparar ? "1" : undefined },
     });
   },
   calendarioDiario(periodo: string): Promise<DiaCalendario[]> {
@@ -2383,6 +2646,33 @@ export const bancosApi = {
   conciliarCxP(): Promise<ReporteConciliacionCxP> {
     return apiFetch<ReporteConciliacionCxP>("/bancos/conciliacion-cxp", { method: "POST" });
   },
+
+  /**
+   * Enlaza A MANO un débito con su factura, para lo que el barrido por huella no puede resolver:
+   * el pago salió, pero la descripción del banco no trae el código.
+   *
+   * NO afloja el monto ni la moneda. Si el banco debitó otra cifra, el servidor contesta 422 con
+   * las dos: eso es un pago parcial o una nota de crédito, y todavía no tienen camino.
+   */
+  enlazarPagoAMano(movimientoId: string, documentoId: string, motivo: string) {
+    return apiFetch<{ Veredicto: string; DocumentoID: string; Consecutivo: string }>(
+      "/bancos/conciliacion-cxp/enlazar",
+      { method: "POST", json: { movimiento_id: movimientoId, documento_id: documentoId, motivo } },
+    );
+  },
+  /**
+   * Deshace una conciliación: la factura vuelve a PAGADO y reaparece en el arqueo.
+   *
+   * Existe porque enlazar era un camino de ida: dos facturas del mismo proveedor por el mismo
+   * monto en la misma semana es corriente, y sin esto el par equivocado quedaba cerrado para
+   * siempre.
+   */
+  desenlazarPago(movimientoId: string, motivo: string) {
+    return apiFetch<{ facturas_reabiertas: number }>("/bancos/conciliacion-cxp/desenlazar", {
+      method: "POST",
+      json: { movimiento_id: movimientoId, motivo },
+    });
+  },
 };
 
 /** Resultado del barrido de códigos internos Bancos↔CxP. */
@@ -2639,4 +2929,151 @@ export interface Conciliacion {
   con_diferencia: number;
   incompletas: number;
   puede_cerrar: boolean;
+}
+
+// ── Presupuesto de INGRESO (mig 0116) ───────────────────────────────────────────────────────
+//
+// La otra mitad de la meta. Sin ella se controla cuánto se gasta sin saber contra qué: no hay
+// resultado presupuestado, ni margen, ni EBITDA presupuestado.
+
+/** Una meta cargada. `clasificacion_id` vacío = el TOTAL del mes. */
+export interface MetaIngreso {
+  periodo: string;
+  monto: string;
+  nota: string;
+  clasificacion_id: string;
+  clasificacion: string;
+  concepto: string;
+}
+
+/** Estado del cumplimiento. NO son los del gasto: acá pasarse es la buena noticia. */
+export type EstadoIngreso = "SIN_META" | "CUMPLIDO" | "EN_CAMINO" | "CORTO";
+
+/** Una línea del control: meta contra real. */
+export interface FilaIngreso {
+  clasificacion_id: string;
+  clasificacion: string;
+  concepto: string;
+  meta: string;
+  real: string;
+  movs: number;
+  /** real − meta. POSITIVO ES BUENO acá, al revés del gasto. */
+  diferencia: string;
+  cumplido_pct: string;
+  estado: EstadoIngreso;
+}
+
+/** El cruce completo del rango. */
+export interface ControlIngreso {
+  desde: string;
+  hasta: string;
+  meta_total: string;
+  meses_con_meta: number;
+  real_total: string;
+  diferencia: string;
+  cumplido_pct: string;
+  estado: EstadoIngreso;
+  lineas: FilaIngreso[];
+  suma_de_lineas: string;
+  sin_repartir: string;
+  lineas_sin_meta: number;
+  aviso?: string;
+}
+
+/** Las dos mitades de la meta contra las dos de lo real. */
+export interface ResultadoPresupuestado {
+  desde: string;
+  hasta: string;
+  ingreso_meta: string;
+  ingreso_real: string;
+  gasto_meta: string;
+  gasto_real: string;
+  resultado_meta: string;
+  resultado_real: string;
+  /** real − meta. Positivo: se cerró mejor de lo planeado. */
+  desvio: string;
+  /** Hay meta de los DOS lados. Sin eso el resultado presupuestado no existe. */
+  completo: boolean;
+  aviso?: string;
+}
+
+/** Lo que se propone desde el histórico, con el rango que se miró. */
+export interface PropuestaDeMeta {
+  items: FilaIngreso[];
+  desde_base: string;
+  hasta_base: string;
+  aviso?: string;
+}
+
+export const presupuestoIngresoApi = {
+  metas: (desde: string, hasta: string) =>
+    apiFetch<{ items: MetaIngreso[] }>("/bancos/presupuesto-ingreso", { query: { desde, hasta } }),
+  guardar: (m: { periodo: string; monto: string; nota?: string; clasificacion_id?: string }) =>
+    apiFetch<void>("/bancos/presupuesto-ingreso", { method: "PUT", json: m }),
+  borrar: (periodo: string, clasificacionId?: string) =>
+    apiFetch<void>("/bancos/presupuesto-ingreso", {
+      method: "DELETE",
+      query: { periodo, clasificacion_id: clasificacionId },
+    }),
+  control: (desde: string, hasta: string) =>
+    apiFetch<ControlIngreso>("/bancos/control-ingreso", { query: { desde, hasta } }),
+  resultado: (desde: string, hasta: string) =>
+    apiFetch<ResultadoPresupuestado>("/bancos/resultado-presupuestado", { query: { desde, hasta } }),
+  propuesta: (desde: string, hasta: string, ajustePct: string) =>
+    apiFetch<PropuestaDeMeta>("/bancos/presupuesto-ingreso/propuesta", {
+      query: { desde, hasta, ajuste_pct: ajustePct },
+    }),
+};
+
+// ── Outlook del año (la tercera columna) ────────────────────────────────────────────────────
+
+/** Un mes del año: lo que pasó, lo que se presupuestó, y si ya cerró. */
+export interface MesDelAnio {
+  periodo: string;
+  ingreso_real: string;
+  gasto_real: string;
+  ingreso_meta: string;
+  gasto_meta: string;
+  estado: "CERRADO" | "EN_CURSO" | "FUTURO";
+  /** Solo en el mes EN CURSO: lo que daría el mes completo a paridad de día. */
+  ingreso_proyectado?: string;
+  gasto_proyectado?: string;
+}
+
+/** Una forma de completar el año. */
+export interface EscenarioOutlook {
+  nombre: "PLAN" | "RITMO";
+  ingreso: string;
+  gasto: string;
+  resultado: string;
+  /** De dónde salió lo proyectado, para que el número se pueda discutir. */
+  base: string;
+  calculable: boolean;
+  aviso?: string;
+}
+
+/** El año entero: lo que pasó, lo presupuestado y cómo cierra. */
+export interface OutlookAnual {
+  anio: number;
+  meses: MesDelAnio[];
+  ingreso_ytd: string;
+  gasto_ytd: string;
+  resultado_ytd: string;
+  ingreso_presupuesto: string;
+  gasto_presupuesto: string;
+  resultado_presupuesto: string;
+  plan: EscenarioOutlook;
+  ritmo: EscenarioOutlook;
+  meses_cerrados: number;
+  /** Cerraron sin un solo movimiento: no promedian en el ritmo y se avisan (suele faltar el estado de cuenta). */
+  meses_cerrados_sin_datos: number;
+  meses_futuros: number;
+  mes_en_curso: string;
+  avance_del_mes: string;
+  avisos: string[];
+}
+
+/** Trae el cierre proyectado del año. */
+export function getOutlook(anio: number): Promise<OutlookAnual> {
+  return apiFetch<OutlookAnual>("/bancos/outlook", { query: { anio } });
 }

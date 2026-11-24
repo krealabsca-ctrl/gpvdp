@@ -81,8 +81,51 @@ func TestCatalogoSinDuplicados(t *testing.T) {
 	// separados porque consultar el costeo lo necesita cualquiera que cotice, mientras que
 	// cambiarlo mueve el precio de todo lo que se vende: son dos decisiones distintas sobre quién
 	// puede qué, y juntarlas obligaría a dar la segunda para conceder la primera.
-	if len(Catalogo) != 93 {
-		t.Errorf("catálogo tiene %d permisos, se esperaban 93", len(Catalogo))
+	// → 94 con el corte del lote de pago (20-oct-2026, mig 0104). `cxp.reabrir_lote` va aparte de
+	// `cxp.tesoreria` —que es con lo que se CIERRA— por el mismo criterio que `cxp.liberar_pago`:
+	// cerrar es ejercer el control y reabrir es levantarlo, y quién puede lo segundo tiene que ser
+	// una decisión separada de quién arma el corte.
+	// → 95 con el pago parcial (20-oct-2026, mig 0105). `cxp.cobrar_saldo` va aparte de
+	// `cxp.tesoreria` —con el que se REGISTRA lo que entró— porque decir «entró esto» y decir «el
+	// resto se sigue debiendo» no son la misma afirmación: la segunda, si la diferencia era una
+	// nota de crédito, le paga de más al proveedor.
+	// → 96 con los errores del sistema (22-oct-2026, mig 0107). `admin.incidentes` es propio y no
+	// se cuelga de `admin.roles` porque lo que muestra no se parece a ninguna otra pantalla: rutas
+	// internas, nombres de tablas y fragmentos de SQL. Eso describe el sistema por dentro, que es
+	// exactamente lo que el mensaje de error le oculta al usuario a propósito.
+	// → 97 con los formatos de banco configurables (22-oct-2026, mig 0108). `bancos.formatos` va
+	// aparte de `bancos.importar` porque importar es la tarea diaria de quien carga los estados de
+	// cuenta, y esto decide en qué columna viene el débito de todos los archivos que vengan
+	// después: un formato con los montos cambiados ensucia la contabilidad entera.
+	// → 98 con el plan de cuentas (23-oct-2026, mig 0109). Estrena el módulo «Contabilidad» y es
+	// `critico` por una razón distinta a la del catálogo de Bancos: una clasificación mal puesta
+	// se corrige reclasificando, pero una cuenta contable mal clasificada ya viajó a todos los
+	// asientos que se generaron con ella.
+	// → 99 con el mapeo contable (26-oct-2026, mig 0110). `conta.mapeo` va aparte del plan de
+	// cuentas porque son dos trabajos distintos: armar el catálogo lo hace el contador una vez,
+	// y decir a qué cuenta va cada una de las 332 partidas con movimiento lo hace quien conoce
+	// la operación.
+	// → 102 con el asiento contable (27-oct-2026, mig 0111). Entran tres de una porque son tres
+	// responsabilidades distintas: configurar los bancos, LEER los libros (lo único no `critico`
+	// del módulo: un auditor interno lo necesita y no debe poder escribir) y escribir asientos a
+	// mano, que mueve plata sin documento que lo respalde.
+	// → 103 con el generador de asientos (28-oct-2026, mig 0112). Va aparte de `conta.asientos`
+	// porque escribir UN asiento a mano y generar los de un mes entero —y poder revertirlos—
+	// son facultades de distinto tamaño.
+	// → 104 con el cierre de período (29-oct-2026, mig 0113). Cerrar un mes congela los estados
+	// financieros para toda la empresa; reabrirlo los descongela y queda registrado con motivo.
+	// → 106 con los ratios del ciclo de efectivo (2-nov-2026, mig 0115). Cruzan CxC y CxP y los
+	// mira dirección: pedir `cxc.ver` o `cxp.ver` daría el detalle de un módulo entero para ver
+	// tres agregados.
+	// → 105 con la política de caja (30-oct-2026, mig 0114). Declarar cuánto se destina por
+	// semana a pagar cartera atrasada ES la decisión de tesorería: produce la curva del flujo a
+	// 13 semanas, así que ver esa curva y mover su supuesto son facultades distintas.
+	// → 107 con las consultas lentas (11-nov-2026, mig 0120). Ver qué se lleva el tiempo del
+	// servidor muestra el SQL del sistema por dentro —nombres de tablas y cómo se cruzan—, que es
+	// lo mismo que `admin.incidentes` oculta al usuario común: por eso lleva permiso propio y
+	// crítico, y no viaja con el resto de Administración.
+	if len(Catalogo) != 107 {
+		t.Errorf("catálogo tiene %d permisos, se esperaban 107", len(Catalogo))
 	}
 }
 

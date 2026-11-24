@@ -338,6 +338,7 @@ function CuentasSection() {
   const [editIban, setEditIban] = useState("");
   const [editMoneda, setEditMoneda] = useState<Moneda>("CRC");
   const [editBanco, setEditBanco] = useState("");
+  const [editReserva, setEditReserva] = useState(false);
   const [porEliminar, setPorEliminar] = useState<CuentaBancaria | null>(null);
   // Qué cuelga de la cuenta que se está editando: decide si la moneda y el IBAN se pueden
   // tocar, y se pide ANTES de que el usuario intente guardar.
@@ -377,6 +378,7 @@ function CuentasSection() {
     setEditIban(c.iban);
     setEditMoneda(c.moneda);
     setEditBanco("");
+    setEditReserva(c.es_reserva);
   }
 
   /**
@@ -389,6 +391,9 @@ function CuentasSection() {
     const a = editAlias.trim();
     if (a && a !== c.alias) cambio.alias = a;
     if (editBanco) cambio.banco_id = editBanco;
+    // «Reserva» es una etiqueta, no un dato importado: se puede cambiar aunque la cuenta ya
+    // tenga movimientos. Lo que mueve es el cronograma de pago, no la historia.
+    if (editReserva !== c.es_reserva) cambio.es_reserva = editReserva;
     if (!conMovimientos) {
       if (editIban.trim() !== c.iban) cambio.iban = editIban.trim();
       if (editMoneda !== c.moneda) cambio.moneda = editMoneda;
@@ -416,7 +421,8 @@ function CuentasSection() {
           <h3 className="text-sm font-semibold text-content">Cuentas</h3>
           <p className="text-xs text-content-muted">
             El importador reconoce el formato del banco automáticamente; el IBAN se valida contra el
-            archivo al importar.
+            archivo al importar. Marcá «Reserva» en las cuentas de fondos apartados: lo que se pague
+            desde ellas sale del banco igual, pero no entra en el flujo normal del cronograma de pago.
           </p>
         </div>
         <form onSubmit={onCrear} className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -476,6 +482,7 @@ function CuentasSection() {
                   <TH>Banco</TH>
                   <TH>IBAN</TH>
                   <TH>Moneda</TH>
+                  <TH>Reserva</TH>
                   <TH className="text-right">Acción</TH>
                 </TR>
               </THead>
@@ -540,6 +547,25 @@ function CuentasSection() {
                         />
                       ) : (
                         <Badge tone="accent">{c.moneda}</Badge>
+                      )}
+                    </TD>
+                    {/* Reserva: se puede marcar siempre (es una etiqueta). Mueve el cronograma
+                        de pago, no la historia de la cuenta. */}
+                    <TD>
+                      {editId === c.id ? (
+                        <label className="flex items-center gap-2 text-xs">
+                          <input
+                            type="checkbox"
+                            checked={editReserva}
+                            onChange={(e) => setEditReserva(e.target.checked)}
+                            aria-label="La cuenta guarda fondos reservados"
+                          />
+                          Fondos reservados
+                        </label>
+                      ) : c.es_reserva ? (
+                        <Badge tone="positivo">Reserva</Badge>
+                      ) : (
+                        <span className="text-xs text-content-muted">—</span>
                       )}
                     </TD>
                     <TD className="text-right">

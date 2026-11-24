@@ -7,6 +7,11 @@ import "testing"
 // Se escriben acá porque ya cambiaron dos veces (2026-09-02 y 2026-09-03) y porque quien recibe el
 // .xlsx lo pega en sus propias hojas: mover una columna le rompe las fórmulas del otro lado. Si este
 // test se pone rojo, el orden cambió — y tiene que ser porque alguien lo decidió, no de rebote.
+//
+// → «Reparto» agregada el 2-nov-2026, decidida por el Director Financiero. Va AL FINAL, que es lo
+// que deja intactas las posiciones de las otras diez: sin ella, las dos caras de un movimiento
+// dividido salen con la misma fecha, el mismo consecutivo y la misma descripción, y contra el
+// estado de cuenta se leen como un duplicado.
 func TestOrdenDeColumnasDelDetalle(t *testing.T) {
 	t.Parallel()
 	quiere := []string{
@@ -20,6 +25,7 @@ func TestOrdenDeColumnasDelDetalle(t *testing.T) {
 		"Concepto",
 		"Clasificación",
 		"Consecutivo largo",
+		"Reparto",
 	}
 	cols := columnasDetalle()
 	if len(cols) != len(quiere) {

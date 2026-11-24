@@ -22,7 +22,34 @@ import (
 // anticipos SOLO existen en colones —las tres consultas que los listan filtran `moneda = 'CRC'`—,
 // así que una factura en dólares no puede tener ninguno, y el service además lo impide al aplicar.
 // El día que haya anticipos en dólares, esto tiene que pasar a comparar `aa.moneda = d.moneda`.
-const netoAPagarSQL = `GREATEST(d.total - d.retencion - COALESCE((SELECT SUM(aa.monto_crc) FROM anticipo_aplicacion aa WHERE aa.factura_id = d.id AND aa.activo AND d.moneda = 'CRC'), 0), 0)`
+// netoAPagarSQL es lo que de verdad se le manda a pagar al banco: total − retención − anticipos.
+//
+// SIN el `AND d.moneda = 'CRC'` que llevaba hasta el 20-oct-2026 (hallazgo 3.8). Esa condición
+// evitaba el error peor —restarle colones a una factura en dólares— pero dejaba otro: una factura
+// en dólares con anticipo aplicado **se pagaba completa**, como si el anticipo no existiera. El
+// propio comentario del código lo reconocía.
+//
+// Ya no hace falta, porque ahora la guarda está donde corresponde: `AplicarAnticipo` exige que el
+// anticipo y la factura estén en la MISMA moneda, así que todo lo que hay en `anticipo_aplicacion`
+// es comparable con el total de su factura por construcción.
+//
+// `monto_crc` conserva su nombre aunque ahora pueda llevar dólares: son 17 referencias en
+// consultas para ganar claridad en un nombre, y el riesgo supera al beneficio. Queda dicho acá y
+// en el servicio que el importe está en la moneda de la factura.
+// Y resta los PAGOS PARCIALES (mig 0105). Esa resta es la que hace que el saldo sea, sin ninguna
+// lógica extra, lo que sale al banco en el próximo corte: la macro usa esta misma expresión.
+//
+// También es lo que permite que el segundo débito concilie. El primero llegó por 60.000 contra un
+// neto de 100.000 y dio MONTO_DIFERENTE; al registrarlo como parcial, el neto pasa a 40.000, y el
+// débito que venga por 40.000 calza exacto. Sin esta resta habría que inventar una comparación
+// aparte para el resto.
+const netoAPagarSQL = `GREATEST(d.total - d.retencion
+	- COALESCE((SELECT SUM(aa.monto_crc) FROM anticipo_aplicacion aa
+	            WHERE aa.factura_id = d.id AND aa.activo), 0)
+	- COALESCE((SELECT SUM(nc.monto) FROM cxp_nota_credito_aplicacion nc
+	            WHERE nc.factura_id = d.id AND nc.activo), 0)
+	- COALESCE((SELECT SUM(pp.monto) FROM pago_parcial pp
+	            WHERE pp.documento_id = d.id AND pp.activo), 0), 0)`
 
 // NetoAPagar devuelve el neto de un documento (mismo cálculo que el archivo de pago).
 func (r *pgRepository) NetoAPagar(ctx context.Context, empresaID, docID string) (string, error) {

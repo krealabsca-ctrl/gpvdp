@@ -38,6 +38,8 @@ import {
   useToast,
 } from "@/components/ui";
 import { bancosApi, type ParDuplicado } from "@/api/bancos";
+import { EnlaceManualPanel } from "@/features/bancos/components/EnlaceManualPanel";
+import { ReemisionesPanel } from "@/features/bancos/components/ReemisionesPanel";
 import { useEmpresaId } from "@/features/bancos/useEmpresaId";
 import { mensajeError } from "@/lib/apiError";
 import { formatFecha, formatMonto } from "@/lib/format";
@@ -154,6 +156,16 @@ export function DuplicadosPage() {
           ))}
         </CardContent>
       </Card>
+
+      {/* Las reemisiones van ENTRE los duplicados y los excluidos porque son el caso que ninguno de
+          los dos resolvía: el detector de arriba busca el mismo día con consecutivos distintos —lo
+          contrario de una reemisión— y la lista de abajo solo muestra el resultado. */}
+      <ReemisionesPanel />
+
+      {/* Y el enlace a mano va DESPUÉS de las reemisiones: es la salida para el par que el detector
+          de arriba no encontró, así que solo tiene sentido después de haber mirado lo que sí
+          encontró. Ponerlo antes invitaría a enlazar a mano lo que el sistema ya propone. */}
+      <EnlaceManualPanel />
 
       <Card>
         <CardHeader>

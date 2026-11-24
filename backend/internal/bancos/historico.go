@@ -413,7 +413,11 @@ func nombreDePartida(v string) string {
 func LeerHistorico(formateada, cruda Grid, date1904 bool) (LecturaHistorico, error) {
 	col, filaEnc := columnasHistorico(formateada)
 	if col == nil {
-		return LecturaHistorico{}, ErrHistoricoSinEncabezado
+		// El error DICE QUÉ ENCONTRÓ, no solo qué hacía falta. Con la frase fija, un banco nuevo
+		// que escribe «F. Movimiento» en vez de «Fecha» se veía igual que una hoja equivocada o
+		// que un archivo vacío, y las tres tienen arreglos distintos. Ver encabezado_diagnostico.go.
+		return LecturaHistorico{}, DiagnosticarEncabezado(formateada, "",
+			[]string{"una columna de fecha", "una de débito o crédito"})
 	}
 
 	lec := LecturaHistorico{Filas: make([]FilaHistorico, 0, 512), Errores: []ErrorFilaHistorico{}}

@@ -46,6 +46,7 @@ import { useClasificaciones, useConceptos } from "@/features/bancos/hooks";
 import { useTienePermiso } from "@/features/auth/permisos";
 import { CandadoDeContado } from "@/features/cxp/components/CandadoDeContado";
 import { CargarIBANPanel } from "@/features/cxp/components/CargarIBANPanel";
+import { ConvenioEnLotePanel } from "@/features/cxp/components/ConvenioEnLotePanel";
 import { GastoCombobox, type GastoElegido } from "@/features/cxp/components/GastoCombobox";
 import type { FiltrosProveedores, Proveedor, ProveedorInput } from "@/api/cxp";
 
@@ -304,6 +305,11 @@ export function ProveedoresPage() {
           línea de la macro. Va arriba del maestro porque hoy es el faltante que trancaba los pagos. */}
       {puedeEditarProveedores && <CargarIBANPanel />}
 
+      {/* El otro faltante medido en el maestro: 0 de 649 proveedores con el convenio marcado,
+          contra 3.565 facturas que declaran «contado». El panel muestra a cuáles les pasa; el
+          selector de la ficha sigue sirviendo para resolverlo de a uno. */}
+      <ConvenioEnLotePanel />
+
       {/* Alta / edición — se abre con el botón para mantener el área limpia. */}
       {mostrarForm && (
         <Card>
@@ -382,18 +388,27 @@ export function ProveedoresPage() {
                       al comprobante o al convenio?» es lo que vuelve inusable una pantalla.
                       Solo aparece en crédito: en contado las dos coinciden y no hay qué elegir. */}
                   <Select
-                    label="Cuando la factura y el convenio no coinciden, manda"
+                    label="A quién le creemos sobre este proveedor"
                     value={form.convenio_manda}
                     onChange={(e) => set("convenio_manda", e.target.value)}
                     options={[
-                      { value: "XML", label: "La factura (lo que declare el comprobante)" },
-                      { value: "PROVEEDOR", label: `El convenio (crédito a ${form.plazo_credito_dias || "0"} días)` },
+                      { value: "XML", label: "Al comprobante que manda" },
+                      {
+                        value: "PROVEEDOR",
+                        label: `A esta ficha (crédito a ${form.plazo_credito_dias || "0"} días)`,
+                      },
                     ]}
                   />
                   <p className="-mt-1 text-xs text-content-muted sm:col-span-2">
                     {form.convenio_manda === "PROVEEDOR"
-                      ? "Sus facturas nuevas vencerán según el plazo de arriba y se podrán pagar por banco, aunque el comprobante declare otro plazo o diga «contado»."
-                      : "Se usa lo que trae el comprobante. Si declara un plazo que no es el pactado —hay proveedores que ponen 90 días por defecto— o dice «contado» cuando en realidad es a crédito, elegí «El convenio»."}
+                      ? Number(form.plazo_credito_dias) > 0
+                        ? "Sus facturas nuevas vencerán a los días de arriba y NO nacerán trancadas, aunque el comprobante declare otro plazo o diga «contado». Esto no toca las que ya entraron."
+                        : // CON PLAZO 0 NO HAY CONVENIO QUE MANDE. Prometer «vencerán a los días de
+                          // arriba» con el plazo en cero sería prometer que vencen el día que se
+                          // emiten, y lo que hace el sistema es seguir tomando el vencimiento del
+                          // comprobante. El candado sí se levanta: son dos efectos distintos.
+                          "Sus facturas nuevas NO nacerán trancadas aunque el comprobante diga «contado». Como el plazo de arriba está en 0, el vencimiento lo sigue poniendo el comprobante: si tenés el plazo pactado, escribilo arriba. Esto no toca las que ya entraron."
+                      : "Se usa lo que trae el comprobante: si declara un plazo que no es el pactado —hay proveedores que ponen 90 días por defecto— vence cuando él diga, y si declara «contado» la factura nace trancada para pago por banco. Si este proveedor siempre declara contado y en realidad es a crédito, elegí «A esta ficha»."}
                   </p>
                 </>
               )}
@@ -599,9 +614,9 @@ export function ProveedoresPage() {
                         {p.convenio_manda === "PROVEEDOR" && (
                           <span
                             className="ml-1"
-                            title="El vencimiento sale de este plazo, no del que declare la factura"
+                            title="El vencimiento sale de este plazo, no del que declare la factura, y sus facturas no nacen trancadas aunque el comprobante diga «contado»"
                           >
-                            <Badge tone="accent">plazo del convenio</Badge>
+                            <Badge tone="accent">manda la ficha</Badge>
                           </span>
                         )}
                       </>

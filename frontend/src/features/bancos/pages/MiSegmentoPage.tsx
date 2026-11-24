@@ -464,27 +464,20 @@ export function MiSegmentoPage() {
               {/* Paginado ARRIBA de la tabla, como en la bandeja de CxP: el total tiene que verse
                   sin tener que bajar 200 filas. «Mostrando 1–200 de 2.108» es el dato que impide
                   que alguien concilie creyendo que vio todo. */}
+              {/* Sin leyenda al pie: acá el conteo del paginador y la suma de dinero miran el
+                  MISMO conjunto, porque el servidor ya dejó afuera lo que no suma. La que había
+                  explicaba una contradicción que ya no existe, y además afirmaba «importación
+                  revertida» también sobre lo que la tesorera sacó a mano por duplicado. */}
               {data && data.movimientos.total > 0 && (
-                <div className="flex flex-col gap-1">
-                  <Paginador
-                    total={data.movimientos.total}
-                    pagina={pagina}
-                    porPagina={porPagina}
-                    enPantalla={items.length}
-                    onPagina={setPagina}
-                    onPorPagina={setPorPagina}
-                    etiqueta={data.movimientos.total === 1 ? "movimiento" : "movimientos"}
-                  />
-                  {/* El conteo del paginador cuenta los excluidos y la suma de dinero no. Si no se
-                      dice, los dos números se contradicen en silencio después de revertir una
-                      importación. */}
-                  {data.movimientos.totales.excluidos > 0 && (
-                    <p className="text-xs text-content-muted">
-                      {data.movimientos.totales.excluidos} de esos movimientos vienen de una
-                      importación revertida: se muestran, pero no suman.
-                    </p>
-                  )}
-                </div>
+                <Paginador
+                  total={data.movimientos.total}
+                  pagina={pagina}
+                  porPagina={porPagina}
+                  enPantalla={items.length}
+                  onPagina={setPagina}
+                  onPorPagina={setPorPagina}
+                  etiqueta={data.movimientos.total === 1 ? "movimiento" : "movimientos"}
+                />
               )}
 
               {query.isError ? (
@@ -535,30 +528,15 @@ export function MiSegmentoPage() {
                               {m.descripcion || "—"}
                             </span>
                           </TD>
-                          {/* Un movimiento excluido (importación duplicada revertida) se muestra
-                              pero no suma. Tachado y con la etiqueta, en la fila misma: el aviso
-                              general de arriba dice cuántos son, no cuáles, y sin esto el monto se
-                              lee como plata que entró. */}
-                          <TD
-                            className={
-                              m.incluido
-                                ? "text-right tabular-nums whitespace-nowrap"
-                                : "text-right tabular-nums whitespace-nowrap text-content-muted"
-                            }
-                          >
-                            <span className={m.incluido ? undefined : "line-through"}>
-                              {formatMonto(m.credito)}
-                            </span>
-                            {/* La etiqueta va DEBAJO del monto, no al lado. Con el badge en la
-                                misma línea el número se corre a la izquierda y deja de alinearse
-                                con los de las demás filas: la columna queda con huecos y comparar
-                                montos en diagonal —que es como se revisa una lista— se vuelve
-                                imposible. Debajo, los números siguen cuadrados a la derecha. */}
-                            {!m.incluido && (
-                              <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-wide text-pendiente">
-                                no suma
-                              </span>
-                            )}
+                          {/* Acá no hay fila tachada ni etiqueta «no suma»: lo revertido y lo
+                              excluido a mano YA NO LLEGA a esta pantalla. El servidor lo deja
+                              fuera (`SoloIncluidos` en MiSegmento, 22-oct-2026), así que todo lo
+                              que se lista suma, y el total del paginador vuelve a cuadrar con la
+                              suma de dinero. Revertir una carga es trabajo de quien administra
+                              Bancos y se ve allá; acá era una fila con la que no se podía hacer
+                              nada y dos números que se contradecían. */}
+                          <TD className="text-right tabular-nums whitespace-nowrap">
+                            {formatMonto(m.credito)}
                           </TD>
                           {/* La celda MUESTRA la partida contra la que quedó marcado el movimiento, y
                               avisar pasa a ser un botón al lado. Antes solo estaba la acción: con dos

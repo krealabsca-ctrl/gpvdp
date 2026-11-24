@@ -68,8 +68,12 @@ func (h *Handler) ClasificarMasivo(c *gin.Context) {
 }
 
 type prioridadMasivaRequest struct {
-	IDs       []string `json:"ids" validate:"required,min=1,max=500,dive,uuid"`
-	Prioridad string   `json:"prioridad" validate:"omitempty,oneof=A AA"`
+	IDs []string `json:"ids" validate:"required,min=1,max=500,dive,uuid"`
+	// SIN `oneof` desde la mig 0121: los códigos los crea el usuario, así que una lista escrita acá
+	// rechazaría toda prioridad nueva —y lo haría con el mensaje del validador, que habla de tags y
+	// no de prioridades—. Quien decide si el código vale es el servicio, contra el catálogo de la
+	// empresa, y su error sí puede nombrar cuáles son las válidas.
+	Prioridad string `json:"prioridad"`
 }
 
 // PrioridadMasiva POST /v1/cxp/documentos/prioridad-masiva — AA (sí o sí) / A / "" (normal).

@@ -87,6 +87,12 @@ type LotePago struct {
 	// justo el momento en que hay que decirlo: si el corte salió de 9 y se pidieron 10, la décima no
 	// se paga y sin esta lista nadie se entera hasta que el proveedor reclama.
 	Fuera []DocumentoFueraDelLote `json:"fuera,omitempty"`
+	// El corte (mig 0104). Vacíos mientras el lote siga ABIERTO, que es como están los 39 que ya
+	// existen. `ReaperturaMotivo` guarda la ÚLTIMA reapertura; la historia completa está en la
+	// bitácora.
+	CerradoEn        string `json:"cerrado_en,omitempty"`
+	ReabiertoEn      string `json:"reabierto_en,omitempty"`
+	ReaperturaMotivo string `json:"reapertura_motivo,omitempty"`
 }
 
 // DocumentoFueraDelLote es una factura que se pidió cortar y quedó afuera, con su razón.

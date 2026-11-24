@@ -30,7 +30,13 @@ import {
   TR,
   useToast,
 } from "@/components/ui";
-import { componerPeriodo, etiquetaPeriodo, formatFecha, partesPeriodo } from "@/lib/format";
+import {
+  componerPeriodo,
+  etiquetaPeriodo,
+  formatFecha,
+  formatTipoCambio,
+  partesPeriodo,
+} from "@/lib/format";
 import { mensajeError, esStatus } from "@/lib/apiError";
 import { usePeriodoActivo } from "@/app/PeriodoProvider";
 import {
@@ -196,7 +202,7 @@ export function TipoCambioPage() {
                       Valor congelado
                     </p>
                     <p className="text-lg font-semibold tabular-nums text-content">
-                      {tcQuery.data?.valor_congelado ?? "—"}
+                      {formatTipoCambio(tcQuery.data?.valor_congelado)}
                     </p>
                   </div>
                 </div>
@@ -254,7 +260,7 @@ export function TipoCambioPage() {
                   {tcQuery.data!.cotizaciones.map((c) => (
                     <TR key={`${c.fecha}-${c.fuente}`}>
                       <TD className="tabular-nums">{formatFecha(c.fecha)}</TD>
-                      <TD className="text-right tabular-nums">{c.valor}</TD>
+                      <TD className="text-right tabular-nums">{formatTipoCambio(c.valor)}</TD>
                       <TD>
                         <Badge tone={c.fuente === "BCCR" ? "accent" : "neutral"}>{c.fuente}</Badge>
                       </TD>

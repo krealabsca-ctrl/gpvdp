@@ -11,6 +11,7 @@
  */
 
 import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { Link } from "react-router-dom";
 import {
   Badge,
   Button,
@@ -54,6 +55,14 @@ export function ImportadorPage() {
   // natural_key marcadas para EXCLUIR de la confirmación.
   const [excluidas, setExcluidas] = useState<Set<string>>(new Set());
   const [dragOver, setDragOver] = useState(false);
+  // El rechazo del archivo se queda EN LA PANTALLA, no en un toast (22-oct-2026).
+  //
+  // El toast mide 384 px y dura cinco segundos. Desde que el importador explica por qué no
+  // reconoció un archivo —qué hoja leyó, qué filas encontró, qué columnas entendió y dónde se
+  // agrega un banco nuevo—, el mensaje pasa de seis palabras a varias líneas: en un toast no se
+  // alcanza a leer, y menos a copiar de ahí los nombres de las columnas para configurar el
+  // formato. Que es justamente para lo que sirve.
+  const [rechazo, setRechazo] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const cuentaOptions = useMemo(
@@ -74,6 +83,9 @@ export function ImportadorPage() {
     setArchivo(f);
     setPreview(null);
     setExcluidas(new Set());
+    // El rechazo anterior se va al elegir otro archivo: si se quedara, describiría un archivo que
+    // ya no es el que está cargado.
+    setRechazo("");
   }
 
   function onDrop(e: DragEvent<HTMLDivElement>) {
@@ -95,6 +107,7 @@ export function ImportadorPage() {
       toast.error("Seleccioná un archivo .xlsx.");
       return;
     }
+    setRechazo("");
     importar.mutate(
       { cuentaId, archivo },
       {
@@ -118,7 +131,12 @@ export function ImportadorPage() {
             `Preview de ${res.banco}: ${res.resumen.nuevas} nuevas, ${res.resumen.duplicados_reales} duplicados.`,
           );
         },
-        onError: (err) => toast.error(mensajeError(err)),
+        // Al bloque de la pantalla, no al toast: ver el comentario de `rechazo`. El toast queda
+        // como el aviso de que algo pasó —una línea— y el detalle se lee abajo con calma.
+        onError: (err) => {
+          setRechazo(mensajeError(err));
+          toast.error("No se pudo leer el archivo. El detalle está abajo.");
+        },
       },
     );
   }
@@ -230,6 +248,30 @@ export function ImportadorPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* POR QUÉ NO SE PUDO LEER EL ARCHIVO, en la pantalla y no en un toast.
+          Va JUSTO DEBAJO del botón «Previsualizar», que es donde está mirando quien acaba de
+          hacer clic. El mensaje trae qué hoja se leyó, qué filas encontró y dónde se agrega un
+          banco nuevo: con eso se corrige el archivo o se configura el formato, y para las dos
+          cosas hay que poder leerlo con calma. */}
+      {rechazo && (
+        <div className="rounded-lg border border-negativo/40 bg-negativo/5 p-4">
+          <p className="text-sm font-medium text-negativo">No se pudo leer este archivo</p>
+          <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-content">{rechazo}</p>
+          <div className="mt-3 flex flex-wrap gap-3 text-xs">
+            <Link to="/formatos" className="font-medium text-accent underline">
+              Ir a Formatos de banco →
+            </Link>
+            <button
+              type="button"
+              className="text-content-muted underline hover:text-content"
+              onClick={() => setRechazo("")}
+            >
+              Ocultar
+            </button>
+          </div>
+        </div>
+      )}
 
       {preview && <PreviewBlock preview={preview} excluidas={excluidas} onToggle={toggleExcluir} />}
 

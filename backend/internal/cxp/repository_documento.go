@@ -47,7 +47,20 @@ const documentoCols = `d.id::text, d.proveedor_id::text, COALESCE(p.nombre, ''),
 	COALESCE(mdoc.id::text, mrem.id::text, ''),
 	COALESCE(to_char(COALESCE(mdoc.fecha, mrem.fecha), 'YYYY-MM-DD'), ''),
 	COALESCE(cbx.alias, ''), COALESCE(bx.nombre, ''),
-	COALESCE(mdoc.debito::text, mrem.debito::text, ''),
+	-- LO QUE SE LE PAGÓ A ESTA FACTURA, sumando las caras si el movimiento se repartió.
+	--
+	-- No alcanza con leer el debito de mdoc: desde el 2-nov-2026 un débito enlazado se puede dividir
+	-- entre partidas —un pago a un proveedor cuyo gasto corresponde en parte a otra empresa del
+	-- grupo—, y entonces la fila del principal queda con MENOS de lo que salió del banco. Leerla
+	-- sola diría «esta factura se pagó con $2.565» cuando se pagó con $4.565.
+	--
+	-- Las partes no heredan el enlace, así que el id enlazado es siempre el del principal y basta
+	-- con sumarlo a sus hijos vivos. Sin reparto, la suma es el propio débito y nada cambia.
+	COALESCE((SELECT SUM(COALESCE(h.debito, 0))::text
+	            FROM movimiento_bancario h
+	           WHERE h.incluido
+	             AND (h.id = COALESCE(mdoc.id, mrem.id)
+	                  OR h.dividido_de = COALESCE(mdoc.id, mrem.id))), ''),
 	-- La remesa dentro de la que se fue esta factura, cuando el lote se cortó por proveedor. Es lo
 	-- que de verdad viaja al banco en ese caso, así que sin esto la pantalla muestra un código que
 	-- el estado de cuenta nunca va a traer.
@@ -115,6 +128,10 @@ const documentoFrom = `FROM documento_cxp d
 	LEFT JOIN comprobante_pago cpz ON cpz.documento_id = d.id AND cpz.tipo = 'COMPROBANTE'
 	LEFT JOIN comprobante_pago cfac ON cfac.documento_id = d.id AND cfac.tipo = 'FACTURA'
 	LEFT JOIN departamento dep ON dep.id = d.departamento_id
+	-- La prioridad configurable (mig 0121). Es LEFT y se cruza por (empresa, código) porque el
+	-- documento guarda el CÓDIGO, no un id: una factura con una prioridad ya retirada del catálogo
+	-- tiene que seguir apareciendo en la lista, solo que sin orden propio.
+	LEFT JOIN prioridad_cxp pr ON pr.empresa_id = d.empresa_id AND pr.codigo = d.prioridad
 	LEFT JOIN usuario uv ON uv.id = d.validado_depto_por
 	-- Quién declaró que la factura se pagó por fuera del banco (mig 0102). Es la mitad del rastro
 	-- que convierte esa afirmación en algo auditable: la otra mitad es el motivo.
@@ -222,7 +239,16 @@ func (r *pgRepository) CrearDocumento(ctx context.Context, empresaID string, in 
 		       --
 		       -- Con 'XML' (el default, y lo que el sistema hacía siempre) manda el comprobante y
 		       -- el plazo de la ficha solo se usa si el XML no trajo vencimiento.
+		       --
+		       -- PLAZO 0 NO ES UN CONVENIO (4-nov-2026). Un plazo_credito_dias en 0 es el valor por
+		       -- defecto de un campo que nadie llenó, no «vence el día de emisión»: 572 de las 573
+		       -- fichas en CONTADO lo tienen en 0. Sin este > 0, dejar una ficha en CRÉDITO para
+		       -- quitarle el candado del contado le ponía además vencimiento = emisión y tiraba el
+		       -- del comprobante — justo en las facturas que declaran contado pero vencen después
+		       -- (45 de 3.092, a 15,6 días en promedio), que son exactamente las que se liberan.
+		       -- Sin plazo pactado no hay nada que mande, así que gana el comprobante.
 		       CASE WHEN p.convenio_manda = 'PROVEEDOR' AND p.condicion_pago = 'CREDITO'
+		                 AND p.plazo_credito_dias > 0
 		            THEN $5::date + p.plazo_credito_dias
 		            ELSE COALESCE(NULLIF($15, '')::date,
 		                          CASE WHEN p.condicion_pago = 'CREDITO'
@@ -309,10 +335,15 @@ func (r *pgRepository) DocumentoPorClave(ctx context.Context, empresaID, clave s
 var ordenesDocumento = map[string]string{
 	// Default: lo más reciente primero.
 	"": "d.fecha_emision DESC, d.id",
-	// Bandeja: prioridad interna primero (AA, luego A), después lo que vence primero. Es la
-	// política del corte y por eso sigue siendo el orden con el que abre «Por pagar».
-	"vencimiento":      "CASE d.prioridad WHEN 'AA' THEN 0 WHEN 'A' THEN 1 ELSE 2 END, d.fecha_vencimiento ASC NULLS LAST, d.id",
-	"vencimiento_desc": "CASE d.prioridad WHEN 'AA' THEN 0 WHEN 'A' THEN 1 ELSE 2 END, d.fecha_vencimiento DESC NULLS LAST, d.id",
+	// Bandeja: prioridad interna primero, después lo que vence primero. Es la política del corte y
+	// por eso sigue siendo el orden con el que abre «Por pagar».
+	//
+	// EL ORDEN SALE DEL CATÁLOGO (mig 0121), no de un CASE con los códigos escritos: con las
+	// prioridades configurables, una creada después no estaría en ese CASE y caería al fondo junto
+	// con las que nadie priorizó —en una lista cuyo propósito es decir qué se paga primero—.
+	// `NULLS LAST` deja abajo lo que no tiene prioridad, que es el comportamiento de siempre.
+	"vencimiento":      "pr.orden DESC NULLS LAST, d.fecha_vencimiento ASC NULLS LAST, d.id",
+	"vencimiento_desc": "pr.orden DESC NULLS LAST, d.fecha_vencimiento DESC NULLS LAST, d.id",
 	// Por fecha de vencimiento PURA, sin la prioridad adelante: para ver la cola real del mes.
 	"vence":      "d.fecha_vencimiento ASC NULLS LAST, d.id",
 	"vence_desc": "d.fecha_vencimiento DESC NULLS LAST, d.id",
@@ -325,9 +356,10 @@ var ordenesDocumento = map[string]string{
 	// que se ve haría parecer que el orden está roto.
 	"monto":      "d.total_crc ASC, d.id",
 	"monto_desc": "d.total_crc DESC, d.id",
-	// Prioridad sola: AA, A, sin prioridad. El desempate por vencimiento mantiene útil la lista.
-	"prioridad":      "CASE d.prioridad WHEN 'AA' THEN 0 WHEN 'A' THEN 1 ELSE 2 END, d.fecha_vencimiento ASC NULLS LAST, d.id",
-	"prioridad_desc": "CASE d.prioridad WHEN 'AA' THEN 2 WHEN 'A' THEN 1 ELSE 0 END, d.fecha_vencimiento ASC NULLS LAST, d.id",
+	// Prioridad sola, de la más alta a la más baja según el catálogo. El desempate por vencimiento
+	// mantiene útil la lista.
+	"prioridad":      "pr.orden DESC NULLS LAST, d.fecha_vencimiento ASC NULLS LAST, d.id",
+	"prioridad_desc": "pr.orden ASC NULLS FIRST, d.fecha_vencimiento ASC NULLS LAST, d.id",
 	"departamento":   "dep.nombre ASC NULLS LAST, d.fecha_vencimiento ASC NULLS LAST, d.id",
 	"gasto":          "c.nombre ASC NULLS LAST, cl.nombre ASC NULLS LAST, d.id",
 }
@@ -476,10 +508,16 @@ func (r *pgRepository) ListarDocumentos(ctx context.Context, empresaID string, f
 		args = append(args, f.Fase)
 		conds = append(conds, fmt.Sprintf("(%s) = $%d", faseBandejaSQL, len(args)))
 	}
-	// Prioridad de pago. La condición sale de un mapa cerrado, nunca del valor que llegó: así un
-	// filtro desconocido no entra a la consulta y tampoco recorta en silencio.
-	if cond := prioridadesFiltro[f.Prioridad]; cond != "" {
-		conds = append(conds, cond)
+	// Prioridad de pago (mig 0121: ahora son configurables). El código que llega del cliente viaja
+	// como PARÁMETRO, nunca interpolado; los valores especiales —sin, con, urgentes— arman su
+	// propia condición y «urgentes» la resuelve contra el catálogo de la empresa del documento.
+	if plantilla, params := condicionPrioridad(f.Prioridad); plantilla != "" {
+		if len(params) > 0 {
+			args = append(args, params...)
+			conds = append(conds, fmt.Sprintf(plantilla, len(args)))
+		} else {
+			conds = append(conds, plantilla)
+		}
 	}
 	where := strings.Join(conds, " AND ")
 

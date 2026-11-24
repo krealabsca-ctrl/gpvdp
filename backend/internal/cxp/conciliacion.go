@@ -114,6 +114,11 @@ type PagoRow struct {
 	Descripcion string `json:"descripcion"` // la huella, para conciliar contra el banco
 	Consecutivo string `json:"consecutivo"`
 	DocumentoID string `json:"documento_id"`
+	// Proveedor identifica al beneficiario. No viaja al cliente ni al archivo del banco: está
+	// para que el AVISO DE PAGO (ver aviso_pago.go) se arme desde estas mismas filas y no desde
+	// una consulta propia, que es lo que haría que el papel y la transferencia pudieran diferir.
+	// Agrupar por nombre en su lugar juntaría a dos proveedores homónimos en una sola línea.
+	ProveedorID string `json:"-"`
 	// Referencia es la mitad LEGIBLE de la descripción cuando el pago no corresponde a una sola
 	// factura: «REM 0043-07». Vacía en el pago por factura, donde esa mitad se deriva del
 	// consecutivo («FC 000487»). Ver descripcionDePago.

@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -16,11 +17,15 @@ type Handler struct {
 	svc   *Service
 	audit *shared.Audit
 	log   *zap.Logger
+	// intentos frena la fuerza bruta contra el login. Ver intentos.go: cuenta por (correo, origen)
+	// y por origen, nunca por correo solo, para que nadie pueda dejar afuera a una persona real
+	// escribiendo mal su contraseña cinco veces.
+	intentos *Intentos
 }
 
 // NewHandler construye el handler de auth.
 func NewHandler(svc *Service, audit *shared.Audit, log *zap.Logger) *Handler {
-	return &Handler{svc: svc, audit: audit, log: log}
+	return &Handler{svc: svc, audit: audit, log: log, intentos: NuevoIntentos()}
 }
 
 // ---- DTOs (contrato HTTP) ----
@@ -95,6 +100,21 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
+	// EL FRENO VA ANTES DE COMPROBAR LA CONTRASEÑA, no después.
+	//
+	// Si se verificara primero, cada intento bloqueado seguiría costando un hash de contraseña
+	// —que es caro a propósito— y el control contra la fuerza bruta se convertiría en la forma de
+	// consumir el servidor. Acá un intento bloqueado no toca ni la base.
+	origen := c.ClientIP()
+	if bloqueado, falta := h.intentos.Bloqueado(req.Email, origen); bloqueado {
+		h.log.Warn("login bloqueado por demasiados intentos",
+			zap.String("origen", origen), zap.Duration("falta", falta))
+		httpx.Abort(c, http.StatusTooManyRequests, httpx.CodeCredenciales,
+			"demasiados intentos fallidos desde este equipo; probá de nuevo en "+
+				strconv.Itoa(int(falta.Minutes())+1)+" minutos")
+		return
+	}
+
 	res, err := h.svc.Login(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
 		switch {
@@ -102,6 +122,10 @@ func (h *Handler) Login(c *gin.Context) {
 			// Mismo 429/mensaje que el límite por IP: no se confirma que la cuenta exista.
 			httpx.Abort(c, http.StatusTooManyRequests, httpx.CodeDemasiadosIntentos, "demasiados intentos, probá de nuevo en unos minutos")
 		case errors.Is(err, ErrCredenciales):
+			// Se cuenta SOLO el fallo de credenciales. Un usuario inactivo no es un ataque —la
+			// cuenta existe y alguien la desactivó— y un error interno es culpa nuestra: contarlos
+			// dejaría afuera a gente por problemas que no causó.
+			h.intentos.Fallo(req.Email, origen)
 			httpx.Abort(c, http.StatusUnauthorized, httpx.CodeCredenciales, "credenciales inválidas")
 		case errors.Is(err, ErrUsuarioInactivo):
 			httpx.Abort(c, http.StatusForbidden, httpx.CodeSinPermiso, "usuario inactivo")
@@ -110,6 +134,9 @@ func (h *Handler) Login(c *gin.Context) {
 		}
 		return
 	}
+
+	// Entró: se limpia el contador de esta pareja (nunca el del origen; ver intentos.go).
+	h.intentos.Exito(req.Email, origen)
 
 	uid := res.Usuario.ID
 	h.audit.Registrar(c.Request.Context(), shared.Evento{

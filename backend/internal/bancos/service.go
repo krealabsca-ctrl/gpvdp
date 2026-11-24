@@ -1,7 +1,6 @@
 package bancos
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -44,6 +43,9 @@ type CuentaListItem struct {
 	// Activo: una cuenta desactivada conserva sus movimientos y su historia, pero no
 	// aparece en el importador ni en los filtros.
 	Activo bool `json:"activo"`
+	// EsReserva: la cuenta guarda fondos reservados (mig 0122). Lo que se paga desde acá sale
+	// del banco igual, pero no entra en el flujo normal del cronograma de pago.
+	EsReserva bool `json:"es_reserva"`
 }
 
 // MovimientoPreview es una línea normalizada + su clasificación de duplicado, para la UI.
@@ -131,6 +133,12 @@ type Repository interface {
 	NaturalKeysExistentes(ctx context.Context, empresaID string, keys []string) (map[string]bool, error)
 	ConfirmarConMovimientos(ctx context.Context, empresaID, cuentaID, importacionID, moneda string, movs []MovimientoParaInsertar) (int, error)
 	SetCuentaIBANSiVacio(ctx context.Context, empresaID, cuentaID, iban string) error
+
+	// Formatos de banco configurables (mig 0108). El importador los prueba ANTES que los seis
+	// que vienen en el código; con la tabla vacía se comporta exactamente como siempre.
+	FormatosDeBanco(ctx context.Context, empresaID string, soloActivos bool) ([]FormatoBanco, error)
+	GuardarFormatoBanco(ctx context.Context, empresaID string, f FormatoBanco, usuarioID string) (FormatoBanco, error)
+	BorrarFormatoBanco(ctx context.Context, empresaID, id string) error
 
 	// Revertir una CARGA entera (mig 0085). La unidad es la importación, no la fecha: es la única
 	// forma de sacar de los libros lo que se cargó mal el 21 sin tocar lo que quedó bien el 20.
@@ -295,6 +303,10 @@ type Repository interface {
 	AplicarClasificacionesEnBloque(ctx context.Context, empresaID string, asigs []AsignacionClasif) (int, error)
 	MovimientosPlantillaClasif(ctx context.Context, empresaID, desde, hasta string, soloSinClasificar bool, limite int) ([]MovimientosParaPlantilla, error)
 	SeriePorPartida(ctx context.Context, empresaID, desde, hasta string) ([]TendenciaPartida, error)
+	// CarteraPendiente: lo que se debe a proveedores, partido en vencido y por vencer. El flujo
+	// proyectado lo informa APARTE de la proyección: es un stock que se arrastra, no un flujo
+	// del mes que viene, y sumarlo haría que el próximo mes pareciera catastrófico.
+	CarteraPendiente(ctx context.Context, empresaID string) (vencido, porVencer decimal.Decimal, err error)
 	// SerieDiariaPorPartida: el día a día de unas partidas concretas dentro del rango de meses.
 	SerieDiariaPorPartida(ctx context.Context, empresaID, desde, hasta string, clasificaciones []string) ([]SerieDiariaPartida, error)
 	// Dimensiones del gasto (departamento y sede) y presupuesto por departamento.
@@ -315,6 +327,22 @@ type Repository interface {
 	GastoPorDimension(ctx context.Context, empresaID, desde, hasta, agruparPor string) ([]GastoDimension, error)
 	PartidasDeDimension(ctx context.Context, empresaID, desde, hasta, agruparPor, dimID string) ([]GastoPartidaDimension, error)
 	PresupuestoDelRango(ctx context.Context, empresaID, desde, hasta string) ([]PresupuestoLinea, error)
+
+	// Presupuesto de INGRESO (mig 0116): la otra mitad de la meta. Va en el mismo repositorio que
+	// el de gasto porque el resultado presupuestado los resta, y leerlos de dos lugares distintos
+	// sería la forma más fácil de que cada mitad use un criterio propio.
+	MetasDeIngreso(ctx context.Context, empresaID, desde, hasta string) ([]MetaIngreso, error)
+	GuardarMetaIngreso(ctx context.Context, empresaID, clasifID, periodo, monto, nota, usuarioID string) error
+	BorrarMetaIngreso(ctx context.Context, empresaID, clasifID, periodo string) error
+	IngresoRealPorLinea(ctx context.Context, empresaID, desde, hasta string) ([]FilaIngreso, error)
+	IngresoYGastoReal(ctx context.Context, empresaID, desde, hasta string) (decimal.Decimal, decimal.Decimal, error)
+	IngresoHistorico(ctx context.Context, empresaID, desde, hasta string) ([]FilaIngreso, error)
+	NaturalezaDeClasificacion(ctx context.Context, empresaID, clasifID string) (string, error)
+
+	// Outlook del año: la tercera columna. Por MES y no acumulado, porque el ritmo se saca de los
+	// meses CERRADOS y un total del año no permite distinguirlos.
+	RealPorMesDelAnio(ctx context.Context, empresaID string, anio int) (map[string][2]decimal.Decimal, error)
+	MetasPorMesDelAnio(ctx context.Context, empresaID string, anio int) (map[string][2]decimal.Decimal, error)
 	GuardarPresupuesto(ctx context.Context, empresaID, deptoID, clasifID, periodo, monto, nota, usuarioID string) error
 	BorrarPresupuesto(ctx context.Context, empresaID, deptoID, clasifID, periodo string) error
 	CalendarioDiario(ctx context.Context, empresaID, periodo string) ([]DiaCalendario, error)
@@ -335,6 +363,15 @@ type Repository interface {
 	CerrarPeriodo(ctx context.Context, empresaID string, anio, mes, noIdentificados int, usuarioID string) error
 	PeriodoCerrado(ctx context.Context, empresaID string, anio, mes int) (bool, error)
 
+	// Reemisiones del banco (mig 0118): el mismo hecho que vuelve a entrar otro día con el mismo
+	// consecutivo. El sistema propone candidatos; enlazar y deshacer son decisiones de una persona.
+	CandidatosReemision(ctx context.Context, empresaID string, diasMax int) ([]CandidatoReemision, error)
+	Reemisiones(ctx context.Context, empresaID string) ([]Reemision, error)
+	DatosParaReemision(ctx context.Context, empresaID, vigenteID, salienteID string) (datosDeMovimiento, datosDeMovimiento, error)
+	DependenciasDelMovimiento(ctx context.Context, empresaID, movID string) ([]DependenciaDeMovimiento, error)
+	EnlazarReemision(ctx context.Context, empresaID, vigenteID, salienteID, motivo, motivoExclusion, usuarioID string, heredar bool) (bool, error)
+	DeshacerReemision(ctx context.Context, empresaID, vigenteID string) error
+
 	// Saldos diarios y checklist de carga (Tanda 1: tesorería)
 	SaldosDelDia(ctx context.Context, empresaID, fecha string) ([]SaldoDelDia, string, error)
 	SerieSaldos(ctx context.Context, empresaID, fecha string, dias int) ([]PuntoSaldo, error)
@@ -344,6 +381,12 @@ type Repository interface {
 	// Huella Bancos↔CxP (barrido de pagos)
 	MovimientosConHuella(ctx context.Context, empresaID, prefijo, importacionID string) ([]MovimientoConHuella, error)
 	EnlazarPagoCxP(ctx context.Context, empresaID, movimientoID, documentoID, conceptoID, clasificacionID string) (bool, bool, error)
+	// MovimientoEnlazable lee el débito que una persona eligió desde el arqueo de excepción y
+	// comprueba, en el WHERE, que todavía se pueda enlazar (mig 0104).
+	MovimientoEnlazable(ctx context.Context, empresaID, movimientoID string) (MovimientoEnlazable, error)
+	// Deshacer el enlace: leer a qué apunta el movimiento y limpiarlo.
+	EnlaceDelMovimiento(ctx context.Context, empresaID, movimientoID string) (EnlaceDelMovimiento, error)
+	LimpiarEnlacePago(ctx context.Context, empresaID, movimientoID string) (int64, error)
 	// EnlazarPagoRemesa: el movimiento pagó una REMESA (varias facturas de un proveedor), no una
 	// factura suelta. Columnas distintas y excluyentes en la base (CHECK de la migración 0089).
 	EnlazarPagoRemesa(ctx context.Context, empresaID, movimientoID, remesaID, conceptoID, clasificacionID string) (bool, bool, error)
@@ -407,7 +450,7 @@ func (s *Service) Preview(ctx context.Context, empresaID, cuentaID, nombre strin
 	if err != nil {
 		return PreviewResult{}, err
 	}
-	res, err := parseArchivo(archivo)
+	res, err := parseArchivo(archivo, s.adaptadoresConfigurados(ctx, empresaID))
 	if err != nil {
 		return PreviewResult{}, err
 	}
@@ -445,7 +488,7 @@ func (s *Service) PreviewExistente(ctx context.Context, empresaID, importacionID
 	if err != nil {
 		return PreviewResult{}, err
 	}
-	res, err := parseArchivo(archivo)
+	res, err := parseArchivo(archivo, s.adaptadoresConfigurados(ctx, empresaID))
 	if err != nil {
 		return PreviewResult{}, err
 	}
@@ -491,7 +534,7 @@ func (s *Service) Confirmar(ctx context.Context, empresaID, importacionID string
 	if err != nil {
 		return 0, err
 	}
-	res, err := parseArchivo(archivo)
+	res, err := parseArchivo(archivo, s.adaptadoresConfigurados(ctx, empresaID))
 	if err != nil {
 		return 0, err
 	}
@@ -648,14 +691,34 @@ func seleccionarParaInsertar(cuentaID, moneda string, res ParseResult, existing,
 	return out
 }
 
-func parseArchivo(archivo []byte) (ParseResult, error) {
-	g, err := CargarGrid(bytes.NewReader(archivo))
+// parseArchivo lee el archivo con el primer adaptador que lo reconozca.
+//
+// `extras` son los formatos configurados de la empresa (mig 0108) y se prueban ANTES que los seis
+// del código. Con `extras` vacío —el estado de toda instalación hasta que alguien configure el
+// primero— esto es exactamente lo que hacía antes.
+func parseArchivo(archivo []byte, extras []Adapter) (ParseResult, error) {
+	// Se lee con `gridDeArchivoConHojas` y no con `CargarGrid` —que hace lo mismo— para saber QUÉ
+	// hoja se leyó y cuáles había. Elegir la hoja equivocada del libro es la causa más común del
+	// rechazo, y es la única que se descarta sin abrir el Excel. Con la preferida vacía toma la
+	// primera, igual que antes.
+	g, hoja, hojas, err := gridDeArchivoConHojas(archivo, "")
 	if err != nil {
 		return ParseResult{}, err
 	}
-	a, err := Detectar(g)
+	a, err := DetectarCon(g, extras)
 	if err != nil {
-		return ParseResult{}, err
+		// NO se devuelve `ErrNoReconocido` pelado (22-oct-2026). Así salía «formato de banco no
+		// reconocido» y nada más: el usuario no sabía qué se había leído, ni en qué fila, ni que
+		// desde la mig 0108 un banco nuevo se agrega desde una pantalla. El lugar donde alguien
+		// descubre que necesita «Formatos de banco» es justamente este rechazo.
+		//
+		// `Base` conserva ErrNoReconocido para que `errors.Is` lo siga encontrando: lo único que
+		// cambia es cuánto dice el mensaje.
+		diag := DiagnosticarEncabezado(g, hoja, nil)
+		diag.Hojas = hojas
+		diag.Base = ErrNoReconocido
+		diag.Salida = "Si es un banco que el sistema todavía no conoce, agregalo en Bancos › Formatos de banco"
+		return ParseResult{}, diag
 	}
 	return a.Parsea(g)
 }

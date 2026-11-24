@@ -23,6 +23,7 @@ import {
   type FiltrosProveedores,
   type ModoPago,
   type NivelCatalogo,
+  type PrioridadInput,
   type ProveedorInput,
   type TipoFactura,
   type CierrePeriodo,
@@ -51,7 +52,12 @@ export function useTodosProveedores() {
   return useQuery({
     queryKey: queryKeys.cxp.proveedoresTodos(empresaId),
     queryFn: () => cxpApi.todosProveedores(),
-    staleTime: 60_000,
+    // Cinco minutos, igual que los catálogos de Bancos (10-nov-2026). Esta lista son DOS
+    // peticiones de 649 proveedores y se usa para llenar selectores: con un minuto, bastaba
+    // navegar a otra pantalla y volver para volver a traerlos enteros. Quien crea o edita un
+    // proveedor NO espera esos cinco minutos —`invalidarProveedores` refresca en el acto—, así
+    // que lo único que esto alarga es el refresco de un cambio hecho por OTRA persona.
+    staleTime: 5 * 60_000,
   });
 }
 
@@ -100,6 +106,77 @@ export function useDesactivarProveedor() {
 }
 
 // ---------------------------------------------------------------------------
+// El convenio del proveedor, en lote (21-oct-2026)
+// ---------------------------------------------------------------------------
+
+/**
+ * Proveedores que declaran «contado» en sus comprobantes.
+ *
+ * `soloPendientes` deja fuera a los que ya tienen las dos condiciones puestas: son los que no
+ * tienen nada que hacer, y mezclarlos obliga a buscar los que sí entre los que no.
+ */
+export function useCandidatosConvenio(soloPendientes = true, habilitado = true) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: queryKeys.cxp.candidatosConvenio(empresaId, soloPendientes),
+    queryFn: () => cxpApi.candidatosConvenio(soloPendientes),
+    enabled: !!empresaId && habilitado,
+  });
+}
+
+/**
+ * Pone el convenio a varios proveedores de una vez.
+ *
+ * NO libera nada: liberar lo que ya está trancado es una decisión aparte, con su propio monto a la
+ * vista y su propio motivo.
+ */
+export function useMarcarConvenioMasivo() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { ids: string[]; convenio: "XML" | "PROVEEDOR"; pasarACredito?: boolean }) =>
+      cxpApi.marcarConvenioMasivo(vars.ids, vars.convenio, vars.pasarACredito ?? true),
+    onSuccess: () => {
+      invalidarProveedores(qc, empresaId);
+      void qc.invalidateQueries({ queryKey: queryKeys.cxp.candidatosConvenioRaiz(empresaId) });
+    },
+  });
+}
+
+/**
+ * Cuántas facturas y por cuánto se liberarían, para verlo ANTES de decidir.
+ *
+ * Va como mutación y no como query a propósito: es un POST (la lista de proveedores no cabe en la
+ * URL) y la cifra se pide en el momento de decidir. Una cifra cacheada acá sería una cifra vieja
+ * sosteniendo una firma.
+ */
+export function useBloqueadasDeProveedores() {
+  return useMutation({
+    mutationFn: (ids: string[]) => cxpApi.bloqueadasDeProveedores(ids),
+  });
+}
+
+/**
+ * Levanta el candado de todo lo bloqueado de esos proveedores.
+ *
+ * Invalida la raíz de CxP entera, sin acotar por empresa: las facturas liberadas cambian de cara
+ * en la Bandeja, en el tablero y en el panel de la ficha, y este módulo arrastra dos formas de
+ * clave (`["cxp", recurso, empresaId]` y `["cxp", empresaId, recurso]`), así que el único prefijo
+ * que alcanza a las dos es el del módulo. Invalidar de más solo cuesta un refetch; dejar una de
+ * esas tres pantallas con la cifra vieja es peor que no haber liberado.
+ */
+export function useLiberarDeProveedores() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { ids: string[]; motivo: string }) =>
+      cxpApi.liberarDeProveedores(vars.ids, vars.motivo),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["cxp"] });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Departamentos (catálogo)
 // ---------------------------------------------------------------------------
 
@@ -108,7 +185,9 @@ export function useDepartamentos(soloActivos = false) {
   return useQuery({
     queryKey: queryKeys.cxp.departamentos(empresaId, soloActivos),
     queryFn: () => cxpApi.departamentos(soloActivos),
-    staleTime: 60_000,
+    // Mismo criterio que los proveedores: es un catálogo, se invalida explícitamente al crearlo o
+    // editarlo (`invalidarDepartamentos`), y los departamentos de una empresa no cambian solos.
+    staleTime: 5 * 60_000,
   });
 }
 
@@ -675,6 +754,80 @@ export function useReporteLote(loteId: string) {
   });
 }
 
+/** El cronograma de pago: lo que se manda ANTES de pagar, con los bancos de donde sale el dinero. */
+export function useCronograma(loteId: string) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: [...queryKeys.cxp.lotes(empresaId), "cronograma", loteId],
+    queryFn: () => cxpApi.cronograma(loteId),
+    enabled: loteId !== "",
+  });
+}
+
+/**
+ * Las tres decisiones que se toman al armar el cronograma: el tipo de cambio, de qué cuenta sale
+ * cada pago, y qué se paga por fuera.
+ *
+ * Las tres invalidan SOLO el cronograma de este corte: las tres cambian la cascada, pero ninguna
+ * toca la Bandeja ni el tablero, y recargarlos haría parpadear listas de cientos de filas mientras
+ * alguien asigna una cuenta.
+ */
+export function useDecisionesDelCronograma(loteId: string) {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  const clave = [...queryKeys.cxp.lotes(empresaId), "cronograma", loteId];
+  const invalidar = () => void qc.invalidateQueries({ queryKey: clave });
+
+  const tipoCambio = useMutation({
+    mutationFn: (v: string) => cxpApi.guardarTCCronograma(loteId, v),
+    onSuccess: invalidar,
+  });
+  const cuenta = useMutation({
+    mutationFn: (v: { proveedorId: string; cuentaId: string }) =>
+      cxpApi.asignarCuentaDePago(loteId, v.proveedorId, v.cuentaId),
+    onSuccess: invalidar,
+  });
+  const porFuera = useMutation({
+    mutationFn: (v: { proveedorId: string; porFuera: boolean }) =>
+      cxpApi.marcarPorFuera(loteId, v.proveedorId, v.porFuera),
+    onSuccess: invalidar,
+  });
+  return { tipoCambio, cuenta, porFuera };
+}
+
+/** El papel de respaldo del corte: el cuadro por moneda y las firmas de quién hizo cada paso. */
+export function useAvisoDeCorte(loteId: string) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: [...queryKeys.cxp.lotes(empresaId), "aviso", loteId],
+    queryFn: () => cxpApi.avisoDeCorte(loteId),
+    enabled: loteId !== "",
+  });
+}
+
+/**
+ * Corrige el concepto o la glosa de un proveedor en el corte.
+ *
+ * Invalida el aviso y no toda la rama de cortes: lo único que cambió es el texto de una fila de
+ * este papel, y recargar la Bandeja entera por eso haría parpadear una lista de cien facturas
+ * mientras alguien corrige una palabra.
+ */
+export function useGuardarTextoAviso(loteId: string) {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { proveedorId: string; concepto?: string; documentos?: string }) =>
+      cxpApi.guardarTextoAviso(loteId, vars.proveedorId, {
+        concepto: vars.concepto,
+        documentos: vars.documentos,
+      }),
+    onSuccess: () =>
+      void qc.invalidateQueries({
+        queryKey: [...queryKeys.cxp.lotes(empresaId), "aviso", loteId],
+      }),
+  });
+}
+
 /** El catálogo de gasto con la nomenclatura de pago de cada rubro. */
 export function useNomenclaturas() {
   const empresaId = useEmpresaId();
@@ -927,10 +1080,63 @@ export function usePrioridadMasiva() {
   const empresaId = useEmpresaId();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { ids: string[]; prioridad: "" | "A" | "AA" }) =>
+    // `prioridad` es un CÓDIGO del catálogo (mig 0121), no una lista cerrada: enumerarla acá
+    // volvería a necesitar un despliegue para agregar una prioridad nueva.
+    mutationFn: (vars: { ids: string[]; prioridad: string }) =>
       cxpApi.prioridadMasiva(vars.ids, vars.prioridad),
-    // La prioridad AA sale en el tablero (compromiso ineludible del corte): refrescarlo.
+    // Las prioridades urgentes salen en el tablero (compromiso ineludible del corte): refrescarlo.
     onSuccess: (_data, vars) => invalidarDocs(qc, empresaId, vars.ids),
+  });
+}
+
+/**
+ * El catálogo de prioridades de la empresa (mig 0121).
+ *
+ * Lo usa la Bandeja para dibujar las insignias y el selector, así que va con `cxp.ver` y no con el
+ * permiso de configurarlo. Cinco minutos de frescura como el resto de los catálogos: cambiarlo
+ * invalida la clave en el acto, y las prioridades de una empresa no cambian solas.
+ */
+export function usePrioridades(soloActivas = false) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: [...queryKeys.cxp.raiz(empresaId), "prioridades", soloActivas],
+    queryFn: () => cxpApi.prioridades(soloActivas),
+    staleTime: 5 * 60_000,
+  });
+}
+
+function invalidarPrioridades(qc: QueryClient, empresaId: string) {
+  void qc.invalidateQueries({ queryKey: [...queryKeys.cxp.raiz(empresaId), "prioridades"] });
+  // El tablero cuenta las urgentes, y la Bandeja las ordena: las dos cambian si se toca el
+  // catálogo, aunque no se haya movido ninguna factura.
+  void qc.invalidateQueries({ queryKey: queryKeys.cxp.raiz(empresaId) });
+}
+
+export function useCrearPrioridad() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: PrioridadInput) => cxpApi.crearPrioridad(input),
+    onSuccess: () => invalidarPrioridades(qc, empresaId),
+  });
+}
+
+export function useActualizarPrioridad() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; input: PrioridadInput }) =>
+      cxpApi.actualizarPrioridad(vars.id, vars.input),
+    onSuccess: () => invalidarPrioridades(qc, empresaId),
+  });
+}
+
+export function useEliminarPrioridad() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => cxpApi.eliminarPrioridad(id),
+    onSuccess: () => invalidarPrioridades(qc, empresaId),
   });
 }
 
@@ -1246,5 +1452,88 @@ export function useComprobanteRecepcion(id: string | null) {
     queryFn: () => cxpApi.comprobanteRecepcion(id!),
     enabled: !!id,
     staleTime: Infinity,
+  });
+}
+
+// ── Lo que baja el neto: notas de crédito y pagos parciales (migs 0105-0106) ───────────────
+
+/**
+ * Invalida todo lo que cambia cuando el neto de una factura se mueve.
+ *
+ * Son más claves de las que parece: el neto aparece en el detalle, en TODO listado de la Bandeja,
+ * en el saldo y —si la factura entró a un corte— en el total del lote. Dejar una afuera hace que
+ * dos pantallas muestren cifras distintas para la misma factura, que es peor que no mostrar nada.
+ */
+function invalidarNeto(qc: QueryClient, empresaId: string, facturaId: string) {
+  invalidarDocs(qc, empresaId);
+  void qc.invalidateQueries({ queryKey: queryKeys.cxp.documento(empresaId, facturaId) });
+  void qc.invalidateQueries({ queryKey: ["cxp", "saldo", empresaId, facturaId] });
+  void qc.invalidateQueries({ queryKey: ["cxp", "notas-factura", empresaId, facturaId] });
+  void qc.invalidateQueries({ queryKey: ["cxp", "notas-disponibles", empresaId] });
+  void qc.invalidateQueries({ queryKey: queryKeys.cxp.arqueo(empresaId) });
+}
+
+export function useSaldoDeFactura(facturaId: string | undefined) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: ["cxp", "saldo", empresaId, facturaId ?? ""],
+    queryFn: () => cxpApi.saldoDeFactura(facturaId!),
+    enabled: !!facturaId,
+  });
+}
+
+export function useNotasDeCreditoDisponibles(proveedorId: string | undefined) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: ["cxp", "notas-disponibles", empresaId, proveedorId ?? ""],
+    queryFn: () => cxpApi.notasDeCredito(proveedorId!),
+    enabled: !!proveedorId,
+  });
+}
+
+export function useNotasDeFactura(facturaId: string | undefined) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: ["cxp", "notas-factura", empresaId, facturaId ?? ""],
+    queryFn: () => cxpApi.notasDeFactura(facturaId!),
+    enabled: !!facturaId,
+  });
+}
+
+export function useAplicarNotaCredito() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; notaId: string; monto: string }) =>
+      cxpApi.aplicarNotaCredito(v.id, v.notaId, v.monto),
+    onSuccess: (_d, v) => invalidarNeto(qc, empresaId, v.id),
+  });
+}
+
+export function useReversarNotaCredito() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; aplicacionId: string }) => cxpApi.reversarNotaCredito(v.aplicacionId),
+    onSuccess: (_d, v) => invalidarNeto(qc, empresaId, v.id),
+  });
+}
+
+export function useRegistrarPagoParcial() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; movimientoId: string; monto: string; motivo: string }) =>
+      cxpApi.registrarPagoParcial(v.id, v.movimientoId, v.monto, v.motivo),
+    onSuccess: (_d, v) => invalidarNeto(qc, empresaId, v.id),
+  });
+}
+
+export function useCobrarSaldo() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; motivo: string }) => cxpApi.cobrarSaldo(v.id, v.motivo),
+    onSuccess: (_d, v) => invalidarNeto(qc, empresaId, v.id),
   });
 }

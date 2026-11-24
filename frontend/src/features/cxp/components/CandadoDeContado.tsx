@@ -39,6 +39,13 @@ export function CandadoDeContado({ proveedorId }: { proveedorId: string }) {
   const [abierto, setAbierto] = useState(false);
   const [motivo, setMotivo] = useState("");
   const [excluidas, setExcluidas] = useState<Set<string>>(new Set());
+  /**
+   * Que las PRÓXIMAS de este proveedor no nazcan bloqueadas. MARCADA por defecto (decisión del
+   * Director Financiero, 4-nov-2026): si se llegó a liberar facturas de un proveedor es porque su
+   * condición declarada está mal, y eso no cambia de una factura a otra. Desmarcarla es decir
+   * «esto es una excepción».
+   */
+  const [configurar, setConfigurar] = useState(true);
 
   const q = useQuery({
     queryKey: ["cxp", empresaId, "bloqueadas", proveedorId],
@@ -50,13 +57,21 @@ export function CandadoDeContado({ proveedorId }: { proveedorId: string }) {
   const elegidas = facturas.filter((f) => !excluidas.has(f.documento_id));
 
   const liberar = useMutation({
-    mutationFn: () => candadoApi.liberar(proveedorId, elegidas.map((f) => f.documento_id), motivo),
+    mutationFn: () =>
+      candadoApi.liberar(proveedorId, elegidas.map((f) => f.documento_id), motivo, configurar),
     onSuccess: (r) => {
       const fallaron = Object.keys(r.no_se_pudo).length;
       if (r.liberadas.length > 0) {
         toast.success(
           `${r.liberadas.length} factura(s) liberada(s)` + (fallaron > 0 ? ` · ${fallaron} no se pudo` : ""),
         );
+        // EL CAMBIO DE LA FICHA SE ANUNCIA APARTE. Gobierna todas las facturas futuras del
+        // proveedor —no solo las que se acaban de liberar— y mezclarlo en el mismo aviso que
+        // «3 liberadas» lo volvería un detalle. El texto lo arma el servidor: distingue entre
+        // haberla configurado y encontrarla ya configurada.
+        if (r.proveedor_configurado && r.que_se_configuro) {
+          toast.info(r.que_se_configuro);
+        }
       } else {
         toast.info("No se liberó ninguna. Volvé a abrir la lista.");
       }
@@ -81,10 +96,14 @@ export function CandadoDeContado({ proveedorId }: { proveedorId: string }) {
           <p className="text-sm font-medium text-pendiente">
             🔒 {facturas.length} factura(s) de este proveedor no se pueden pagar por banco
           </p>
+          {/* EL TEXTO ANTERIOR ACONSEJABA MAL: decía «marcar manda el convenio arriba arregla las
+              próximas», y eso SOLO no alcanza — la regla exige además que la condición de pago sea
+              CRÉDITO, y 573 de 649 proveedores están en CONTADO. Quien seguía el consejo veía
+              nacer la siguiente factura igual de trancada. Ahora el ajuste lo hace la liberación. */}
           <p className="mt-0.5 text-xs text-content-muted">
             El comprobante las declaró de contado, así que nacieron bloqueadas para no pagarlas dos
-            veces (pudieron salir ya por caja chica). Marcar «manda el convenio» arriba arregla las
-            próximas, pero no éstas.
+            veces (pudieron salir ya por caja chica). Al liberarlas podés dejar configurado que las
+            próximas de este proveedor no nazcan así.
           </p>
         </div>
         <Badge tone="pendiente">{formatMoneda(String(total), "CRC")}</Badge>
@@ -132,6 +151,29 @@ export function CandadoDeContado({ proveedorId }: { proveedorId: string }) {
             Queda guardado en cada factura con tu nombre y la fecha. Es lo que permite reconstruir
             después quién autorizó el pago, así que escribí la razón de verdad.
           </p>
+
+          {/* QUE NO HAYA QUE VOLVER A HACER ESTO. Liberar arreglaba lo que ya estaba y nada más:
+              la factura siguiente del mismo proveedor nacía trancada igual, y había que acordarse
+              de ir a la ficha a cambiar DOS campos que en ninguna parte decían que gobernaban el
+              candado. Marcada por defecto: si se llegó hasta acá es porque la condición que
+              declara el emisor está mal, y eso no cambia de una factura a otra. */}
+          <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border bg-surface p-2">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={configurar}
+              onChange={(e) => setConfigurar(e.target.checked)}
+            />
+            <span className="text-xs">
+              <span className="font-medium text-content">
+                Y que las próximas de este proveedor no nazcan bloqueadas
+              </span>
+              <span className="block text-content-muted">
+                Deja la ficha en crédito y con «manda el convenio», que es lo que de verdad
+                desactiva el candado. Desmarcalo si esta liberación es una excepción.
+              </span>
+            </span>
+          </label>
 
           <div className="flex flex-wrap items-center gap-2">
             <Button

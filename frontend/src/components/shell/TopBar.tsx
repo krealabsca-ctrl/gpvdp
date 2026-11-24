@@ -1,5 +1,5 @@
-import { useLocation } from "react-router-dom";
-import { Bell, ChevronRight, Search } from "lucide-react";
+import { Link, useLocation } from "react-router-dom";
+import { Bell, ChevronRight, CircleHelp, Search } from "lucide-react";
 import { useAuth } from "@/features/auth/AuthContext";
 import { Button, Select, useToast } from "@/components/ui";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -56,6 +56,17 @@ export function TopBar() {
           className="hidden h-9 w-40 lg:block"
         />
         <EmpresaSwitcher />
+        {/* El manual, a un clic desde cualquier pantalla. Va en la barra de arriba y no colgando
+            de un módulo porque la ayuda no es de nadie en particular: quien se traba en Nómina no
+            tiene por qué entrar a Bancos para encontrarla. Sin permiso, por lo mismo. */}
+        <Link
+          to="/ayuda"
+          aria-label="Ayuda y manual de uso"
+          title="Ayuda y manual de uso"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-content-muted transition-colors hover:bg-surface-muted hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          <CircleHelp className="h-[18px] w-[18px]" aria-hidden />
+        </Link>
         <button
           type="button"
           onClick={() => toast.info("No tenés notificaciones nuevas.")}

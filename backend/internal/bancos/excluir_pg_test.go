@@ -40,7 +40,17 @@ var tablasExcluir = []string{
 	// La huella CxP→Bancos trae el gasto de lo que se pagó (13-oct-2026), así que la lista de
 	// movimientos toca las tablas de CxP. Sin ellas el esquema temporal da «relation does not
 	// exist», que es lo correcto: el pool solo ve este esquema.
-	"proveedor", "lote_pago", "remesa_pago", "documento_cxp",
+	"proveedor", "lote_pago", "remesa_pago", "documento_cxp", "prioridad_cxp",
+	// Enlazar una reemisión del banco (mig 0118) pregunta por TODO lo que puede colgar del
+	// movimiento que saldría de los libros, en una sola consulta. Si una de estas faltara, el
+	// esquema temporal daría «relation does not exist» —que es lo correcto, el pool solo ve este
+	// esquema— en vez de dejar pasar un enlace que rompe un cobro o un abono.
+	"periodo_cierre", "cobro_cxc", "cxc_planilla_movimiento", "pago_parcial",
+	"pago_aplicado_externo", "responsabilidad_periodo",
+	// La precisión del tipo de cambio (mig 0119) se comprueba contra las columnas de verdad: el
+	// redondeo a seis decimales en Go no sirve de nada si la columna guarda cuatro, y PostgreSQL
+	// recorta en silencio en vez de fallar.
+	"tipo_cambio_cotizacion", "tipo_cambio_mes",
 }
 
 func baseDeExclusion(t *testing.T) *pgRepository {
@@ -338,9 +348,13 @@ func TestNoSeExcluyeUnMovimientoDeOtraEmpresa(t *testing.T) {
 
 // ── La guarda del enlace a CxP (16-oct-2026) ────────────────────────────────────────────────
 
-// `incluido` tiene tres escritores y durante un tiempo solo dos protegieron el enlace a CxP: la
-// reversa de la carga entera (BloqueosReversa.FacturasCxP) y la división (ErrDivisionConCxP).
-// Excluir suelto —el tercero, de la mig 0093— no miraba.
+// `incluido` tiene tres escritores y durante un tiempo solo uno protegía el enlace a CxP: la
+// reversa de la carga entera (BloqueosReversa.FacturasCxP). Excluir suelto —el tercero, de la
+// mig 0093— no miraba.
+//
+// Dividir era el otro guardián y dejó de serlo el 2-nov-2026, a propósito: repartir NO toca
+// `incluido` —las caras siguen en los libros y suman lo mismo—, así que nunca fue la clase de
+// daño que este test vigila.
 //
 // El daño lo describe el comentario de la reversa, que por eso bloquea: la factura queda CONCILIADA
 // contra plata que ya no está en los libros, y el barrido de huellas no puede volver a mirarla

@@ -22,20 +22,24 @@ import (
 	"github.com/gpvdp/erp/internal/auth"
 	"github.com/gpvdp/erp/internal/bancos"
 	"github.com/gpvdp/erp/internal/config"
+	"github.com/gpvdp/erp/internal/conta"
 	"github.com/gpvdp/erp/internal/correo"
 	"github.com/gpvdp/erp/internal/cxc"
 	"github.com/gpvdp/erp/internal/cxp"
 	"github.com/gpvdp/erp/internal/database"
+	"github.com/gpvdp/erp/internal/flujocaja"
 	"github.com/gpvdp/erp/internal/grupo"
 	"github.com/gpvdp/erp/internal/inventario"
 	"github.com/gpvdp/erp/internal/logging"
 	"github.com/gpvdp/erp/internal/nomina"
 	"github.com/gpvdp/erp/internal/plantillas"
 	"github.com/gpvdp/erp/internal/precios"
+	"github.com/gpvdp/erp/internal/ratios"
 	"github.com/gpvdp/erp/internal/rbac"
 	"github.com/gpvdp/erp/internal/seed"
 	"github.com/gpvdp/erp/internal/server"
 	"github.com/gpvdp/erp/internal/shared"
+	"github.com/gpvdp/erp/internal/sistema"
 	"github.com/gpvdp/erp/migrations"
 )
 
@@ -200,7 +204,35 @@ func run(migrateOnly bool) error {
 	// desde las membresías del usuario, así que no otorga acceso nuevo ni depende de ningún módulo.
 	grupoH := grupo.NewHandler(grupo.NewService(grupo.NewRepository(pool), logger), logger)
 
-	router := server.NewRouter(cfg, logger, authH, bancosH, cxpH, cxcH, nominaH, rbacH, plantillasH, correoH, inventarioH, grupoH, preciosH, rbacSvc)
+	// ── Los errores del sistema (mig 0107) ──
+	// Es a la vez el que ESCRIBE —desde el middleware, en cada 5xx y cada panic— y el que los
+	// sirve para consulta. Un solo servicio para los dos lados: si el que guarda y el que lee se
+	// separaran, nada garantizaría que lo que se muestra sea lo que se guardó.
+	sistemaSvc := sistema.NewService(sistema.NewRepository(pool), logger)
+	sistemaH := sistema.NewHandler(sistemaSvc, logger)
+	// Las consultas lentas del motor (mig 0120): lee `pg_stat_statements` para que «el sistema
+	// está lento» deje de ser una conjetura.
+	rendimientoH := sistema.NewHandlerRendimiento(
+		sistema.NewServiceRendimiento(sistema.NewRepositoryRendimiento(pool)), logger)
+
+	// ── Contabilidad · Fase 1: el plan de cuentas (mig 0109) ──
+	// No recibe ningún otro servicio a propósito: la contabilidad LEE lo que los demás módulos
+	// producen, y en esta fase todavía no lee nada. Bancos, CxP, CxC y nómina no la conocen.
+	contaH := conta.NewHandler(conta.NewService(conta.NewRepository(pool), audit, logger), logger)
+
+	// ── Flujo de caja a 13 semanas (mig 0114) ──
+	// Como `grupo`, es una VISTA: cruza bancos, CxP, CxC y nómina, y solo lee —salvo la política
+	// de caja, que es su propia decisión y su propia tabla—. Vive aparte para que se vea que
+	// cruza módulos y nadie meta por accidente una consulta así dentro de bancos.
+	flujoCajaH := flujocaja.NewHandler(
+		flujocaja.NewService(flujocaja.NewRepository(pool), audit, logger), logger)
+
+	// ── Ratios del ciclo de efectivo (mig 0115) ──
+	// Otra VISTA: cruza CxC y CxP y solo lee. DSO, DPO y el ciclo —lo primero que pregunta un
+	// banco o un due diligence, y lo que el sistema no tenía teniendo los datos adentro.
+	ratiosH := ratios.NewHandler(ratios.NewService(ratios.NewRepository(pool), logger), logger)
+
+	router := server.NewRouter(cfg, logger, authH, bancosH, cxpH, cxcH, nominaH, rbacH, plantillasH, correoH, inventarioH, grupoH, preciosH, sistemaH, rendimientoH, contaH, flujoCajaH, ratiosH, rbacSvc, estadoDelSistema{pool}, registroDeIncidentes{sistemaSvc})
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -441,6 +473,33 @@ func (c conciliadorCxP) ConciliarHuella(ctx context.Context, empresaID, descripc
 	}, nil
 }
 
+// DesconciliarPago: deshacer el enlace, para cuando se emparejó el débito equivocado.
+func (c conciliadorCxP) DesconciliarPago(ctx context.Context, empresaID, documentoID, remesaID, usuarioID, motivo string) (int, error) {
+	return c.svc.Desconciliar(ctx, empresaID, documentoID, remesaID, usuarioID, motivo)
+}
+
+// ConciliarDocumento: el enlace que elige una persona desde el arqueo de excepción.
+func (c conciliadorCxP) ConciliarDocumento(ctx context.Context, empresaID, documentoID, montoBanco, monedaBanco, usuarioID, motivo string) (bancos.ResultadoHuella, error) {
+	r, err := c.svc.ConciliarPorDocumento(ctx, empresaID, documentoID, montoBanco, monedaBanco, usuarioID, motivo)
+	if err != nil {
+		// El resultado viaja AUNQUE haya error: cuando el rechazo es por monto o por moneda, trae
+		// lo esperado y lo que trajo el banco, que es lo que la pantalla tiene que mostrar para que
+		// la persona entienda por qué no se enlazó.
+		return bancos.ResultadoHuella{
+			Veredicto: r.Veredicto, Huella: r.Huella, DocumentoID: r.DocumentoID,
+			Consecutivo: r.Consecutivo, Proveedor: r.Proveedor,
+			MontoEsperado: r.MontoEsperado, MontoBanco: r.MontoBanco, MonedaEsperada: r.MonedaEsperada,
+		}, err
+	}
+	return bancos.ResultadoHuella{
+		Veredicto: r.Veredicto, Huella: r.Huella,
+		DocumentoID: r.DocumentoID, Consecutivo: r.Consecutivo, Proveedor: r.Proveedor,
+		ConceptoID: r.ConceptoID, ClasificacionID: r.ClasificacionID,
+		MontoEsperado: r.MontoEsperado, MontoBanco: r.MontoBanco,
+		MonedaEsperada: r.MonedaEsperada, RemesaID: r.RemesaID, Facturas: r.Facturas,
+	}, nil
+}
+
 // cargasDeNomina satisface el puerto que declara `precios` para saber cuánto cuesta de verdad
 // una comisión.
 //
@@ -479,4 +538,62 @@ func (c cargasDeNomina) PorcentajePatronal(ctx context.Context, empresaID string
 		return decimal.Zero, err
 	}
 	return total.Add(ins), nil
+}
+
+// registroDeIncidentes satisface el puerto que declara `server` para guardar los errores.
+//
+// Es una traducción de tipos y nada más: `server` declara su propia forma del incidente para no
+// importar `sistema`, igual que hace con EstadoDelSistema. El adaptador vive acá, donde los dos
+// paquetes ya se conocen.
+type registroDeIncidentes struct{ svc *sistema.Service }
+
+func (r registroDeIncidentes) Registrar(ctx context.Context, in server.IncidenteRegistrado) {
+	r.svc.Registrar(ctx, sistema.Incidente{
+		Referencia: in.Referencia,
+		EmpresaID:  in.EmpresaID,
+		UsuarioID:  in.UsuarioID,
+		Metodo:     in.Metodo,
+		Ruta:       in.Ruta,
+		Estado:     in.Estado,
+		Operacion:  in.Operacion,
+		Detalle:    in.Detalle,
+		Panico:     in.Panico,
+		Traza:      in.Traza,
+	})
+}
+
+// estadoDelSistema satisface el puerto que declara `server` para `/readyz`.
+//
+// Vive acá y no dentro de `server` por la misma razón que los demás adaptadores: el router no
+// tiene por qué conocer pgx, y así la verificación se puede cambiar —o doblar en una prueba— sin
+// tocar el servidor.
+type estadoDelSistema struct{ pool *pgxpool.Pool }
+
+func (e estadoDelSistema) Ping(ctx context.Context) error { return e.pool.Ping(ctx) }
+
+// Esquema lee la versión aplicada y la marca de migración a medias.
+//
+// Si la tabla no existe todavía, no es un error del chequeo: es una base sin migrar, y eso se
+// informa como versión 0 y «sucia», porque servir con un esquema inexistente no es estar listo.
+func (e estadoDelSistema) Esquema(ctx context.Context) (int64, bool, error) {
+	var version int64
+	var sucio bool
+	err := e.pool.QueryRow(ctx, `SELECT version, dirty FROM schema_migrations`).Scan(&version, &sucio)
+	if err != nil {
+		return 0, true, nil
+	}
+	return version, sucio, nil
+}
+
+// HayEmpresas comprueba que la siembra inicial se haya completado.
+//
+// Sin empresas, entrar es imposible —el ingreso exige elegir una— y el sistema queda instalado y
+// sin poder usarse. Pasó de verdad: la siembra fallaba en silencio desde la migración 0067 y el
+// arranque seguía adelante. Ver internal/seed.
+func (e estadoDelSistema) HayEmpresas(ctx context.Context) (bool, error) {
+	var hay bool
+	if err := e.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM empresa)`).Scan(&hay); err != nil {
+		return false, err
+	}
+	return hay, nil
 }
