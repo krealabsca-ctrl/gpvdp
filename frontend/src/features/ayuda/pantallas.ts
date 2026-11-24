@@ -46,6 +46,28 @@ export const AYUDA_POR_PANTALLA: AyudaDePantalla[] = [
       "«Falta un movimiento» levanta el aviso a Finanzas con la fecha y el monto que esperabas.",
     ],
   },
+  // Las dos de abajo son para gente de FUERA de Finanzas —jefes de área, gerencias—, que entra
+  // a una sola pantalla y no conoce el resto del sistema. Son las que más necesitan el «?».
+  {
+    ruta: "/mi-presupuesto",
+    queEs: "Cómo va el gasto de tu área este mes, contra lo que tiene presupuestado.",
+    puntos: [
+      "El alcance va por persona: ves las áreas de las que sos responsable y ninguna otra.",
+      "Si no hay presupuesto cargado, igual ves lo gastado, pero sin semáforo: no hay contra qué compararlo. Lo carga quien administra el presupuesto.",
+      "Un mes a medio clasificar consume menos de lo que consumió. Si el aviso dice que falta clasificar, el porcentaje todavía va a subir.",
+      "No muestra movimientos del banco: es el total de tu área, no el detalle de cada pago.",
+    ],
+  },
+  {
+    ruta: "/mi-ingreso",
+    queEs: "Cuánto entró por tus partidas de cobro este mes, contra la meta.",
+    puntos: [
+      "El alcance va por persona y por partida: ves tus canales de cobro y ninguno más.",
+      "Acá superar la meta es lo bueno: la diferencia en verde es a favor, en rojo es lo que falta.",
+      "Si no hay meta declarada, ves lo que entró sin nada contra qué compararlo. La declara Finanzas en el presupuesto de ingreso.",
+      "Un depósito que nadie clasificó todavía no aparece en ninguna partida. Si esperabas uno y no está, puede estar sin clasificar.",
+    ],
+  },
   {
     ruta: "/analisis",
     queEs: "Cada partida mes a mes contra su propia historia: qué se movió, cuánto pesa y qué explica el cambio.",

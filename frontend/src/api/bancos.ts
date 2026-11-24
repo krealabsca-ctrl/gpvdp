@@ -1158,6 +1158,33 @@ export interface GastoMes {
 export type EstadoControl = "SIN_PRESUPUESTO" | "EN_RANGO" | "ALERTA" | "EXCEDIDO";
 
 /** Un departamento con su presupuesto y su gasto real, ya comparados. */
+/** Un área de la que la persona es responsable (mig 0124). */
+export interface AreaDelUsuario {
+  departamento_id: string;
+  departamento: string;
+  /** TITULAR o SUPLENTE: un suplente que ve el mismo número tiene que saber que lo ve como tal. */
+  rol: string;
+}
+
+/**
+ * «Mi presupuesto»: el control recortado a las áreas de quien lo abre.
+ *
+ * Los totales son de SUS áreas, no de la empresa, y el gasto sin dueño NO viaja: es plata de toda
+ * la empresa y mostrársela a un jefe de área sería mostrarle lo ajeno.
+ */
+export interface MiPresupuesto {
+  desde: string;
+  hasta: string;
+  areas: AreaDelUsuario[];
+  filas: FilaControl[];
+  total_presupuesto: string;
+  total_gasto: string;
+  meses: SaludMes[];
+  aviso: string;
+  /** Cuántas de sus áreas no tienen monto definido. Es lo primero que ve casi todo el mundo. */
+  sin_presupuesto: number;
+}
+
 export interface FilaControl {
   departamento_id: string;
   departamento: string;
@@ -2485,6 +2512,66 @@ export const bancosApi = {
     });
   },
 
+  /** El control recortado a MIS áreas. Endpoint propio: no es `/bancos/control` con un filtro. */
+  miPresupuesto(desde: string, hasta: string, umbral: string): Promise<MiPresupuesto> {
+    return apiFetch<MiPresupuesto>("/bancos/mi-presupuesto", {
+      method: "GET",
+      query: { desde, hasta, umbral },
+    });
+  },
+
+  /** El ingreso recortado a MIS partidas (mig 0125). Permiso aparte del de gasto. */
+  miIngreso(desde: string, hasta: string): Promise<MiIngreso> {
+    return apiFetch<MiIngreso>("/bancos/mi-ingreso", {
+      method: "GET",
+      query: { desde, hasta },
+    });
+  },
+
+  /** Qué meses tiene cargados la empresa. Sin permiso de módulo: lo usa la barra de todas las pantallas. */
+  periodos(): Promise<PeriodosDeLaEmpresa> {
+    return apiFetch<PeriodosDeLaEmpresa>("/bancos/periodos", { method: "GET" });
+  },
+
+  /** El desglose de MI área: en qué partidas se fue el gasto y en qué meses. */
+  misPartidasDeArea(
+    desde: string,
+    hasta: string,
+    departamentoId: string,
+    umbral: string,
+  ): Promise<GastoPartidaDimension[]> {
+    return apiFetch<GastoPartidaDimension[]>("/bancos/mi-presupuesto/partidas", {
+      method: "GET",
+      query: { desde, hasta, departamento_id: departamentoId, umbral },
+    });
+  },
+
+  /** El mes a mes de MIS partidas de ingreso. */
+  miSerieDeIngreso(desde: string, hasta: string): Promise<MiIngresoSerie> {
+    return apiFetch<MiIngresoSerie>("/bancos/mi-ingreso/serie", {
+      method: "GET",
+      query: { desde, hasta },
+    });
+  },
+
+  /** «Qué ve» una persona: sus áreas de gasto y sus partidas de ingreso. */
+  alcanceDeUsuario(usuarioId: string): Promise<AlcanceDelUsuario> {
+    return apiFetch<AlcanceDelUsuario>(`/bancos/usuarios/${usuarioId}/alcance`, { method: "GET" });
+  },
+  /** Reemplaza las áreas. OJO: también define quién valida las facturas del área en CxP. */
+  guardarAreasDeUsuario(usuarioId: string, areas: AreaAsignada[]): Promise<AlcanceDelUsuario> {
+    return apiFetch<AlcanceDelUsuario>(`/bancos/usuarios/${usuarioId}/alcance/areas`, {
+      method: "PUT",
+      json: { areas },
+    });
+  },
+  /** Reemplaza las partidas de ingreso. Solo acepta partidas de naturaleza INGRESO. */
+  guardarPartidasDeUsuario(usuarioId: string, clasificacionIds: string[]): Promise<AlcanceDelUsuario> {
+    return apiFetch<AlcanceDelUsuario>(`/bancos/usuarios/${usuarioId}/alcance/partidas`, {
+      method: "PUT",
+      json: { clasificacion_ids: clasificacionIds },
+    });
+  },
   control(
     desde: string,
     hasta: string,
@@ -2977,6 +3064,81 @@ export interface ControlIngreso {
   suma_de_lineas: string;
   sin_repartir: string;
   lineas_sin_meta: number;
+  aviso?: string;
+}
+
+/**
+ * Qué meses tiene cargados la empresa, para que los selectores dejen de inventarlos.
+ *
+ * `con_movimiento` puede tener huecos, y el hueco es información: ese mes no se cargó. No se
+ * rellena, porque ofrecer un mes vacío en Exportar da un Excel vacío.
+ */
+export interface PeriodosDeLaEmpresa {
+  con_movimiento: string[];
+  /** Extremos. Vacíos si la empresa no tiene nada cargado todavía. */
+  primero: string;
+  ultimo: string;
+}
+
+/** El mes a mes de las partidas de la persona. Reusa el cálculo de Análisis y tendencias. */
+export interface MiIngresoSerie {
+  desde: string;
+  hasta: string;
+  partidas: TendenciaPartida[];
+}
+
+/** Un área que se le asigna a una persona. Sin rol se guarda como TITULAR. */
+export interface AreaAsignada {
+  departamento_id: string;
+  rol: "TITULAR" | "SUPLENTE";
+}
+
+/**
+ * «Qué ve» una persona, en un solo lugar.
+ *
+ * El permiso dice qué PANTALLA abre; esto dice qué DATOS alcanza. Por eso vienen los dos
+ * permisos: asignar el alcance y olvidar el permiso deja a alguien mirando un 403 sin saber por
+ * qué, y es el error que se comete la primera vez.
+ */
+export interface AlcanceDelUsuario {
+  usuario_id: string;
+  nombre: string;
+  email: string;
+  /** Gobierna «Mi presupuesto» Y la validación de facturas del área en CxP. */
+  areas: AreaDelUsuario[];
+  /** Gobierna «Mi ingreso». Solo partidas de naturaleza INGRESO. */
+  partidas: PartidaDelUsuario[];
+  puede_ver_presupuesto: boolean;
+  puede_ver_ingreso: boolean;
+}
+
+/** Una partida de ingreso asignada a la persona (mig 0125). */
+export interface PartidaDelUsuario {
+  clasificacion_id: string;
+  clasificacion: string;
+  concepto: string;
+}
+
+/**
+ * «Mi presupuesto», mitad de INGRESO: lo que entró en MIS partidas.
+ *
+ * El eje es la partida y no el departamento porque las partidas de ingreso son canales de cobro
+ * —Datáfonos, Depósito de Clientes, Cobrador Limón—, no áreas, y ninguna tiene departamento.
+ *
+ * Los totales son de SUS partidas y el ingreso sin clasificar NO viaja: es justo el que alguien
+ * busca cuando espera un depósito.
+ */
+export interface MiIngreso {
+  desde: string;
+  hasta: string;
+  /** Van siempre, aunque la partida no haya facturado: «no aparece» ≠ «no facturó». */
+  partidas: PartidaDelUsuario[];
+  lineas: FilaIngreso[];
+  meta_total: string;
+  real_total: string;
+  /** real − meta. POSITIVO ES BUENO, al revés del gasto. */
+  diferencia: string;
+  sin_meta: number;
   aviso?: string;
 }
 

@@ -124,8 +124,18 @@ func TestCatalogoSinDuplicados(t *testing.T) {
 	// servidor muestra el SQL del sistema por dentro —nombres de tablas y cómo se cruzan—, que es
 	// lo mismo que `admin.incidentes` oculta al usuario común: por eso lleva permiso propio y
 	// crítico, y no viaja con el resto de Administración.
-	if len(Catalogo) != 107 {
-		t.Errorf("catálogo tiene %d permisos, se esperaban 107", len(Catalogo))
+	// → 108 con la aprobación del corte (13-nov-2026, mig 0123). Va SEPARADO de `cxp.tesoreria`
+	// porque la segregación de funciones es la razón de ser de ese paso: quien arma el corte no
+	// puede aprobarlo, y con un solo permiso para las dos cosas el control no existe. Es el mismo
+	// criterio por el que `cxp.liberar_pago` no viaja con `cxp.aprobar`.
+	// → 109 con «Mi presupuesto» (16-nov-2026, mig 0124). Alcance por USUARIO y no por rol, que
+	// es lo que lo distingue de `bancos.ver_mi_segmento`: lo pidió así el Director Financiero
+	// porque un jefe de área es una persona, no un perfil.
+	// → 110 con la mitad de INGRESO de «Mi presupuesto» (16-nov-2026, mig 0125). Va separado del
+	// de gasto porque «en algunos casos aplica solo para gastos, en otras ingresos también»: con
+	// un permiso único no habría forma de dar uno sin el otro.
+	if len(Catalogo) != 110 {
+		t.Errorf("catálogo tiene %d permisos, se esperaban 110", len(Catalogo))
 	}
 }
 

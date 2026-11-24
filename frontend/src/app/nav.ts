@@ -109,6 +109,13 @@ export const MODULES: NavModule[] = [
       // módulo, y `primeraRutaAccesible` recorre esta lista en orden para aterrizarlos. Si
       // estuviera al final, el equipo de Asociaciones entraría a «Sin acceso» y de ahí se iría.
       { label: "Mi partida", descripcion: "Lo que entró en tu segmento", to: "/mi-segmento", icon: Landmark, permiso: "bancos.ver_mi_segmento" },
+      // Misma razón que la de arriba: para un jefe de área es la única página del módulo, y por
+      // eso va segunda. El alcance acá es por USUARIO (`departamento_validador`), no por rol.
+      { label: "Mi presupuesto", descripcion: "Cómo va el gasto de tu área", to: "/mi-presupuesto", icon: Landmark, permiso: "bancos.ver_mi_presupuesto" },
+      // Hermana de la de arriba, con PERMISO PROPIO: «en algunos casos aplica solo para gastos,
+      // pero en otras ingresos también». Pantalla aparte porque el eje es la PARTIDA y no el
+      // área: las partidas de ingreso son canales de cobro y ninguna tiene departamento.
+      { label: "Mi ingreso", descripcion: "Cuánto entró por tus partidas", to: "/mi-ingreso", icon: Landmark, permiso: "bancos.ver_mi_ingreso" },
       { label: "Dashboard", descripcion: "KPIs del período", to: "/", end: true, icon: LayoutDashboard, permiso: "bancos.ver_dashboard" },
       { label: "Clasificar", descripcion: "Bandeja: motor, traslados y reglas", to: "/clasificar", icon: ClipboardCheck, permiso: "bancos.ver_clasificar", anchoCompleto: true },
       // Nombres de PÁGINA, distintos de los módulos futuros «Tesorería» y «Conciliación

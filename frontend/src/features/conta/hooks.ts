@@ -123,6 +123,22 @@ export function useDeshacerMapeo() {
   });
 }
 
+/**
+ * Sube el .xlsx del mapeo lleno (12-nov-2026).
+ *
+ * Va acá y no suelto en el panel por la misma razón que los dos de arriba: así la pantalla
+ * depende de un hook del módulo que las pruebas pueden mockear, en vez de arrastrar la sesión y
+ * el cliente de consultas a cada prueba que la monte.
+ */
+export function useImportarMapeoXLSX() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (archivo: File) => contaApi.importarMapeoXLSX(archivo),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.conta.raiz(empresaId) }),
+  });
+}
+
 // ── Fase 3A · la contrapartida bancaria y los libros (mig 0111) ──────────────────────────────
 
 /** Las cuentas bancarias con su cuenta contable y la sugerencia por IBAN. */

@@ -12,11 +12,12 @@ import { useState } from "react";
 
 import { Badge, Button, LoadingState, ErrorState } from "@/components/ui";
 import { formatFecha, formatMoneda } from "@/lib/format";
+import { AprobacionDelCortePanel } from "@/features/cxp/components/AprobacionDelCortePanel";
 import { AvisoDeCortePanel } from "@/features/cxp/components/AvisoDeCortePanel";
 import { CronogramaPanel } from "@/features/cxp/components/CronogramaPanel";
 import { mensajeError } from "@/lib/apiError";
 import { cxpApi } from "@/api/cxp";
-import { useReporteLote } from "@/features/cxp/hooks";
+import { useLotes, useReporteLote } from "@/features/cxp/hooks";
 import { useAuth } from "@/features/auth/AuthContext";
 import { abrirReporteLoteImprimible } from "@/features/cxp/components/ReporteLoteImprimible";
 
@@ -30,6 +31,11 @@ export function ReporteLotePanel({
   onCerrar: () => void;
 }) {
   const q = useReporteLote(loteId);
+  // El lote sale del listado que la pantalla ya tiene cargado: el panel de aprobación necesita su
+  // ESTADO y sus firmas, y pedir el mismo lote por separado sería una consulta de más por cada
+  // corte que alguien abre.
+  const lotesQ = useLotes();
+  const lote = lotesQ.data?.find((l) => l.id === loteId);
   const { empresaActiva } = useAuth();
   const [bajando, setBajando] = useState(false);
   // Un solo aviso para las dos acciones del encabezado (bajar la planilla, abrir el documento):
@@ -173,6 +179,10 @@ export function ReporteLotePanel({
 
           {/* El cronograma va ANTES del respaldo: uno se manda para avisar lo que se va a pagar
               y el otro cuando ya se pagó, y ese es el orden en que se usan. */}
+          {/* La aprobación va ARRIBA del cronograma: es lo que decide si este corte se puede
+              pagar, y el cronograma es justamente el documento que la gerencia mira para
+              decidirlo. Abajo se leería después de haber bajado media pantalla. */}
+          {lote && <AprobacionDelCortePanel lote={lote} />}
           <CronogramaPanel loteId={loteId} />
 
           {/* El respaldo del pago va DENTRO del panel del corte y no en una pantalla aparte: es

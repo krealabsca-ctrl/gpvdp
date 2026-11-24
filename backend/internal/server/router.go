@@ -94,6 +94,12 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.GET("/empresas/actual", authH.EmpresaActual)
 
 			// ── Módulo Bancos ──
+			// Qué meses tiene cargados la empresa. SIN permiso de módulo, como `/rbac/mis-permisos`:
+			// el selector de período vive en la barra de TODAS las pantallas, también las de quien
+			// no tiene nada de Bancos, y un 403 acá le rompe la barra. Devuelve etiquetas «YYYY-MM»
+			// y nada más: ni montos, ni cuentas, ni partidas.
+			scoped.GET("/bancos/periodos", bancosH.Periodos)
+
 			// Lectura (bancos.ver)
 			scoped.GET("/bancos/cuentas", P("bancos.ver"), bancosH.Cuentas)
 			scoped.GET("/bancos/movimientos", PAlguno("bancos.ver_clasificar", "bancos.ver_dashboard", "bancos.exportar", "inventario.entrada"), bancosH.Movimientos)
@@ -153,6 +159,24 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			// Dimensiones del gasto (departamento y sede) y control presupuestario.
 			scoped.GET("/bancos/catalogo/sedes", PAlguno("bancos.ver", "inventario.ver", "cxc.ver"), bancosH.Sedes)
 			scoped.GET("/bancos/catalogo/departamentos", P("bancos.ver"), bancosH.Departamentos)
+			// «Mi presupuesto» (mig 0124): el mismo control, recortado a las áreas de la persona,
+			// para quien NO entra a Bancos. Endpoint PROPIO y no este con un filtro: el de abajo lo
+			// usan otras superficies con permiso de Finanzas.
+			scoped.GET("/bancos/mi-presupuesto", P("bancos.ver_mi_presupuesto"), bancosH.MiPresupuesto)
+			// La mitad de INGRESO (mig 0125): por PARTIDA, porque las de ingreso son canales de
+			// cobro y no áreas. Permiso aparte: hay quien ve solo gasto.
+			scoped.GET("/bancos/mi-ingreso", P("bancos.ver_mi_ingreso"), bancosH.MiIngreso)
+			// El detalle de las dos: «¿en qué se me fue?» y «¿en qué mes?». Reusan el cálculo de
+			// Finanzas (Control y presupuesto / Análisis) recortado al alcance de la persona.
+			scoped.GET("/bancos/mi-presupuesto/partidas", P("bancos.ver_mi_presupuesto"), bancosH.MisPartidasDeArea)
+			scoped.GET("/bancos/mi-ingreso/serie", P("bancos.ver_mi_ingreso"), bancosH.MiSerieDeIngreso)
+			// «Qué ve» una persona, desde su ficha en Usuarios. Mismo permiso que esa pantalla:
+			// decir qué datos alcanza cada quien ES administrar usuarios. OJO: las áreas escriben
+			// `departamento_validador`, la MISMA tabla con la que CxP decide quién valida las
+			// facturas del departamento; la pantalla lo avisa.
+			scoped.GET("/bancos/usuarios/:id/alcance", P("admin.roles"), bancosH.AlcanceDeUsuario)
+			scoped.PUT("/bancos/usuarios/:id/alcance/areas", P("admin.roles"), bancosH.GuardarAreasDeUsuario)
+			scoped.PUT("/bancos/usuarios/:id/alcance/partidas", P("admin.roles"), bancosH.GuardarPartidasDeUsuario)
 			scoped.GET("/bancos/control", P("bancos.ver_control"), bancosH.ControlPresupuestario)
 			scoped.GET("/bancos/control/partidas", P("bancos.ver_control"), bancosH.PartidasDeDimension)
 			scoped.GET("/bancos/presupuesto", P("bancos.ver_control"), bancosH.Presupuesto)
@@ -464,6 +488,17 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			scoped.GET("/cxp/lotes/:id/respaldo", P("cxp.ver"), cxpH.RespaldoDelLoteHandler)
 			// CERRAR lo hace quien arma el lote y sube la macro: mismo permiso que crearlo.
 			// Pedirle uno extra a la acción ordenada es la forma segura de que nadie la use.
+			// El calendario de pagos (16-nov-2026): qué sale y en qué fecha, y qué venció
+			// esperando. Se LEE, así que va con permiso de ver.
+			scoped.GET("/cxp/calendario", P("cxp.ver"), cxpH.CalendarioDePagos)
+			// La aprobación del corte (mig 0123): el paso que faltaba entre armar el listado y
+			// pagar. Mandar a aprobar lo pide TESORERÍA; aprobar y devolver, la gerencia con su
+			// permiso propio. Sin esa separación el control no existe.
+			scoped.POST("/cxp/lotes/:id/mandar-a-aprobar", P("cxp.tesoreria"), cxpH.MandarLoteAAprobar)
+			scoped.POST("/cxp/lotes/:id/aprobar", P("cxp.aprobar_lote"), cxpH.AprobarLote)
+			scoped.POST("/cxp/lotes/:id/devolver", P("cxp.aprobar_lote"), cxpH.DevolverLote)
+			scoped.POST("/cxp/lotes/:id/excluir/:documentoId", P("cxp.aprobar_lote"), cxpH.ExcluirFacturaDelLote)
+			scoped.GET("/cxp/lotes/:id/excluidas", P("cxp.ver"), cxpH.ExcluidasDelLote)
 			scoped.POST("/cxp/lotes/:id/cerrar", P("cxp.tesoreria"), cxpH.CerrarLoteHandler)
 			// REABRIR sí lleva permiso propio: es levantar un control, no ejercerlo. Mismo
 			// criterio que `cxp.liberar_pago`.
@@ -691,6 +726,10 @@ func NewRouter(cfg config.Config, log *zap.Logger, authH *auth.Handler, bancosH 
 			// armar el catálogo lo hace el contador una vez; mapear las 332 partidas con
 			// movimiento lo hace quien conoce la operación.
 			scoped.GET("/conta/mapeo", P("conta.mapeo"), contaH.Mapeo)
+			// El mapeo en Excel: quien sabe a qué cuenta va cada partida es el contador, y sin
+			// esto no había forma de sacarle la lista para que la llene.
+			scoped.GET("/conta/mapeo.xlsx", P("conta.mapeo"), contaH.ExportarMapeoXLSX)
+			scoped.POST("/conta/mapeo.xlsx", P("conta.mapeo"), contaH.ImportarMapeoXLSX)
 			scoped.POST("/conta/mapeo", P("conta.mapeo"), contaH.Decidir)
 			scoped.DELETE("/conta/mapeo/:id", P("conta.mapeo"), contaH.Deshacer)
 

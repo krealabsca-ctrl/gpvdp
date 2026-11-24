@@ -739,6 +739,74 @@ export function useLotes() {
   });
 }
 
+// ── La aprobación del corte (mig 0123) ──────────────────────────────────────────────────────
+//
+// Los cuatro invalidan la RAÍZ de CxP y no solo los lotes: aprobar o devolver cambia qué se puede
+// hacer con el corte, y excluir una factura la devuelve a la Bandeja. Refrescar solo el listado
+// de lotes dejaría la Bandeja mostrando una factura que ya no está en el corte.
+
+/**
+ * El calendario de pagos: qué sale y cuándo, y qué venció esperando (16-nov-2026).
+ *
+ * `staleTime` corto: la pantalla se mira mientras se programan pagos, así que tiene que reflejar
+ * lo que acaba de cambiar sin obligar a recargar.
+ */
+export function useCalendarioDePagos() {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: [...queryKeys.cxp.raiz(empresaId), "calendario"],
+    queryFn: () => cxpApi.calendarioDePagos(),
+    staleTime: 15_000,
+  });
+}
+
+/** Qué sacó la gerencia de un corte. Deshabilitado sin lote, como el reporte. */
+export function useExcluidasDelLote(loteId: string) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: [...queryKeys.cxp.lotes(empresaId), "excluidas", loteId],
+    queryFn: () => cxpApi.excluidasDelLote(loteId),
+    enabled: loteId !== "",
+  });
+}
+
+export function useMandarLoteAAprobar() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (loteId: string) => cxpApi.mandarLoteAAprobar(loteId),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.cxp.raiz(empresaId) }),
+  });
+}
+
+export function useAprobarLote() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (loteId: string) => cxpApi.aprobarLote(loteId),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.cxp.raiz(empresaId) }),
+  });
+}
+
+export function useDevolverLote() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { loteId: string; motivo: string }) => cxpApi.devolverLote(v.loteId, v.motivo),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.cxp.raiz(empresaId) }),
+  });
+}
+
+export function useExcluirDelLote() {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { loteId: string; documentoId: string; motivo: string }) =>
+      cxpApi.excluirDelLote(v.loteId, v.documentoId, v.motivo),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.cxp.raiz(empresaId) }),
+  });
+}
+
 /**
  * «Lo que se va a pagar» de un corte, para revisarlo ANTES de subir el archivo al banco.
  *

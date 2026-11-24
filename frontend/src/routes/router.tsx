@@ -14,6 +14,8 @@ import { PagosExternosPage } from "@/features/bancos/pages/PagosExternosPage";
 import { ClasificarPage } from "@/features/bancos/pages/ClasificarPage";
 import { CatalogoPage } from "@/features/bancos/pages/CatalogoPage";
 import { MiSegmentoPage } from "@/features/bancos/pages/MiSegmentoPage";
+import { MiIngresoPage } from "@/features/bancos/pages/MiIngresoPage";
+import { MiPresupuestoPage } from "@/features/bancos/pages/MiPresupuestoPage";
 import { TipoCambioPage } from "@/features/bancos/pages/TipoCambioPage";
 import { ExportarPage } from "@/features/bancos/pages/ExportarPage";
 import { ProyeccionesPage } from "@/features/bancos/pages/ProyeccionesPage";
@@ -139,6 +141,8 @@ export const router = createBrowserRouter([
           { path: "revisar", element: <Navigate to="/clasificar" replace /> },
           { path: "catalogo", element: <CatalogoPage /> },
           { path: "mi-segmento", element: <MiSegmentoPage /> },
+          { path: "mi-presupuesto", element: <MiPresupuestoPage /> },
+          { path: "mi-ingreso", element: <MiIngresoPage /> },
           { path: "tipo-cambio", element: <TipoCambioPage /> },
           { path: "exportar", element: <ExportarPage /> },
           { path: "analisis", element: <AnalisisPage /> },

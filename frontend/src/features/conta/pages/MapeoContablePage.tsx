@@ -12,6 +12,15 @@
  * Resolverlas de a una es lo que hace que un mapeo no se termine nunca. Por eso se filtra, se
  * marcan varias y se decide una sola vez.
  *
+ * ── POR QUÉ LA LISTA ORDENA POR PLATA Y NO POR CANTIDAD (12-nov-2026) ────────────────────────
+ *
+ * Ordenaba por cantidad de movimientos, y eso manda a trabajar en el orden equivocado. Medido en
+ * Valle de Paz sobre ₡2.956 M: «Traslado de Fondos» mueve ₡1.115 M en 239 movimientos y quedaba
+ * OCTAVO, detrás de «Depósito de Clientes», que mueve doce veces menos plata en 7.960
+ * movimientos; «Utilidades» mueve ₡63 M en 6 movimientos y caía en el puesto 54, fuera de la
+ * primera pantalla. Con el orden por monto, SIETE partidas de 131 cubren el 80 % del dinero y 24
+ * cubren el 95 %: es la diferencia entre 131 pendientes y una tarde de trabajo con sentido.
+ *
  * ── POR QUÉ EL AVISO DE CRUCE AVISA Y NO BLOQUEA ─────────────────────────────────────────────
  *
  * Las 23 de caja chica cuelgan del concepto GASTOS en el ERP, y en el plan la caja chica es
@@ -44,6 +53,8 @@ import {
   useToast,
 } from "@/components/ui";
 import { mensajeError } from "@/lib/apiError";
+import { formatMoneda } from "@/lib/format";
+import { MapeoExcelPanel } from "@/features/conta/components/MapeoExcelPanel";
 import { useTienePermiso } from "@/features/auth/permisos";
 import {
   useCuentasDeMovimiento,
@@ -190,6 +201,10 @@ export function MapeoContablePage() {
 
       {cobertura && <Avance c={cobertura} />}
 
+      {/* El Excel va ARRIBA de la lista: con 131 partidas por decidir, quien abre esta pantalla
+          por primera vez necesita saber que no tiene que resolverlas de a una acá adentro. */}
+      <MapeoExcelPanel />
+
       <Card>
         <CardContent className="flex flex-wrap items-end gap-4 pt-5">
           <Input
@@ -305,6 +320,9 @@ export function MapeoContablePage() {
                   )}
                 </TH>
                 <TH>Partida</TH>
+                {/* El MONTO va antes que la cantidad porque es el que ordena la lista: la cantidad
+                    acompaña, pero no es la que dice por dónde empezar. */}
+                <TH className="text-right">Colones</TH>
                 <TH className="text-right">Movimientos</TH>
                 <TH>Naturaleza en el ERP</TH>
                 <TH>Cuenta contable</TH>
@@ -417,7 +435,8 @@ function Fila({
         <p className="font-medium text-content">{f.clasificacion}</p>
         <p className="text-xs text-content-muted">{f.concepto}</p>
       </TD>
-      <TD className="text-right tabular-nums">{f.movimientos}</TD>
+      <TD className="text-right font-medium tabular-nums">{formatMoneda(f.monto_crc, "CRC")}</TD>
+      <TD className="text-right tabular-nums text-content-muted">{f.movimientos}</TD>
       <TD>
         {f.naturaleza_declarada ? (
           <Badge tone="neutral">{f.naturaleza_concepto}</Badge>

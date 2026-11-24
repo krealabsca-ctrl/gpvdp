@@ -11,9 +11,28 @@
  *
  * El que falta NO se esconde. Mostrar solo lo que existe obliga a deducir lo que falta leyendo
  * toda la columna; con el chip apagado, un expediente incompleto se ve de un vistazo.
+ *
+ * ── LOS DATOS DE LA FACTURA NO SON EL ARCHIVO DE LA FACTURA (16-nov-2026) ────────────────────
+ *
+ * El chip de FACTURA decía «+» —«no hay, adjuntala»— en las 4.542 facturas del sistema, y se leía
+ * como que el sistema había perdido la factura. Medido: 4.526 tienen su CLAVE DE HACIENDA de 50
+ * dígitos, con proveedor, consecutivo, subtotal, IVA, retención y total. Lo que falta es el PDF o
+ * el XML: el archivo nunca entró, porque las facturas se importaron por Excel y el buzón de
+ * Hacienda tiene 0 recepciones.
+ *
+ * Un expediente con los datos completos no puede verse igual que uno sin nada. Así que el chip
+ * distingue tres estados y no dos:
+ *
+ *   ✓  el archivo está      → lo abre
+ *   ·  solo los datos       → lleva al detalle, donde están los once campos
+ *   +  no hay nada          → lo pide
+ *
+ * En el DETALLE el chip de «solo datos» no lleva a ningún lado —ya se está ahí— así que ahí sí
+ * ofrece adjuntar, que es lo único que falta hacer.
  */
 
 import { useRef, useState, type ChangeEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/cn";
 import { mensajeError } from "@/lib/apiError";
 import { useToast } from "@/components/ui";
@@ -47,6 +66,7 @@ export function ExpedienteDelPago({
   compacto?: boolean;
 }) {
   const toast = useToast();
+  const navegar = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
   const [subiendoTipo, setSubiendoTipo] = useState<TipoAdjunto | null>(null);
   const [abriendo, setAbriendo] = useState<TipoAdjunto | null>(null);
@@ -56,6 +76,17 @@ export function ExpedienteDelPago({
 
   function tiene(tipo: TipoAdjunto) {
     return tipo === "FACTURA" ? doc.tiene_factura : doc.tiene_comprobante;
+  }
+
+  /**
+   * La factura existe COMO DATO aunque no esté el archivo: la clave de Hacienda de 50 dígitos la
+   * identifica, y con ella están el proveedor, el consecutivo, los montos y la retención.
+   *
+   * Solo aplica a la FACTURA. Un comprobante de pago no tiene equivalente en datos: o está el
+   * documento del banco o no hay nada que mostrar.
+   */
+  function soloDatos(tipo: TipoAdjunto) {
+    return tipo === "FACTURA" && !doc.tiene_factura && doc.clave.trim() !== "";
   }
 
   /**
@@ -107,17 +138,32 @@ export function ExpedienteDelPago({
       />
       {PAPELES.map((p) => {
         const hay = tiene(p.tipo);
+        const datos = soloDatos(p.tipo);
         const ocupado = abriendo === p.tipo || subiendoTipo === p.tipo;
-        // Sin el papel y sin permiso para adjuntarlo, el chip solo informa: no es un botón.
-        const accionable = hay || puedeAdjuntar;
+        // En la FILA, «solo datos» lleva al detalle, y para eso no hace falta permiso de
+        // adjuntar: mirar la factura es parte de revisarla. En el detalle ya se está ahí, así
+        // que el chip vuelve a ser el de adjuntar y sí lo exige.
+        const llevaAlDetalle = datos && compacto;
+        const accionable = hay || llevaAlDetalle || puedeAdjuntar;
         return (
           <button
             key={p.tipo}
             type="button"
             disabled={!accionable || ocupado}
-            title={hay ? `Abrir ${p.nombre.toLowerCase()}` : puedeAdjuntar ? p.falta : `Sin ${p.nombre.toLowerCase()}`}
+            title={
+              hay
+                ? `Abrir ${p.nombre.toLowerCase()}`
+                : llevaAlDetalle
+                  ? "Ver los datos de la factura (clave, montos, retención). El archivo no está adjunto."
+                  : datos
+                    ? "Los datos están arriba; falta adjuntar el archivo"
+                    : puedeAdjuntar
+                      ? p.falta
+                      : `Sin ${p.nombre.toLowerCase()}`
+            }
             onClick={() => {
               if (hay) return void abrir(p.tipo);
+              if (llevaAlDetalle) return navegar(`/cxp/documentos/${doc.id}`);
               setSubiendoTipo(p.tipo);
               fileRef.current?.click();
             }}
@@ -126,17 +172,23 @@ export function ExpedienteDelPago({
               compacto ? "text-[11px]" : "text-xs",
               hay
                 ? "border-positivo/40 bg-positivo/10 text-positivo hover:border-positivo"
-                : accionable
-                  ? "border-dashed border-border text-content-muted hover:border-accent hover:text-accent"
-                  : "border-dashed border-border text-content-muted opacity-60",
+                : // «Solo datos» va con borde ENTERO y no punteado: el punteado es la forma de
+                  // «acá falta algo», y los datos de la factura no faltan. Lo que falta es el
+                  // archivo, y eso lo dice el símbolo.
+                  datos
+                  ? "border-border text-content-muted hover:border-accent hover:text-accent"
+                  : accionable
+                    ? "border-dashed border-border text-content-muted hover:border-accent hover:text-accent"
+                    : "border-dashed border-border text-content-muted opacity-60",
               ocupado && "opacity-60",
             )}
           >
             <span aria-hidden>{p.icono}</span>
             {p.nombre}
-            {/* El símbolo final es el estado: ✓ está, + se puede adjuntar, — no hay y no se puede. */}
+            {/* El símbolo es el estado: ✓ está el archivo, · están los datos, + se puede
+                adjuntar, — no hay y no se puede. */}
             <span aria-hidden className="font-semibold">
-              {hay ? "✓" : puedeAdjuntar ? "+" : "—"}
+              {hay ? "✓" : datos ? "·" : puedeAdjuntar ? "+" : "—"}
             </span>
           </button>
         );

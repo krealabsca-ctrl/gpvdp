@@ -11,8 +11,21 @@ import (
 
 // fakeRepo implementa Repository en memoria para probar el servicio.
 type fakeRepo struct {
-	cuenta   Cuenta
-	existing map[string]bool
+	// areasDelUsuario: el alcance de «Mi presupuesto» (mig 0124). Nil por defecto a propósito.
+	areasDelUsuario []AreaDelUsuario
+	// Y el de la mitad de ingreso (mig 0125), por partida.
+	partidasDeIngresoDelUsuario []PartidaDelUsuario
+	periodosConMovimiento       []string
+	// Alcance por persona. `usuarioDeLaEmpresa` arranca en false: ese es el caso a probar.
+	usuarioDeLaEmpresa    bool
+	puedeVerPresupuesto   bool
+	puedeVerIngreso       bool
+	naturalezas           map[string]string
+	areasGuardadas        []AreaAsignada
+	partidasGuardadas     []string
+	pidioUsuarioDeEmpresa []string
+	cuenta                Cuenta
+	existing              map[string]bool
 	// Reemisiones del banco (mig 0118). Lo que el servicio LEE para decidir si deja enlazar, y lo
 	// que ESCRIBIÓ, para que la prueba pueda comprobar que no enlazó cuando no correspondía.
 	candidatosReemision    []CandidatoReemision

@@ -142,3 +142,54 @@ func (f *fakeRepo) RealPorMesDelAnio(context.Context, string, int) (map[string][
 func (f *fakeRepo) MetasPorMesDelAnio(context.Context, string, int) (map[string][2]decimal.Decimal, error) {
 	return f.metasPorMes, nil
 }
+
+// El alcance de «Mi presupuesto» (mig 0124). `areasDelUsuario` es nil por defecto, que es el caso
+// que importa: un doble que devolviera áreas por accidente haría pasar una prueba de recorte que
+// en realidad no recorta nada.
+func (f *fakeRepo) AreasDelUsuario(context.Context, string, string) ([]AreaDelUsuario, error) {
+	return f.areasDelUsuario, nil
+}
+
+// El alcance de la mitad de ingreso (mig 0125). Nil por defecto, igual que el de gasto: un doble
+// que devolviera partidas por accidente haría pasar una prueba de recorte que no recorta nada.
+func (f *fakeRepo) PartidasDeIngresoDelUsuario(context.Context, string, string) ([]PartidaDelUsuario, error) {
+	return f.partidasDeIngresoDelUsuario, nil
+}
+
+// El calendario real de la empresa. Nil por defecto: una empresa recién instalada no tiene nada
+// cargado, y es el caso en que el selector tiene que seguir funcionando.
+func (f *fakeRepo) PeriodosConMovimiento(context.Context, string) ([]string, error) {
+	return f.periodosConMovimiento, nil
+}
+
+// ── El alcance por persona, desde la ficha del usuario ───────────────────────────────────────
+//
+// `usuarioDeLaEmpresa` arranca en FALSE a propósito: «esa persona no es de esta empresa» es el
+// caso que hay que probar, y un doble que dijera que sí por omisión dejaría pasar una prueba de
+// aislamiento que en realidad no aísla nada.
+
+func (f *fakeRepo) UsuarioDeLaEmpresa(_ context.Context, empresaID, usuarioID string) (string, string, bool, error) {
+	f.pidioUsuarioDeEmpresa = append(f.pidioUsuarioDeEmpresa, empresaID+"/"+usuarioID)
+	if !f.usuarioDeLaEmpresa {
+		return "", "", false, nil
+	}
+	return "Jefe de prueba", "jefe@prueba.local", true, nil
+}
+
+func (f *fakeRepo) PermisosDeAlcanceDelUsuario(context.Context, string, string) (bool, bool, error) {
+	return f.puedeVerPresupuesto, f.puedeVerIngreso, nil
+}
+
+func (f *fakeRepo) GuardarAreasDelUsuario(_ context.Context, _, _ string, areas []AreaAsignada) error {
+	f.areasGuardadas = areas
+	return nil
+}
+
+func (f *fakeRepo) GuardarPartidasDeIngresoDelUsuario(_ context.Context, _, _ string, ids []string) error {
+	f.partidasGuardadas = ids
+	return nil
+}
+
+func (f *fakeRepo) NaturalezasDeClasificaciones(context.Context, string, []string) (map[string]string, error) {
+	return f.naturalezas, nil
+}

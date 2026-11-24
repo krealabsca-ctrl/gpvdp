@@ -228,8 +228,30 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoPaquete(err))
 	// «Tu rol no tiene partidas» solo llega acá desde la búsqueda de faltantes: la pantalla lo
 	// resuelve con su propio estado vacío, así que acá es 403 y no un 500.
-	case errors.Is(err, ErrSinAlcance):
+	case errors.Is(err, ErrSinAlcance),
+		// «Todavía no sos responsable de ninguna área» (mig 0124). Va acá porque es la MISMA
+		// clase: el permiso está, lo que falta es el alcance. Sin esta línea salía como 500
+		// «Error interno», que es justo lo que ve un jefe de área nuevo al que nadie le asignó
+		// todavía su departamento — el caso más común de la pantalla, no el raro.
+		errors.Is(err, ErrSinAlcanceDePresupuesto),
+		// Y el de la mitad de ingreso (mig 0125), por exactamente lo mismo.
+		errors.Is(err, ErrSinPartidasDeIngreso):
 		httpx.Abort(c, http.StatusForbidden, httpx.CodeSinPermiso, sinPrefijoPaquete(err))
+	// Alcance por persona, desde la ficha del usuario. «No es de esta empresa» es 404 y no 403 por
+	// la misma razón que `ErrFueraDeAlcance`: para esta empresa esa persona no existe, y un 403
+	// confirmaría que existe en otra.
+	case errors.Is(err, ErrUsuarioFueraDeLaEmpresa),
+		// «Esa área no es tuya»: 404 por lo mismo, un 403 confirmaría que el área existe.
+		errors.Is(err, ErrAreaFueraDeMiAlcance):
+		httpx.Abort(c, http.StatusNotFound, httpx.CodeNoEncontrado, sinPrefijoPaquete(err))
+	case errors.Is(err, ErrAreaDesconocida), errors.Is(err, ErrPartidaDesconocida),
+		errors.Is(err, ErrRolDeAreaInvalido):
+		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, sinPrefijoPaquete(err))
+	// De NEGOCIO: el pedido está bien escrito y lo que no se cumple es que «Mi ingreso» solo mide
+	// partidas de ingreso. Sin esto, asignar una de gasto se aceptaría y la persona vería su
+	// partida nombrada arriba con la tabla vacía debajo, sin explicación.
+	case errors.Is(err, ErrPartidaNoEsDeIngreso):
+		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoPaquete(err))
 	case errors.Is(err, ErrDimensionInvalida), errors.Is(err, ErrPresupuestoNegativo),
 		errors.Is(err, ErrNombreRequerido):
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, sinPrefijoPaquete(err))

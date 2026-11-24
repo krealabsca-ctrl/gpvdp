@@ -206,7 +206,14 @@ export function componerPeriodo(anio: number, mes: number): string {
   return `${anio}-${String(mes).padStart(2, "0")}`;
 }
 
-/** Genera una lista de períodos YYYY-MM hacia atrás desde el actual (para selectores). */
+/**
+ * Genera una lista de períodos YYYY-MM hacia atrás desde el actual.
+ *
+ * ES EL RESPALDO, NO LA LISTA BUENA. Inventa meses sin mirar la base, así que esconde los que
+ * quedan fuera de la ventana y ofrece los que no existen. Se usa solo mientras el calendario real
+ * de la empresa todavía no llegó, o cuando la empresa no tiene nada cargado. La lista de verdad la
+ * arma `periodosDelSelector` con lo que devuelve `GET /bancos/periodos`.
+ */
 export function periodosRecientes(cantidad = 18): string[] {
   const out: string[] = [];
   const now = new Date();
@@ -215,6 +222,54 @@ export function periodosRecientes(cantidad = 18): string[] {
     out.push(componerPeriodo(d.getFullYear(), d.getMonth() + 1));
   }
   return out;
+}
+
+/** El mes de hoy como «YYYY-MM». */
+export function mesDeHoy(): string {
+  const d = new Date();
+  return componerPeriodo(d.getFullYear(), d.getMonth() + 1);
+}
+
+/** Cuántos meses hay de `a` a `b`, ambos incluidos. Negativo si `b` es anterior. */
+function mesesEntreInclusive(a: string, b: string): number {
+  const [a1, m1] = a.split("-").map(Number);
+  const [a2, m2] = b.split("-").map(Number);
+  if (!a1 || !m1 || !a2 || !m2) return 0;
+  return (a2 - a1) * 12 + (m2 - m1) + 1;
+}
+
+/**
+ * La lista del selector de período de la barra: un rango CONTINUO desde el primer mes con dato
+ * hasta hoy, del más reciente al más viejo.
+ *
+ * ── POR QUÉ CONTINUO Y NO «LOS MESES CON MOVIMIENTO» ────────────────────────────────────────
+ *
+ * Este selector gobierna 16 pantallas, y varias trabajan justamente sobre meses que todavía no
+ * tienen movimiento: cargar el tipo de cambio del mes que arranca, cerrar un período contable,
+ * mirar la nómina. Limitarlo a los meses con movimiento haría imposible cargar el tipo de cambio
+ * de un mes nuevo. Los huecos se conservan solo donde importan: en Exportar.
+ *
+ * Y LLEGA HASTA HOY AUNQUE NO HAYA DATO, por lo mismo: el mes en curso casi nunca está cargado
+ * todavía y es el que más se mira. Si la empresa tiene algo cargado MÁS ADELANTE que hoy, el
+ * rango se estira hasta ahí en vez de esconderlo.
+ */
+export function periodosDelSelector(primero: string, ultimo: string, mesActual: string): string[] {
+  // Sin calendario —empresa nueva, o la respuesta todavía en camino— se usa el respaldo.
+  if (!primero || !mesActual) return periodosRecientes();
+  const fin = ultimo > mesActual ? ultimo : mesActual;
+  const n = mesesEntreInclusive(primero, fin);
+  // Un rango imposible (fechas corruptas, un movimiento con año 1900) cae al respaldo conocido en
+  // vez de truncarse a la mitad en silencio: 600 meses son 50 años.
+  if (n <= 0 || n > 600) return periodosRecientes();
+
+  const [anio, mes] = primero.split("-").map(Number);
+  if (!anio || !mes) return periodosRecientes();
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const d = new Date(anio, mes - 1 + i, 1);
+    out.push(componerPeriodo(d.getFullYear(), d.getMonth() + 1));
+  }
+  return out.reverse();
 }
 
 /** Etiqueta legible de un período: "2026-07" -> "Julio 2026". */

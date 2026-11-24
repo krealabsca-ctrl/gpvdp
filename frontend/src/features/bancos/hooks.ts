@@ -14,6 +14,7 @@ import { formatosBancoApi, type FormatoBanco } from "@/api/formatosBanco";
 import {
   bancosApi,
   type AmbitoCatalogo,
+  type AreaAsignada,
   type CambioDeCuenta,
   type ClasificacionInput,
   type ConceptoInput,
@@ -841,6 +842,119 @@ export function useAsignarDimensionesMovimiento() {
 }
 
 /** El control presupuestario del rango. */
+/**
+ * «Mi presupuesto»: el control recortado a MIS áreas (mig 0124).
+ *
+ * La clave NO incluye el usuario: el alcance sale del token, y el token cambia al cambiar de
+ * sesión, así que no hay forma de que la caché de una persona le llegue a otra.
+ */
+export function useMiPresupuesto(desde: string, hasta: string, umbral = "") {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: [...queryKeys.bancos.raiz(empresaId), "mi-presupuesto", desde, hasta, umbral],
+    queryFn: () => bancosApi.miPresupuesto(desde, hasta, umbral),
+    enabled: desde !== "" && hasta !== "",
+  });
+}
+
+/**
+ * «Mi presupuesto», mitad de INGRESO: lo que entró en MIS partidas (mig 0125).
+ *
+ * `habilitado` sale del permiso: quien tiene solo la mitad de gasto no tiene que ver el 403 de
+ * esta llamada en la consola ni un bloque de error en la pantalla.
+ */
+export function useMiIngreso(desde: string, hasta: string, habilitado = true) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: [...queryKeys.bancos.raiz(empresaId), "mi-ingreso", desde, hasta],
+    queryFn: () => bancosApi.miIngreso(desde, hasta),
+    enabled: habilitado && desde !== "" && hasta !== "",
+  });
+}
+
+/**
+ * Qué meses tiene cargados la empresa, para los selectores de período.
+ *
+ * Lo pide la barra superior, que está en TODAS las pantallas, así que conviene que cambie poco:
+ * el calendario solo se mueve cuando alguien importa un estado de cuenta de un mes nuevo. Si la
+ * llamada falla, los selectores caen al respaldo de 18 meses y el sistema sigue andando.
+ */
+export function usePeriodosDeLaEmpresa() {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: [...queryKeys.bancos.raiz(empresaId), "periodos"],
+    queryFn: () => bancosApi.periodos(),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * El desglose de MI área. `departamentoId` vacío no pide nada: el servidor lo rechazaría igual
+ * (un área vacía no vale como «todas»), pero no vale el viaje.
+ */
+export function useMisPartidasDeArea(
+  desde: string,
+  hasta: string,
+  departamentoId: string,
+  umbral = "",
+) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: [
+      ...queryKeys.bancos.raiz(empresaId),
+      "mi-presupuesto-partidas",
+      desde,
+      hasta,
+      departamentoId,
+      umbral,
+    ],
+    queryFn: () => bancosApi.misPartidasDeArea(desde, hasta, departamentoId, umbral),
+    enabled: departamentoId !== "" && desde !== "" && hasta !== "",
+  });
+}
+
+/** El mes a mes de MIS partidas de ingreso. */
+export function useMiSerieDeIngreso(desde: string, hasta: string, habilitado = true) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: [...queryKeys.bancos.raiz(empresaId), "mi-ingreso-serie", desde, hasta],
+    queryFn: () => bancosApi.miSerieDeIngreso(desde, hasta),
+    enabled: habilitado && desde !== "" && hasta !== "",
+  });
+}
+
+/** «Qué ve» una persona: sus áreas de gasto y sus partidas de ingreso. */
+export function useAlcanceDeUsuario(usuarioId: string) {
+  const empresaId = useEmpresaId();
+  return useQuery({
+    queryKey: [...queryKeys.bancos.raiz(empresaId), "alcance-usuario", usuarioId],
+    queryFn: () => bancosApi.alcanceDeUsuario(usuarioId),
+    enabled: usuarioId !== "",
+  });
+}
+
+/**
+ * Guarda las áreas o las partidas de una persona.
+ *
+ * Las dos mutaciones devuelven la ficha completa, así que se escribe directo en la caché en vez
+ * de invalidar: el panel está abierto y un parpadeo mientras se recarga haría dudar de si guardó.
+ */
+export function useGuardarAlcanceDeUsuario(usuarioId: string) {
+  const empresaId = useEmpresaId();
+  const qc = useQueryClient();
+  const clave = [...queryKeys.bancos.raiz(empresaId), "alcance-usuario", usuarioId];
+
+  const areas = useMutation({
+    mutationFn: (v: AreaAsignada[]) => bancosApi.guardarAreasDeUsuario(usuarioId, v),
+    onSuccess: (res) => qc.setQueryData(clave, res),
+  });
+  const partidas = useMutation({
+    mutationFn: (v: string[]) => bancosApi.guardarPartidasDeUsuario(usuarioId, v),
+    onSuccess: (res) => qc.setQueryData(clave, res),
+  });
+  return { areas, partidas };
+}
+
 export function useControl(
   desde: string,
   hasta: string,

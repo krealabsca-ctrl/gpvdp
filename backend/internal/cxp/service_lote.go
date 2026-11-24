@@ -35,6 +35,25 @@ func (s *Service) Lotes(ctx context.Context, empresaID string) ([]LotePago, erro
 // él, el navegador los guarda como «macro-pagos-CRC.txt» y «macro-pagos-CRC (1).txt», y cuál es
 // cuál se vuelve una adivinanza — la misma trampa que ya existía entre colones y dólares.
 func (s *Service) MacroLote(ctx context.Context, empresaID, loteID string) ([]PagoRow, int64, error) {
+	// EL ARCHIVO DEL BANCO NO SALE ANTES DE LA APROBACIÓN (mig 0123).
+	//
+	// Es la guarda central del paso de aprobación: hasta acá, la macro se bajaba de un corte
+	// ABIERTO y nadie había dicho que sí. Sin esto, el resto del flujo es decorativo —se puede
+	// subir al banco un corte que la gerencia nunca vio, o uno que devolvió—.
+	//
+	// Los CERRADOS pasan a propósito: un corte ya pagado tuvo que estar aprobado para llegar ahí,
+	// y volver a bajar su macro es lo que se hace cuando el banco pide el archivo de nuevo.
+	estado, existe, err := s.repo.EstadoDelLote(ctx, empresaID, loteID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !existe {
+		return nil, 0, ErrLoteNoEncontrado
+	}
+	if estado != LoteAprobado && estado != LoteCerrado {
+		return nil, 0, ErrLoteSinAprobar
+	}
+
 	rows, err := s.repo.DocumentosParaPagoPorLote(ctx, empresaID, loteID)
 	if err != nil {
 		return nil, 0, err

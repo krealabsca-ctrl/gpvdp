@@ -194,12 +194,31 @@ func (r *pgRepository) ListarLotes(ctx context.Context, empresaID string) ([]Lot
 		       -- tenga que distinguir dos formas de «no está cerrado».
 		       COALESCE(to_char(l.cerrado_en,   'YYYY-MM-DD"T"HH24:MI:SSOF'), ''),
 		       COALESCE(to_char(l.reabierto_en, 'YYYY-MM-DD"T"HH24:MI:SSOF'), ''),
-		       COALESCE(l.reapertura_motivo, '')
+		       COALESCE(l.reapertura_motivo, ''),
+		       -- La aprobación (mig 0123). Los nombres salen de tres LEFT JOIN y no de una
+		       -- subconsulta por fila: son tres columnas sobre una tabla de decenas de lotes.
+		       COALESCE(to_char(l.enviado_aprobacion_en, 'YYYY-MM-DD"T"HH24:MI:SSOF'), ''),
+		       COALESCE(ue.nombre, ''),
+		       COALESCE(to_char(l.aprobado_en, 'YYYY-MM-DD"T"HH24:MI:SSOF'), ''),
+		       COALESCE(ua.nombre, ''),
+		       COALESCE(to_char(l.devuelto_en, 'YYYY-MM-DD"T"HH24:MI:SSOF'), ''),
+		       COALESCE(ud.nombre, ''),
+		       COALESCE(l.devolucion_motivo, ''),
+		       -- Lo excluido NO cuelga del lote (su lote_id ya es NULL), así que se cuenta por el
+		       -- número del corte, que es lo que queda escrito en la factura.
+		       (SELECT COUNT(*)::int FROM documento_cxp x
+		         WHERE x.empresa_id = l.empresa_id AND x.excluido_lote_numero = l.numero
+		           AND x.excluido_lote_en IS NOT NULL)
 		FROM lote_pago l
 		LEFT JOIN documento_cxp d ON d.lote_id = l.id
+		LEFT JOIN usuario ue ON ue.id = l.enviado_aprobacion_por
+		LEFT JOIN usuario ua ON ua.id = l.aprobado_por
+		LEFT JOIN usuario ud ON ud.id = l.devuelto_por
 		WHERE l.empresa_id = $1::uuid
-		GROUP BY l.id, l.numero, l.fecha_corte, l.estado, l.creado_en,
-		         l.cerrado_en, l.reabierto_en, l.reapertura_motivo
+		GROUP BY l.id, l.numero, l.fecha_corte, l.estado, l.creado_en, l.empresa_id,
+		         l.cerrado_en, l.reabierto_en, l.reapertura_motivo,
+		         l.enviado_aprobacion_en, ue.nombre, l.aprobado_en, ua.nombre,
+		         l.devuelto_en, ud.nombre, l.devolucion_motivo
 		ORDER BY l.creado_en DESC`
 	rows, err := r.pool.Query(ctx, q, empresaID)
 	if err != nil {
@@ -211,7 +230,11 @@ func (r *pgRepository) ListarLotes(ctx context.Context, empresaID string) ([]Lot
 		var l LotePago
 		if err := rows.Scan(&l.ID, &l.Numero, &l.FechaCorte, &l.Estado, &l.Cantidad, &l.TotalCRC, &l.CreadoEn,
 			&l.Pagadas, &l.Rebotadas, &l.Pendientes,
-			&l.CerradoEn, &l.ReabiertoEn, &l.ReaperturaMotivo); err != nil {
+			&l.CerradoEn, &l.ReabiertoEn, &l.ReaperturaMotivo,
+			&l.EnviadoAprobacionEn, &l.EnviadoAprobacionPor,
+			&l.AprobadoEn, &l.AprobadoPor,
+			&l.DevueltoEn, &l.DevueltoPor, &l.DevolucionMotivo,
+			&l.Excluidas); err != nil {
 			return nil, fmt.Errorf("cxp: scan lote: %w", err)
 		}
 		out = append(out, l)
