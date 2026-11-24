@@ -93,6 +93,20 @@ type LotePago struct {
 	CerradoEn        string `json:"cerrado_en,omitempty"`
 	ReabiertoEn      string `json:"reabierto_en,omitempty"`
 	ReaperturaMotivo string `json:"reapertura_motivo,omitempty"`
+	// La aprobación (mig 0123). Van con el NOMBRE de quien hizo cada paso y no solo la fecha: un
+	// corte que mueve millones y dice «aprobado el viernes» sin decir por quién no sirve de
+	// respaldo. `DevolucionMotivo` guarda la ÚLTIMA devolución, igual que la reapertura.
+	EnviadoAprobacionEn  string `json:"enviado_aprobacion_en,omitempty"`
+	EnviadoAprobacionPor string `json:"enviado_aprobacion_por,omitempty"`
+	AprobadoEn           string `json:"aprobado_en,omitempty"`
+	AprobadoPor          string `json:"aprobado_por,omitempty"`
+	DevueltoEn           string `json:"devuelto_en,omitempty"`
+	DevueltoPor          string `json:"devuelto_por,omitempty"`
+	DevolucionMotivo     string `json:"devolucion_motivo,omitempty"`
+	// Excluidas cuenta lo que la gerencia sacó de este corte. Va en el listado —y no solo en el
+	// detalle— porque un corte del que salieron tres facturas se tiene que poder distinguir de
+	// uno que pasó limpio sin abrirlo.
+	Excluidas int `json:"excluidas"`
 }
 
 // DocumentoFueraDelLote es una factura que se pidió cortar y quedó afuera, con su razón.

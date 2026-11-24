@@ -119,6 +119,23 @@ export const contaApi = {
   deshacer(clasificacionId: string): Promise<void> {
     return apiFetch<void>(`/conta/mapeo/${clasificacionId}`, { method: "DELETE" });
   },
+  /**
+   * La hoja de trabajo para llenar afuera, con el plan de cuentas en la segunda hoja.
+   *
+   * Existe porque quien sabe a qué cuenta va cada partida es el contador, y el mapeo solo se podía
+   * decidir adentro del sistema. La columna de la cuenta sale VACÍA a propósito: medido contra el
+   * plan real, sugerirla por nombre acierta 6 de 131 y propone hasta 9 candidatos de clases
+   * contables distintas.
+   */
+  exportarMapeoXLSX(): Promise<Blob> {
+    return apiFetch<Blob>("/conta/mapeo.xlsx", { method: "GET", blob: true });
+  },
+  /** Aplica el archivo lleno. Devuelve qué entró y qué se rechazó, con el número de fila. */
+  importarMapeoXLSX(archivo: File): Promise<ResultadoImportacionMapeo> {
+    const fd = new FormData();
+    fd.append("archivo", archivo);
+    return apiFetch<ResultadoImportacionMapeo>("/conta/mapeo.xlsx", { method: "POST", raw: fd });
+  },
 
   // ── Fase 3A · la contrapartida bancaria y los libros (mig 0111) ────────────────────────────
 
@@ -452,6 +469,25 @@ export interface NuevoAsiento {
 /** Las dos decisiones posibles. No hay una tercera: «falta decidir» es la ausencia de fila. */
 export type EstadoMapeo = "MAPEADA" | "NO_CONTABILIZABLE";
 
+/** Una fila del Excel que no se pudo aplicar, con el número de fila que la persona ve. */
+export interface RechazoDeFila {
+  fila: number;
+  concepto: string;
+  clasificacion: string;
+  motivo: string;
+}
+
+/** Lo que pasó al subir el archivo del mapeo. */
+export interface ResultadoImportacionMapeo {
+  aplicadas: number;
+  rechazos: RechazoDeFila[];
+  resumen: {
+    filas_leidas: number;
+    mapeadas: number;
+    no_contables: number;
+  };
+}
+
 /** Una clasificación del ERP con su decisión contable, si ya se tomó. */
 export interface FilaDelMapeo {
   clasificacion_id: string;
@@ -463,8 +499,14 @@ export interface FilaDelMapeo {
    */
   naturaleza_concepto: "INGRESO" | "GASTO" | "NEUTRO";
   naturaleza_declarada: boolean;
-  /** Movimientos vivos que la usan. Es lo que ordena el trabajo: mapear primero lo que más pesa. */
+  /** Movimientos vivos que la usan. */
   movimientos: number;
+  /**
+   * La plata que pasó por esta partida, en colones y en valor absoluto. ES LO QUE ORDENA EL
+   * TRABAJO, no la cantidad: 7 partidas de 131 cubren el 80 % del dinero en Valle de Paz, y
+   * varias de ellas aparecen tarde si se ordena por cantidad de movimientos.
+   */
+  monto_crc: string;
 
   /** "" = falta decidir. */
   estado: EstadoMapeo | "";

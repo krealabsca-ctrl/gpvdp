@@ -7,7 +7,8 @@ import { EmpresaSwitcher } from "@/components/shell/EmpresaSwitcher";
 import { BrandLogo } from "@/components/shell/BrandLogo";
 import { usePeriodoActivo } from "@/app/PeriodoProvider";
 import { migasDeRuta } from "@/app/nav";
-import { etiquetaPeriodo, periodosRecientes } from "@/lib/format";
+import { etiquetaPeriodo, mesDeHoy, periodosDelSelector } from "@/lib/format";
+import { usePeriodosDeLaEmpresa } from "@/features/bancos/hooks";
 
 /** Barra superior del shell autenticado: marca, breadcrumb, buscador, contexto (período + empresa) y perfil. */
 export function TopBar() {
@@ -19,7 +20,15 @@ export function TopBar() {
   // Inventario, RRHH, CxC, Grupo y Configuración, y se volvió crítico al poder colapsar la sidebar.
   const crumb = migasDeRuta(pathname);
 
-  const periodoOptions = periodosRecientes().map((p) => ({ value: p, label: etiquetaPeriodo(p) }));
+  // Los meses que la empresa tiene de verdad, no 18 contados hacia atrás desde el reloj. Esa
+  // cuenta escondía los 5 primeros meses de la empresa más antigua del grupo y, al revés, ofrecía
+  // 15 meses vacíos en las otras dos. Si la respuesta no llegó todavía, cae al respaldo.
+  const cal = usePeriodosDeLaEmpresa();
+  const periodoOptions = periodosDelSelector(
+    cal.data?.primero ?? "",
+    cal.data?.ultimo ?? "",
+    mesDeHoy(),
+  ).map((p) => ({ value: p, label: etiquetaPeriodo(p) }));
 
   return (
     <header className="flex h-16 items-center gap-3 border-b border-border bg-surface-raised px-4 md:px-6">

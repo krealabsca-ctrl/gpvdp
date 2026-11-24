@@ -8,6 +8,7 @@ import {
   montoACentimos,
   montoLegible,
   montoParaApi,
+  periodosDelSelector,
 } from "./format";
 
 /**
@@ -173,5 +174,74 @@ describe("formatTipoCambio", () => {
     expect(formatTipoCambio(null)).toBe("—");
     expect(formatTipoCambio("")).toBe("—");
     expect(formatTipoCambio(undefined)).toBe("—");
+  });
+});
+
+/**
+ * La lista del selector de período (16-nov-2026).
+ *
+ * EL DEFECTO QUE ESTO FIJA: la lista se armaba contando 18 meses hacia atrás desde el reloj, sin
+ * mirar la base. A la empresa más antigua del grupo —21 meses cargados desde enero 2025— le
+ * escondía enero a mayo 2025, y a las otras dos —3 meses cargados— les ofrecía 15 meses vacíos.
+ */
+describe("periodosDelSelector", () => {
+  // EL CASO REPORTADO: 21 meses cargados tienen que ser alcanzables.
+  it("llega hasta el primer mes cargado aunque pase de 18 meses", () => {
+    const lista = periodosDelSelector("2025-01", "2026-09", "2026-11");
+
+    // Enero 2025 a noviembre 2026 son 23 meses, no 18.
+    expect(lista).toHaveLength(23);
+    expect(lista[0]).toBe("2026-11"); // el más reciente primero
+    expect(lista[lista.length - 1]).toBe("2025-01");
+    // Los cinco que el tope de 18 escondía.
+    for (const m of ["2025-01", "2025-02", "2025-03", "2025-04", "2025-05"]) {
+      expect(lista).toContain(m);
+    }
+  });
+
+  // Y EL CASO INVERSO: no ofrecer meses anteriores al primer dato.
+  it("no ofrece meses anteriores al primer mes cargado", () => {
+    const lista = periodosDelSelector("2026-07", "2026-09", "2026-11");
+
+    // Julio a noviembre 2026: cinco meses, no dieciocho.
+    expect(lista).toEqual(["2026-11", "2026-10", "2026-09", "2026-08", "2026-07"]);
+  });
+
+  // LLEGA HASTA HOY AUNQUE NO HAYA DATO: el mes en curso es el que más se mira, y casi nunca
+  // está cargado todavía.
+  it("incluye el mes de hoy aunque no tenga movimiento", () => {
+    const lista = periodosDelSelector("2026-07", "2026-09", "2026-11");
+    expect(lista).toContain("2026-11");
+    expect(lista).toContain("2026-10");
+  });
+
+  // Y SE ESTIRA HACIA ADELANTE si alguien cargó un mes posterior a hoy.
+  it("llega hasta el último mes cargado si es posterior a hoy", () => {
+    const lista = periodosDelSelector("2026-07", "2026-12", "2026-11");
+    expect(lista[0]).toBe("2026-12");
+  });
+
+  // SIN CALENDARIO NO SE ROMPE: empresa nueva o respuesta en camino → el respaldo de siempre.
+  it("cae al respaldo cuando la empresa no tiene nada cargado", () => {
+    expect(periodosDelSelector("", "", "2026-11")).toHaveLength(18);
+  });
+
+  // UN RANGO IMPOSIBLE cae al respaldo en vez de truncarse en silencio.
+  it("cae al respaldo con un rango absurdo", () => {
+    // Un movimiento con año 1900 por un error de carga: 126 años son 1 512 meses.
+    expect(periodosDelSelector("1900-01", "1900-02", "2026-11")).toHaveLength(18);
+    // Y un primero posterior al fin —datos incoherentes— tampoco arma una lista al revés.
+    expect(periodosDelSelector("2027-05", "2026-01", "2026-11")).toHaveLength(18);
+  });
+
+  // UN SOLO MES CARGADO que además es hoy: una lista de uno, no una vacía.
+  it("devuelve un mes cuando ese es todo el calendario", () => {
+    expect(periodosDelSelector("2026-11", "2026-11", "2026-11")).toEqual(["2026-11"]);
+  });
+
+  // CRUZA EL AÑO sin saltarse diciembre ni repetir enero.
+  it("cruza el cambio de año", () => {
+    const lista = periodosDelSelector("2025-11", "2026-02", "2026-02");
+    expect(lista).toEqual(["2026-02", "2026-01", "2025-12", "2025-11"]);
   });
 });

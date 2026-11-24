@@ -186,7 +186,11 @@ func (h *Handler) responder(c *gin.Context, err error, op string) {
 		errors.Is(err, ErrMontoNegativo), errors.Is(err, ErrLineaSinMonto),
 		errors.Is(err, ErrLineaDebeYHaber), errors.Is(err, ErrMotivoAnulacionRequerido),
 		errors.Is(err, ErrPeriodoInvalido), errors.Is(err, ErrMotivoReversaRequerido),
-		errors.Is(err, ErrMotivoReaperturaRequerido):
+		errors.Is(err, ErrMotivoReaperturaRequerido),
+		// Los del .xlsx del mapeo: los tres dicen qué hacer con el archivo —cambiarlo, llenarlo o
+		// volver a bajar la plantilla—, así que el texto completo es justamente lo que sirve.
+		errors.Is(err, ErrMapeoArchivoIlegible), errors.Is(err, ErrMapeoSinEncabezado),
+		errors.Is(err, ErrMapeoSinFilas):
 		httpx.Abort(c, http.StatusBadRequest, httpx.CodeValidacion, sinPrefijo(err))
 	// Nada que generar no es un error de forma: el pedido está bien y lo que falta son datos.
 	case errors.Is(err, ErrNadaQueGenerar), errors.Is(err, ErrAperturaVacia):

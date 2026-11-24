@@ -35,6 +35,7 @@ import {
   useCuadre,
   useCuentas,
   useMovimientos,
+  usePeriodosDeLaEmpresa,
 } from "@/features/bancos/hooks";
 import { bancosApi, type AgruparReporte, type FiltrosMovimientos } from "@/api/bancos";
 
@@ -64,17 +65,26 @@ function porAnio(periodos: string[]): [string, string[]][] {
     .map(([anio, ms]) => [anio, [...ms].sort()] as [string, string[]]);
 }
 
-/** Los últimos N meses hacia atrás desde el período activo, para elegir uno o varios. */
-function mesesDisponibles(desde: string, cuantos = 18): string[] {
-  const [a, m] = desde.split("-").map(Number);
-  if (!a || !m) return [desde];
-  const out: string[] = [];
-  const d = new Date(Date.UTC(a, m - 1, 1));
-  for (let i = 0; i < cuantos; i++) {
-    out.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
-    d.setUTCMonth(d.getUTCMonth() - 1);
-  }
-  return out;
+/**
+ * Los meses que se pueden exportar: los que la empresa TIENE CARGADOS, todos.
+ *
+ * ── LO QUE ESTO ARREGLA ──────────────────────────────────────────────────────────────────────
+ *
+ * Antes la parrilla se armaba contando 18 meses hacia atrás desde el período activo, sin mirar la
+ * base, y eso fallaba por los dos lados (medido el 16-nov-2026):
+ *   · La empresa más antigua del grupo tiene 21 meses desde enero 2025; la ventana empezaba en
+ *     junio 2025, así que enero a mayo 2025 no se podían exportar desde la pantalla.
+ *   · Las otras dos tienen 3 meses y la parrilla ofrecía 18: elegir un mes vacío daba un Excel
+ *     vacío, que es exactamente el viaje perdido que esta pantalla dice evitar.
+ *
+ * El período ACTIVO va siempre, aunque no tenga movimiento: la pantalla arranca con él
+ * seleccionado y un chip marcado que no está en la lista no se puede desmarcar.
+ */
+function mesesDisponibles(conMovimiento: string[], periodoActivo: string): string[] {
+  if (conMovimiento.length === 0) return [periodoActivo];
+  return conMovimiento.includes(periodoActivo)
+    ? conMovimiento
+    : [...conMovimiento, periodoActivo];
 }
 
 export function ExportarPage() {
@@ -101,7 +111,11 @@ export function ExportarPage() {
   const cuadreQuery = useCuadre(periodo);
   const cuadre = cuadreQuery.data ?? [];
 
-  const meses = useMemo(() => mesesDisponibles(periodo), [periodo]);
+  const calendario = usePeriodosDeLaEmpresa();
+  const meses = useMemo(
+    () => mesesDisponibles(calendario.data?.con_movimiento ?? [], periodo),
+    [calendario.data, periodo],
+  );
 
   const opcConceptos = useMemo(
     () => (conceptosQ.data ?? []).map((c) => ({ value: c.id, label: c.nombre })),

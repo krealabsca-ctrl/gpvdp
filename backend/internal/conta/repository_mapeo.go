@@ -17,18 +17,31 @@ import (
 // declara (concepto y naturaleza), cuántos movimientos la usan, y la decisión contable si ya se
 // tomó. Juntarlas es lo que permite ver el cruce de naturaleza y ordenar el trabajo por peso.
 //
-// El conteo de movimientos sale de una subconsulta y no de un JOIN con GROUP BY: con 31.195
-// movimientos, agrupar para contar por clasificación obliga a recorrerlos todos aunque la
-// pantalla muestre 170 filas.
+// EL PESO SE AGRUPA UNA VEZ, NO UNA VEZ POR FILA (12-nov-2026). La primera versión contaba los
+// movimientos con una subconsulta correlacionada, con el argumento de que agrupar 31.195
+// movimientos para mostrar 170 filas sería más caro. Medido, es al revés y por mucho: la
+// subconsulta se ejecuta una vez por clasificación y recorre el índice entero cada vez
+// —239.366 bloques y 557 ms—, mientras que el GROUP BY recorre la tabla UNA vez: 1.414 bloques
+// y 9 ms. Sesenta veces más rápido, y con lugar para traer el monto sin pagar nada.
+// Es el mismo defecto que ya se corrigió en el tablero de CxP.
 const filasDelMapeoSQL = `
 	SELECT cl.id::text, co.nombre, cl.nombre,
 	       COALESCE(co.naturaleza,''), co.naturaleza_declarada,
-	       (SELECT COUNT(*) FROM movimiento_bancario m
-	         WHERE m.clasificacion_id = cl.id AND m.incluido)::int AS movimientos,
+	       COALESCE(peso.movimientos, 0),
+	       -- El cast a numeric(18,2) ANTES del texto: sin él, una partida con movimientos sale
+	       -- «1500000.00» y una sin movimientos sale «0», porque el literal del COALESCE es entero.
+	       -- Dos formatos distintos en la misma columna rompen cualquier lector del otro lado.
+	       COALESCE(peso.monto, 0)::numeric(18,2)::text,
 	       COALESCE(mp.estado,''), COALESCE(mp.motivo,''),
 	       cc.id::text, COALESCE(cc.codigo,''), COALESCE(cc.nombre,''), COALESCE(cc.clase,'')
 	FROM clasificacion cl
 	JOIN concepto co ON co.id = cl.concepto_id
+	LEFT JOIN (
+	    SELECT m.clasificacion_id, COUNT(*)::int AS movimientos, SUM(abs(m.monto_crc)) AS monto
+	      FROM movimiento_bancario m
+	     WHERE m.empresa_id = $1::uuid AND m.incluido
+	     GROUP BY m.clasificacion_id
+	) peso ON peso.clasificacion_id = cl.id
 	LEFT JOIN mapeo_contable mp ON mp.clasificacion_id = cl.id AND mp.empresa_id = $1::uuid
 	LEFT JOIN cuenta_contable cc ON cc.id = mp.cuenta_id
 	WHERE cl.empresa_id = $1::uuid AND cl.activo`
@@ -43,11 +56,18 @@ func (r *pgRepository) FilasDelMapeo(ctx context.Context, empresaID string, solo
 		q += ` AND mp.id IS NULL`
 	}
 	if soloConMovimientos {
-		q += ` AND EXISTS (SELECT 1 FROM movimiento_bancario m
-		                    WHERE m.clasificacion_id = cl.id AND m.incluido)`
+		q += ` AND peso.movimientos IS NOT NULL`
 	}
-	// Lo que más se usa, primero: es donde mapear rinde más.
-	q += ` ORDER BY movimientos DESC, co.nombre, cl.nombre`
+	// LO QUE MÁS PLATA MUEVE, PRIMERO — no lo que más veces aparece.
+	//
+	// Antes ordenaba por cantidad de movimientos, y eso manda a trabajar en el orden equivocado.
+	// Medido en Valle de Paz sobre ₡2.956 M: «Traslado de Fondos» mueve ₡1.115 M en 239
+	// movimientos y quedaba OCTAVO, detrás de «Depósito de Clientes», que mueve doce veces menos
+	// plata en 7.960 movimientos. «Utilidades» mueve ₡63 M en 6 movimientos y caía en el puesto 54.
+	//
+	// Con este orden, SIETE clasificaciones de 131 cubren el 80 % del dinero y 24 cubren el 95 %:
+	// la diferencia entre una pantalla con 131 pendientes y una tarde de trabajo con sentido.
+	q += ` ORDER BY COALESCE(peso.monto, 0) DESC, COALESCE(peso.movimientos, 0) DESC, co.nombre, cl.nombre`
 
 	rows, err := r.pool.Query(ctx, q, empresaID)
 	if err != nil {
@@ -59,7 +79,7 @@ func (r *pgRepository) FilasDelMapeo(ctx context.Context, empresaID string, solo
 	for rows.Next() {
 		var f FilaDelMapeo
 		if err := rows.Scan(&f.ClasificacionID, &f.Concepto, &f.Clasificacion,
-			&f.NaturalezaConcepto, &f.NaturalezaDeclarada, &f.Movimientos,
+			&f.NaturalezaConcepto, &f.NaturalezaDeclarada, &f.Movimientos, &f.MontoCRC,
 			&f.Estado, &f.Motivo, &f.CuentaID, &f.CuentaCodigo, &f.CuentaNombre, &f.CuentaClase); err != nil {
 			return nil, fmt.Errorf("conta: scan fila del mapeo: %w", err)
 		}

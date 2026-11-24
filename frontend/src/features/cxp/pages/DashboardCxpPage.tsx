@@ -34,6 +34,7 @@ import { mensajeError } from "@/lib/apiError";
 import { usePeriodoActivo } from "@/app/PeriodoProvider";
 import { ETIQUETA_ESTADO, ESTADOS_TERMINALES, FLUJO_ESTADOS, TONO_ESTADO } from "@/features/cxp/dominio";
 import { useDashboardCxp } from "@/features/cxp/hooks";
+import { CalendarioDePagos } from "@/features/cxp/components/CalendarioDePagos";
 import { useTienePermiso } from "@/features/auth/permisos";
 import type {
   CarteraCxp,
@@ -246,6 +247,11 @@ function Contenido({ data, periodo }: { data: DashboardCxp; periodo: string }) {
         <Aging cartera={c} verCartera={verCartera} />
         <Concentracion cartera={c} />
       </div>
+
+      {/* El calendario va ANTES de la cola: la cola dice cuánto hay en cada paso, y el
+          calendario dice qué de eso tiene fecha y qué ya venció. Primero cuándo sale la plata,
+          después por dónde está trabada. */}
+      <CalendarioDePagos />
 
       {/* 2. Cola de trabajo: cada paso del flujo con su propio número */}
       <Cola cola={data.cola ?? []} />

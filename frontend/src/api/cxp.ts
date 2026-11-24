@@ -837,6 +837,56 @@ export interface RespaldoDelLote {
 }
 
 /** Lote/corte de pago. */
+/** Un día de pago con lo que sale ese día. */
+export interface TramoProgramado {
+  fecha: string;
+  dia: string;
+  /** «atrasado», «esta semana», «la próxima semana», «más adelante». */
+  cuando: string;
+  facturas: number;
+  total_crc: string;
+  atrasado: boolean;
+}
+
+/** Lo vencido sin fecha de pago, agrupado por LO QUE FALTA HACERLE. */
+export interface GrupoVencido {
+  orden: number;
+  situacion: string;
+  /** La acción pendiente. Es lo que convierte el bloque en trabajo y no en un diagnóstico. */
+  que_falta: string;
+  estados: string[];
+  facturas: number;
+  total_crc: string;
+}
+
+/**
+ * El calendario de pagos: las dos preguntas, contestadas por separado.
+ *
+ * `listo_para_pagar` va aparte del total vencido a propósito: medido en Valle de Paz, de ₡998 M
+ * vencidos solo ₡3,9 M se pueden pagar hoy —el 98,6 % está en recepción sin revisar—. Mostrar un
+ * solo número diría que hay ₡998 M por pagar, que no es cierto.
+ */
+export interface CalendarioPagos {
+  hoy: string;
+  programado: TramoProgramado[];
+  vencido: GrupoVencido[];
+  total_programado: string;
+  total_vencido: string;
+  listo_para_pagar: string;
+}
+
+/** Una factura que la gerencia sacó de un corte. Volvió a la bandeja, no fue denegada. */
+export interface FacturaExcluida {
+  documento_id: string;
+  consecutivo: string;
+  proveedor: string;
+  monto_crc: string;
+  motivo: string;
+  excluido_por: string;
+  excluido_en: string;
+  lote_numero: number;
+}
+
 export interface LotePago {
   id: string;
   numero: number;
@@ -852,6 +902,22 @@ export interface LotePago {
   cerrado_en?: string;
   reabierto_en?: string;
   reapertura_motivo?: string;
+  /**
+   * La aprobación (mig 0123). El corte pasa ABIERTO → EN_APROBACION → APROBADO → CERRADO, y el
+   * archivo del banco NO se puede bajar antes de APROBADO: ese es el control.
+   *
+   * Van con el NOMBRE de quien hizo cada paso, no solo la fecha: un corte que mueve millones y
+   * dice «aprobado el viernes» sin decir por quién no sirve de respaldo.
+   */
+  enviado_aprobacion_en?: string;
+  enviado_aprobacion_por?: string;
+  aprobado_en?: string;
+  aprobado_por?: string;
+  devuelto_en?: string;
+  devuelto_por?: string;
+  devolucion_motivo?: string;
+  /** Cuántas facturas sacó la gerencia de este corte. */
+  excluidas: number;
   /**
    * Cómo se armó el corte: una transferencia por FACTURA (el de siempre) o una por PROVEEDOR,
    * cubriendo todas sus facturas del lote. Decide cuántas líneas tiene la macro.
@@ -2029,6 +2095,43 @@ export const cxpApi = {
   /** Reabre un corte cerrado. El motivo es obligatorio: es la única huella de que se volvió a mover. */
   reabrirLote(loteId: string, motivo: string): Promise<LotePago> {
     return apiFetch<LotePago>(`/cxp/lotes/${loteId}/reabrir`, { method: "POST", json: { motivo } });
+  },
+
+  // ── La aprobación del corte (mig 0123) ──────────────────────────────────────────────────────
+  //
+  // El paso que faltaba entre armar el listado y pagar. Hasta acá la macro se bajaba de un corte
+  // ABIERTO, sin que nadie lo aprobara: el archivo que mueve el dinero no tenía puerta.
+
+  /** Tesorería dice que el corte está listo para que lo miren. */
+  mandarLoteAAprobar(loteId: string): Promise<LotePago> {
+    return apiFetch<LotePago>(`/cxp/lotes/${loteId}/mandar-a-aprobar`, { method: "POST" });
+  },
+  /** La firma de la gerencia. A partir de acá se puede bajar el archivo del banco. */
+  aprobarLote(loteId: string): Promise<LotePago> {
+    return apiFetch<LotePago>(`/cxp/lotes/${loteId}/aprobar`, { method: "POST" });
+  },
+  /** Rechaza el corte ENTERO y lo manda de vuelta a tesorería, con qué hay que corregir. */
+  devolverLote(loteId: string, motivo: string): Promise<LotePago> {
+    return apiFetch<LotePago>(`/cxp/lotes/${loteId}/devolver`, { method: "POST", json: { motivo } });
+  },
+  /**
+   * Saca UNA factura del corte. No la deniega: vuelve a la bandeja en PROGRAMADO, con su
+   * aprobación y su validación de área intactas, lista para el próximo corte.
+   */
+  excluirDelLote(loteId: string, documentoId: string, motivo: string): Promise<FacturaExcluida> {
+    return apiFetch<FacturaExcluida>(`/cxp/lotes/${loteId}/excluir/${documentoId}`, {
+      method: "POST",
+      json: { motivo },
+    });
+  },
+  /** Qué sacó la gerencia de este corte, para comparar lo aprobado contra lo pagado. */
+  excluidasDelLote(loteId: string): Promise<{ items: FacturaExcluida[] }> {
+    return apiFetch<{ items: FacturaExcluida[] }>(`/cxp/lotes/${loteId}/excluidas`, { method: "GET" });
+  },
+
+  /** Qué se paga y cuándo, y qué venció esperando. */
+  calendarioDePagos(): Promise<CalendarioPagos> {
+    return apiFetch<CalendarioPagos>("/cxp/calendario", { method: "GET" });
   },
   /** Descarga la macro (.txt) de un lote. */
   /**

@@ -42,6 +42,11 @@ var Catalogo = []PermisoDef{
 	// del módulo, es la única pantalla de los roles que no tienen el módulo. El permiso dice qué
 	// pantalla; el alcance (rol × clasificación, mig 0077) dice cuáles filas.
 	{"bancos.ver_mi_segmento", "Bancos", "Consultar mi segmento de bancos", "Ver SOLO los créditos de las partidas asignadas al rol, y avisar cuando alguno quedó mal segmentado. No abre ninguna otra pantalla de Bancos", false},
+	// Alcance por USUARIO (mig 0124), no por rol: lo pidió así el Director Financiero. El permiso
+	// solo no abre nada — sin filas en `departamento_validador` la pantalla no muestra una línea.
+	{"bancos.ver_mi_presupuesto", "Bancos", "Ver el presupuesto de mi área", "El gasto del mes contra el presupuesto, SOLO de las áreas donde la persona está declarada como responsable. No da acceso a Bancos ni a los movimientos.", false},
+	// Separado del de gasto: «en algunos casos aplica solo para gastos, en otras ingresos también».
+	{"bancos.ver_mi_ingreso", "Bancos", "Ver el ingreso de mis partidas", "Lo que entró en las partidas de ingreso asignadas a la persona, contra la meta. No da acceso a Bancos ni a los movimientos.", false},
 	{"bancos.importar", "Bancos", "Importar estados de cuenta", "Subir, previsualizar y confirmar archivos del banco", false},
 	// Revertir una CARGA entera (mig 0085). Aparte de `bancos.importar` a propósito: importar es el
 	// trabajo diario de la auxiliar, sacar millones de los libros no lo es. Decisión del Director
@@ -91,6 +96,11 @@ var Catalogo = []PermisoDef{
 	// El resultado del banco sobre un lote ya enviado: rebotó o se reintenta.
 	{"cxp.resultado_pago", "Cuentas por pagar", "Registrar el resultado del banco", "Marcar un pago como rebotado o reintentarlo", true},
 	{"cxp.aprobar", "Cuentas por pagar", "Aprobar facturas", "Aprobación según matriz de montos", true},
+	// CRÍTICO y SEPARADO de `cxp.tesoreria` a propósito (mig 0123): quien arma el corte no puede
+	// aprobarlo. Esa separación es la razón de ser del paso; con un solo permiso para las dos
+	// cosas, el control no existe. Va acá además de en la migración porque `EnsureDefaults` no
+	// reparte permisos nuevos a una empresa que ya tiene su matriz configurada.
+	{"cxp.aprobar_lote", "Cuentas por pagar", "Aprobar el corte de pago", "Revisar el cronograma de un corte y aprobarlo, devolverlo o sacarle facturas. Sin esta aprobación no se puede bajar el archivo del banco.", true},
 	// CRÍTICO: levanta la única barrera que queda contra el doble pago de una factura que pudo
 	// haberse pagado ya por caja chica. Exige motivo y queda registrado quién lo hizo.
 	{"cxp.liberar_pago", "Cuentas por pagar", "Liberar una factura de contado para pagarla por banco", "El emisor la declaró de contado y nació bloqueada. Liberarla afirma que NO se pagó por caja chica ni tarjeta.", true},

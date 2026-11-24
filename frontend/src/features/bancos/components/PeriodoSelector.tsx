@@ -1,5 +1,6 @@
 import { Select } from "@/components/ui";
-import { etiquetaPeriodo, periodosRecientes } from "@/lib/format";
+import { etiquetaPeriodo, mesDeHoy, periodosDelSelector } from "@/lib/format";
+import { usePeriodosDeLaEmpresa } from "@/features/bancos/hooks";
 
 interface PeriodoSelectorProps {
   value: string;
@@ -8,14 +9,19 @@ interface PeriodoSelectorProps {
   id?: string;
 }
 
-/** Selector de período YYYY-MM (últimos 18 meses), con etiqueta legible. */
+/** Selector de período YYYY-MM, con etiqueta legible. Los meses salen del calendario real de la empresa. */
 export function PeriodoSelector({
   value,
   onChange,
   label = "Período",
   id,
 }: PeriodoSelectorProps) {
-  const options = periodosRecientes().map((p) => ({ value: p, label: etiquetaPeriodo(p) }));
+  const cal = usePeriodosDeLaEmpresa();
+  const options = periodosDelSelector(
+    cal.data?.primero ?? "",
+    cal.data?.ultimo ?? "",
+    mesDeHoy(),
+  ).map((p) => ({ value: p, label: etiquetaPeriodo(p) }));
   return (
     <Select
       id={id}

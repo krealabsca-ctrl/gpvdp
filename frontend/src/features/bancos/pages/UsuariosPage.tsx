@@ -32,6 +32,7 @@ import {
 import { mensajeError } from "@/lib/apiError";
 import { useAuth } from "@/features/auth/AuthContext";
 import { rbacApi, type UsuarioAdmin } from "@/api/rbac";
+import { AlcanceDelUsuarioPanel } from "@/features/bancos/components/AlcanceDelUsuarioPanel";
 
 interface FormState {
   nombre: string;
@@ -55,6 +56,10 @@ export function UsuariosPage() {
   const [form, setForm] = useState<FormState>(VACIO);
   const [mostrarForm, setMostrarForm] = useState(false);
   const [reset, setReset] = useState<UsuarioAdmin | null>(null);
+  // La ficha «qué ve»: qué áreas de gasto y qué partidas de ingreso alcanza esta persona. Va acá
+  // y no en CxP › Departamentos —donde vivían las áreas— porque para armar a UNA persona había
+  // que recorrer otro módulo, y las partidas de ingreso no tenían pantalla en ninguna parte.
+  const [alcance, setAlcance] = useState<UsuarioAdmin | null>(null);
 
   const rolOptions = (rolesQ.data ?? []).map((r) => ({ value: r.codigo, label: r.nombre }));
   const usuarios = usuariosQ.data ?? [];
@@ -227,6 +232,12 @@ export function UsuariosPage() {
         </Card>
       )}
 
+      {/* Va ARRIBA de la lista: se abre desde una fila y el panel tiene que quedar a la vista, no
+          al final de una tabla de 20 personas. */}
+      {alcance && (
+        <AlcanceDelUsuarioPanel usuarioId={alcance.id} onCerrar={() => setAlcance(null)} />
+      )}
+
       {cargando ? (
         <LoadingState label="Cargando usuarios" />
       ) : usuariosQ.isError ? (
@@ -278,6 +289,9 @@ export function UsuariosPage() {
                     <div className="flex flex-wrap justify-end gap-2">
                       <Button size="sm" variant="secondary" onClick={() => editar(u)}>
                         Editar
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => setAlcance(u)}>
+                        Qué ve
                       </Button>
                       <Button size="sm" variant="secondary" onClick={() => setReset(u)}>
                         Restablecer contraseña

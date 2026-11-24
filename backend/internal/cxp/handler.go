@@ -237,7 +237,13 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 	// y la petición está bien escrita; lo que pasa es que el lote ya está como se pedía, o al
 	// revés. 409 y el texto del centinela, que dice qué hacer.
 	case errors.Is(err, ErrLoteYaCerrado), errors.Is(err, ErrLoteNoEstaCerrado),
-		errors.Is(err, ErrLoteCerradoNoSeToca):
+		errors.Is(err, ErrLoteCerradoNoSeToca),
+		// La aprobación del corte (mig 0123). Son la misma clase: el corte existe y la petición
+		// está bien, lo que no calza es EN QUÉ PUNTO está. Pasa cuando dos personas miran el
+		// mismo corte y una lo mueve mientras la otra decide, que es el caso normal un viernes.
+		errors.Is(err, ErrLoteNoEstaAbierto), errors.Is(err, ErrLoteNoEstaEnAprobacion),
+		errors.Is(err, ErrLoteSinAprobar), errors.Is(err, ErrLoteNoSeTocaAprobado),
+		errors.Is(err, ErrFacturaNoEstaEnElLote):
 		httpx.Abort(c, http.StatusConflict, httpx.CodeConflicto, sinPrefijoCxP(err))
 	// El pago parcial (mig 0105). CONFLICTO los dos que son de estado —el movimiento ya está
 	// aplicado, la factura no está en el punto del flujo donde un débito tiene sentido— y REGLA DE
@@ -261,7 +267,10 @@ func (h *Handler) responderError(c *gin.Context, err error, op string) {
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
 	case errors.Is(err, ErrMotivoReaperturaRequerido), errors.Is(err, ErrEnlaceMotivoRequerido),
 		errors.Is(err, ErrMotivoDesenlaceRequerido), errors.Is(err, ErrParcialMotivoRequerido),
-		errors.Is(err, ErrMotivoCobroRequerido):
+		errors.Is(err, ErrMotivoCobroRequerido),
+		// Los dos de la mig 0123: van con los otros motivos porque son la misma regla —una huella
+		// que alguien va a leer meses después no se llena con «ok»—.
+		errors.Is(err, ErrMotivoDevolucionRequerido), errors.Is(err, ErrMotivoExclusionRequerido):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))
 	case errors.Is(err, ErrRecepcionNoReintentable):
 		httpx.Abort(c, http.StatusUnprocessableEntity, httpx.CodeReglaNegocio, sinPrefijoCxP(err))

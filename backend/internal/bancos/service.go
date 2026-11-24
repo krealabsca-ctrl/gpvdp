@@ -310,6 +310,15 @@ type Repository interface {
 	// SerieDiariaPorPartida: el día a día de unas partidas concretas dentro del rango de meses.
 	SerieDiariaPorPartida(ctx context.Context, empresaID, desde, hasta string, clasificaciones []string) ([]SerieDiariaPartida, error)
 	// Dimensiones del gasto (departamento y sede) y presupuesto por departamento.
+	// El alcance de «Mi presupuesto» (mig 0124): de qué áreas es responsable la persona.
+	AreasDelUsuario(ctx context.Context, empresaID, usuarioID string) ([]AreaDelUsuario, error)
+	PartidasDeIngresoDelUsuario(ctx context.Context, empresaID, usuarioID string) ([]PartidaDelUsuario, error)
+	PeriodosConMovimiento(ctx context.Context, empresaID string) ([]string, error)
+	UsuarioDeLaEmpresa(ctx context.Context, empresaID, usuarioID string) (string, string, bool, error)
+	PermisosDeAlcanceDelUsuario(ctx context.Context, empresaID, usuarioID string) (bool, bool, error)
+	GuardarAreasDelUsuario(ctx context.Context, empresaID, usuarioID string, areas []AreaAsignada) error
+	GuardarPartidasDeIngresoDelUsuario(ctx context.Context, empresaID, usuarioID string, ids []string) error
+	NaturalezasDeClasificaciones(ctx context.Context, empresaID string, ids []string) (map[string]string, error)
 	ListarSedes(ctx context.Context, empresaID string, incluirInactivas bool) ([]Sede, error)
 	CrearSede(ctx context.Context, empresaID, nombre, codigo string) (Sede, error)
 	ActualizarSede(ctx context.Context, empresaID, sedeID, nombre, codigo string) error

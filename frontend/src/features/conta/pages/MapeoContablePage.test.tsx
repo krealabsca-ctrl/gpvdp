@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@/components/ui";
 
 /**
@@ -17,6 +18,7 @@ vi.mock("@/features/conta/hooks", () => ({
   useMapeoContable: vi.fn(),
   useCuentasDeMovimiento: vi.fn(),
   useDecidirMapeo: vi.fn(),
+  useImportarMapeoXLSX: vi.fn(),
   useDeshacerMapeo: vi.fn(),
 }));
 vi.mock("@/features/auth/permisos", () => ({ useTienePermiso: () => () => true }));
@@ -25,6 +27,7 @@ import {
   useCuentasDeMovimiento,
   useDecidirMapeo,
   useDeshacerMapeo,
+  useImportarMapeoXLSX,
   useMapeoContable,
 } from "@/features/conta/hooks";
 import { MapeoContablePage } from "@/features/conta/pages/MapeoContablePage";
@@ -38,6 +41,7 @@ function fila(p: Partial<FilaDelMapeo> & { clasificacion_id: string; clasificaci
     naturaleza_concepto: "GASTO",
     naturaleza_declarada: true,
     movimientos: 4,
+    monto_crc: "120000.00",
     estado: "",
     motivo: "",
     cuenta_id: null,
@@ -81,12 +85,23 @@ function montar(items: FilaDelMapeo[]) {
     mutate: vi.fn(),
     isPending: false,
   } as unknown as ReturnType<typeof useDeshacerMapeo>);
+  vi.mocked(useImportarMapeoXLSX).mockReturnValue({
+    mutate: vi.fn(),
+    isPending: false,
+  } as unknown as ReturnType<typeof useImportarMapeoXLSX>);
+  // El QueryClientProvider hace falta desde que la pantalla monta el panel del Excel
+  // (12-nov-2026), que usa `useMutation` directo en vez de un hook del módulo. En la aplicación
+  // real el provider siempre está; sin él acá, la prueba fallaba por el envoltorio y no por la
+  // pantalla.
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
-    <ToastProvider>
-      <MemoryRouter>
-        <MapeoContablePage />
-      </MemoryRouter>
-    </ToastProvider>,
+    <QueryClientProvider client={qc}>
+      <ToastProvider>
+        <MemoryRouter>
+          <MapeoContablePage />
+        </MemoryRouter>
+      </ToastProvider>
+    </QueryClientProvider>,
   );
 }
 

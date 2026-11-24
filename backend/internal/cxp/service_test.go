@@ -537,6 +537,37 @@ func (f *fakeRepo) LoteEstaCerrado(context.Context, string, string) (bool, bool,
 func (f *fakeRepo) LoteDeDocumentoEstaCerrado(context.Context, string, string) (bool, error) {
 	return false, nil
 }
+
+// La aprobación del corte (mig 0123). Igual que las de arriba: lo que estas funciones hacen se
+// prueba contra PostgreSQL de verdad, acá solo cumplen la interfaz. `EstadoDelLote` devuelve
+// APROBADO porque es el estado que deja pasar la macro, que es lo que varias pruebas de este
+// archivo ejercitan.
+func (f *fakeRepo) EstadoDelLote(context.Context, string, string) (string, bool, error) {
+	return LoteAprobado, true, nil
+}
+func (f *fakeRepo) MandarAAprobar(context.Context, string, string, string) (int64, error) {
+	return 1, nil
+}
+func (f *fakeRepo) AprobarLote(context.Context, string, string, string) (int64, error) { return 1, nil }
+func (f *fakeRepo) DevolverLote(context.Context, string, string, string, string) (int64, error) {
+	return 1, nil
+}
+func (f *fakeRepo) ExcluirDelLote(context.Context, string, string, string, string, string) (int64, error) {
+	return 1, nil
+}
+func (f *fakeRepo) ExcluidasDelLote(context.Context, string, string) ([]FacturaExcluida, error) {
+	return nil, nil
+}
+
+// El calendario de pagos (16-nov-2026). Lo que arma el calendario a partir de estas dos filas se
+// prueba con un doble propio en `calendario_test.go`, donde SÍ importa lo que devuelven; acá
+// vacías, solo para cumplir la interfaz.
+func (f *fakeRepo) ProgramadoPorFecha(context.Context, string) ([]FilaProgramada, error) {
+	return nil, nil
+}
+func (f *fakeRepo) VencidoPorEstado(context.Context, string) ([]FilaVencida, error) {
+	return nil, nil
+}
 func (f *fakeRepo) FacturasSinRespaldo(context.Context, string, string, string) ([]FacturaSinRespaldo, error) {
 	return nil, nil
 }

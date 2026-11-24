@@ -53,9 +53,13 @@ type FilaDelMapeo struct {
 	// nadie eligió llenaría la pantalla de avisos falsos.
 	NaturalezaConcepto  string `json:"naturaleza_concepto"`
 	NaturalezaDeclarada bool   `json:"naturaleza_declarada"`
-	// Movimientos dice cuántos movimientos vivos usan esta clasificación. Es lo que ordena el
-	// trabajo: mapear primero lo que más se usa.
+	// Movimientos dice cuántos movimientos vivos usan esta clasificación.
 	Movimientos int `json:"movimientos"`
+	// MontoCRC es la plata que pasó por esta clasificación, en valor absoluto y en colones. ES LO
+	// QUE ORDENA EL TRABAJO, y no la cantidad de movimientos: medido en Valle de Paz, 7
+	// clasificaciones de 131 cubren el 80 % de ₡2.956 M, y varias de ellas aparecen tarde si se
+	// ordena por cantidad. Va como string porque es dinero (ver CLAUDE.md).
+	MontoCRC string `json:"monto_crc"`
 
 	Estado       string  `json:"estado"` // "" = falta decidir
 	Motivo       string  `json:"motivo"`
@@ -111,6 +115,17 @@ var (
 	ErrCuentaDeAgrupacion = errors.New("conta: esa cuenta agrupa a otras, así que no admite asientos: elegí una cuenta de movimiento")
 	// ErrMapeoNoEncontrado: no hay decisión tomada sobre esa clasificación.
 	ErrMapeoNoEncontrado = errors.New("conta: esa partida todavía no tiene decisión")
+
+	// Los tres del archivo .xlsx (12-nov-2026). Se distinguen entre sí porque la salida de cada
+	// uno es distinta: uno se arregla cambiando el archivo, otro llenándolo, y el tercero
+	// volviendo a exportar la plantilla.
+	//
+	// ErrMapeoArchivoIlegible: no es un .xlsx que se pueda abrir.
+	ErrMapeoArchivoIlegible = errors.New("conta: no se pudo abrir el archivo; tiene que ser un .xlsx")
+	// ErrMapeoSinEncabezado: faltan las columnas que identifican la fila.
+	ErrMapeoSinEncabezado = errors.New("conta: el archivo no trae las columnas «Concepto» y «Partida»; bajá la plantilla y llenala sobre ella")
+	// ErrMapeoSinFilas: el archivo abrió pero no trae ninguna decisión que aplicar.
+	ErrMapeoSinFilas = errors.New("conta: el archivo no trae ninguna fila con cuenta o con motivo")
 )
 
 // motivoMinimo descarta el «ok» reflejo. Mismo criterio que la liberación de facturas.

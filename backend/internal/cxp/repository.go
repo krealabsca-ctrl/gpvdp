@@ -165,6 +165,20 @@ type Repository interface {
 	LoteEstaCerrado(ctx context.Context, empresaID, loteID string) (existe, cerrado bool, err error)
 	LoteDeDocumentoEstaCerrado(ctx context.Context, empresaID, id string) (bool, error)
 
+	// La aprobación del corte (mig 0123): el paso que faltaba entre armar el listado y pagar.
+	// `EstadoDelLote` es lo que permite distinguir «no existe» de «estaba en otro estado» cuando
+	// un UPDATE no mueve nada, y también es la guarda de la macro.
+	// El calendario de pagos (16-nov-2026): qué se paga y cuándo, y qué venció esperando.
+	ProgramadoPorFecha(ctx context.Context, empresaID string) ([]FilaProgramada, error)
+	VencidoPorEstado(ctx context.Context, empresaID string) ([]FilaVencida, error)
+
+	EstadoDelLote(ctx context.Context, empresaID, loteID string) (estado string, existe bool, err error)
+	MandarAAprobar(ctx context.Context, empresaID, loteID, usuarioID string) (int64, error)
+	AprobarLote(ctx context.Context, empresaID, loteID, usuarioID string) (int64, error)
+	DevolverLote(ctx context.Context, empresaID, loteID, usuarioID, motivo string) (int64, error)
+	ExcluirDelLote(ctx context.Context, empresaID, loteID, documentoID, usuarioID, motivo string) (int64, error)
+	ExcluidasDelLote(ctx context.Context, empresaID, loteID string) ([]FacturaExcluida, error)
+
 	// El arqueo de excepción (hallazgo 3.1): lo declarado pagado que el banco nunca debitó, y la
 	// columna inversa. `soloLote` vacío = todas.
 	// AbrirRemesa deshace lo que hizo CerrarRemesa: las facturas de un pago agrupado vuelven de
